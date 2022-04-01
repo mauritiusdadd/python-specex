@@ -108,21 +108,33 @@ def argshandler():
     )
 
     parser.add_argument(
-        '--spec-hdu', metavar='SPEC_HDU', type=int, default=1,
+        '--info-hdu', metavar='INFO_HDU', type=int, default=0,
+        help='The HDU containing cube metadata. If this argument '
+        'Set this to -1 to automatically detect the HDU containing the info. '
+        'NOTE that this value is zero indexed (i.e. firts HDU has index 0).'
+    )
+
+    parser.add_argument(
+        '--spec-hdu', metavar='SPEC_HDU', type=int, default=-1,
         help='The HDU containing the spectral data to use. If this argument '
-        'is not specified, the image is loaded from the first HDU.'
+        'Set this to -1 to automatically detect the HDU containing spectra. '
+        'NOTE that this value is zero indexed (i.e. second HDU has index 1).'
     )
 
     parser.add_argument(
-        '--var-hdu', metavar='VAR_HDU', type=int, default=2,
+        '--var-hdu', metavar='VAR_HDU', type=int, default=-1,
         help='The HDU containing the variance of the spectral data. '
+        'Set this to -1 if no variance data is present in the cube. '
         'The default value is %(metavar)s=%(default)s.'
+        'NOTE that this value is zero indexed (i.e. third HDU has index 2).'
     )
 
     parser.add_argument(
-        '--mask-hdu', metavar='MASK_HDU', type=int, default=3,
+        '--mask-hdu', metavar='MASK_HDU', type=int, default=-1,
         help='The HDU containing the valid pixel mask of the spectral data. '
+        'Set this to -1 if no mask is present in the cube. '
         'The default value is %(metavar)s=%(default)s.'
+        'NOTE that this value is zero indexed (i.e. fourth HDU has index 3).'
     )
 
     parser.add_argument(
@@ -199,6 +211,28 @@ def argshandler():
     )
 
     return parser.parse_args()
+
+
+def getspplatefits(cube_header, spec_data, var_data=None, and_mask_data=None,
+                   or_mask_data=None, wdisp_data=None, sky_data=None):
+    spec_hdu = fits.PrimaryHDU()
+    ivar_hdu = fits.ImageHDU()
+    andmsk_hdu = fits.ImageHDU()
+    ormsk_hdu = fits.ImageHDU()
+    wdisp_hdu = fits.ImageHDU()
+    tbl_hdu = fits.TableHDU()
+    sky_hdu = fits.ImageHDU()
+
+    spec_hdu.data = spec_data
+
+    if var_data is not None:
+        ivar_hdu.data = 1 / var_data
+
+    hdul = fits.HDUList([
+        spec_hdu, ivar_hdu, andmsk_hdu, ormsk_hdu, wdisp_hdu, tbl_hdu, sky_hdu
+    ])
+
+    return hdul
 
 
 def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
@@ -280,6 +314,60 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
     return hdul
 
 
+def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
+           msg_index_error=None, exit_on_errors=True):
+    """
+    Find a valid HDU in a HDUList.
+
+    Parameters
+    ----------
+    hdl : list of astropy.io.fits HDUs
+        A list of HDUs.
+    valid_names : list or tuple of str
+        A list of possible names for the valid HDU.
+    hdu_index : int, optional
+        Manually specify which HDU to use. The default is -1.
+    msg_err_notfound : str or None, optional
+        Error message to be displayed if no valid HDU is found.
+        The default is None.
+    msg_index_error : str or None, optional
+        Error message to be displayed if the specified index is outside the
+        HDU list boundaries.
+        The default is None.
+    exit_on_errors : bool, optional
+        If it is set to True, then exit the main program with an error if a
+        valid HDU is not found, otherwise just return None.
+        The default value is True.
+
+    Returns
+    -------
+    valid_hdu : astropy.io.fits HDU or None
+        The requested HDU.
+
+    """
+    valid_hdu = None
+    if hdu_index < 0:
+        # Try to detect HDU containing spectral data
+        for hdu in hdl:
+            if hdu.name.lower() in ['data', 'spec', 'spectrum', 'spectra']:
+                valid_hdu = hdu
+                break
+        else:
+            if msg_err_notfound:
+                print(msg_err_notfound, file=sys.stderr)
+            if exit_on_errors:
+                sys.exit(1)
+    else:
+        try:
+            valid_hdu = hdl[hdu_index]
+        except IndexError:
+            if msg_index_error:
+                print(msg_index_error.format(hdu_index), file=sys.stderr)
+            if exit_on_errors:
+                sys.exit(1)
+    return valid_hdu
+
+
 def main():
     """
     Run the main program.
@@ -300,9 +388,45 @@ def main():
 
     hdl = fits.open(args.input_cube[0])
 
-    spec_hdu = hdl[args.spec_hdu]
-    var_hdu = hdl[args.var_hdu]
-    mask_hdu = hdl[args.mask_hdu]
+    hdu_info = spec_hdu = gethdu(
+        hdl,
+        hdu_index=args.spec_hdu,
+        valid_names=['data', 'spec', 'spectrum', 'spectra'],
+        msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
+                         "data, try to specify it manually!",
+        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read specra!",
+        exit_on_errors=False
+    )
+
+    spec_hdu = gethdu(
+        hdl,
+        hdu_index=args.spec_hdu,
+        valid_names=['data', 'spec', 'spectrum', 'spectra'],
+        msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
+                         "data, try to specify it manually!",
+        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read specra!"
+    )
+
+    var_hdu = gethdu(
+        hdl,
+        hdu_index=args.var_hdu,
+        valid_names=['stat', 'var', 'variance', 'noise'],
+        msg_err_notfound="ERROR: Cannot determine which HDU contains the "
+                         "variance data, try to specify it manually!",
+        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read the "
+                        "variance!",
+        exit_on_errors=False
+    )
+
+    mask_hdu = gethdu(
+        hdl,
+        hdu_index=args.mask_hdu,
+        valid_names=['stat', 'var', 'variance', 'noise'],
+        msg_err_notfound="ERROR: Cannot determine which HDU contains the "
+                         "mask data, try to specify it manually!",
+        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read the mask!",
+        exit_on_errors=False
+    )
 
     img_wcs = wcs.WCS(spec_hdu.header)
     celestial_wcs = img_wcs.celestial
@@ -369,9 +493,16 @@ def main():
 
     print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
+    n_objects = len(sources)
+    n_objects = 100
+
+    if args.boss:
+        array_spectra = np.zeros((n_objects, trasposed_spec.shape[2]))
+        array_variances = np.zeros((n_objects, trasposed_spec.shape[2]))
+
     # TODO: add region file handling
-    for i, source in enumerate(sources):
-        progress = i / len(sources)
+    for i, source in enumerate(sources[:n_objects]):
+        progress = i / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
         sys.stderr.flush()
         obj_ra = source[args.key_ra]
@@ -437,11 +568,33 @@ def main():
         else:
             obj_spectrum_var = None
 
-        hdul = getspsinglefits(
-            main_header, spec_wcs_header,
-            obj_spectrum, spec_hdu.header,
-            obj_spectrum_var
+        if args.boss:
+            hdul = getspsinglefits(
+                main_header, spec_wcs_header,
+                obj_spectrum, spec_hdu.header,
+                obj_spectrum_var
+            )
+
+            hdul.writeto(
+                os.path.join(outdir, outname),
+                overwrite=True
+            )
+        else:
+            array_spectra[i] = obj_spectrum
+            array_variances[i] = obj_spectrum_var
+
+    if args.boss:
+        hdul = getspplatefits(
+            spec_hdu.header,
+            array_spectra,
+            var_data=array_variances,
+            and_mask_data=None,
+            or_mask_data=None,
+            wdisp_data=None,
+            sky_data=None
         )
+
+        outname = 'spPlate.fits'
 
         hdul.writeto(
             os.path.join(outdir, outname),
