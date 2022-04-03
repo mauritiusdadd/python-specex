@@ -16,7 +16,7 @@ import argparse
 import numpy as np
 from astropy import units as u
 from astropy import wcs
-from astropy.table import Table
+from astropy.table import Table, Column
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
@@ -199,6 +199,15 @@ def argshandler():
     )
 
     parser.add_argument(
+        '--key-id', metavar='OBJID_KEY', type=str, default=None,
+        help='Set the name of the column from which to read the id of the '
+        'object to which the spectral data belong. If this argument is not '
+        'specified then a suitable column will be selected according to its '
+        'name or, if none is found, a new progressive id will be generated. '
+        'This id will be included in the fits header.'
+    )
+
+    parser.add_argument(
         '--outdir', metavar='DIR', type=str, default=None,
         help='Set the directory where extracted spectra will be outputed. '
         'If this parameter is not specified, then a new directory will be '
@@ -213,20 +222,81 @@ def argshandler():
     return parser.parse_args()
 
 
-def getspplatefits(cube_header, spec_data, var_data=None, and_mask_data=None,
-                   or_mask_data=None, wdisp_data=None, sky_data=None):
+def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
+                   and_mask_data=None, or_mask_data=None, wdisp_data=None,
+                   sky_data=None):
     spec_hdu = fits.PrimaryHDU()
     ivar_hdu = fits.ImageHDU()
     andmsk_hdu = fits.ImageHDU()
     ormsk_hdu = fits.ImageHDU()
     wdisp_hdu = fits.ImageHDU()
-    tbl_hdu = fits.TableHDU()
+    tbl_hdu = fits.BinTableHDU()
     sky_hdu = fits.ImageHDU()
 
-    spec_hdu.data = spec_data
+    spec_hdu.data = spec_data.T
+    spec_hdu.header['PLATEID'] = 0
+
+    try:
+        spec_hdu.header['MJD'] = cube_header['MJD']
+    except KeyError:
+        try:
+            spec_hdu.header['MJD'] = cube_header['MJD-OBS']
+        except KeyError:
+            print(
+                "WARNING: no MJD found in the cube metadata, using extraction "
+                "time instead!",
+                file=sys.stderr
+            )
+            spec_hdu.header['MJD'] = Time.now().mjd
+
+    # See the following link for COEFF0 and COEFF1 definition
+    # https://classic.sdss.org/dr7/products/spectra/read_spSpec.html
+    try:
+        spec_hdu.header["COEFF0"] = spec_header["COEFF0"]
+        spec_hdu.header["COEFF1"] = spec_header["COEFF1"]
+    except KeyError:
+        print(
+            "WARING: wavelength binning of the input cube is not compatible "
+            "with boss log10 binning data model.\n        Computing the best "
+            "values of COEFF0 and COEFF1 for this wavelengt range...",
+            file=sys.stderr
+        )
+        # Compute coeff0 and coeff1 that best approximate wavelenght range
+        # of the datacube
+        crpix = spec_header["CRPIX3"] - 1
+        crval = spec_header["CRVAL3"]
+        cd1 = spec_header["CD3_3"]
+
+        w_end = spec_data.shape[1] - crpix
+
+        coeff0 = np.log10(crval + cd1*(crpix))
+        coeff1 = np.log10(1 + (w_end*cd1)/crval) / w_end
+
+        spec_hdu.header['COEFF0'] = coeff0
+        spec_hdu.header['COEFF1'] = coeff1
+
+    spec_hdu.header["CRVAL1"] = spec_header["CRVAL3"]
+    spec_hdu.header["CD1_1"] = spec_header["CD3_3"]
+    spec_hdu.header["CDELT1"] = spec_header["CD3_3"]
+    spec_hdu.header["CRPIX1"] = spec_header["CRPIX3"]
+    spec_hdu.header['BUNIT'] = spec_header['BUNIT']
+    spec_hdu.header["CUNIT1"] = spec_header["CUNIT3"]
+    spec_hdu.header["CTYPE1"] = spec_header["CTYPE3"]
 
     if var_data is not None:
-        ivar_hdu.data = 1 / var_data
+        ivar_hdu.data = 1 / var_data.T
+
+    if wdisp_data is None:
+        wdisp_hdu.data = np.zeros_like(spec_data.T)
+    else:
+        wdisp_hdu.data = wdisp_data.T
+
+    info_table = Table()
+    info_table.add_column(
+        Column(data=obj_ids, name='FIBERID', dtype='>i4')
+    )
+
+    tbl_hdu.data = info_table.as_array()
 
     hdul = fits.HDUList([
         spec_hdu, ivar_hdu, andmsk_hdu, ormsk_hdu, wdisp_hdu, tbl_hdu, sky_hdu
@@ -274,8 +344,8 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
     spec_header = fits.Header()
     spec_header['BUNIT'] = spec_hdu_header['BUNIT']
     spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
-    spec_header["CUNIT1"] = spec_hdu_header["CUNIT1"]
-    spec_header["CTYPE1"] = spec_hdu_header["CTYPE1"]
+    spec_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
+    spec_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
     spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
     spec_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
     spec_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
@@ -295,8 +365,8 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
         var_header = fits.Header()
         var_header['BUNIT'] = spec_hdu_header['BUNIT']
         var_header["OBJECT"] = spec_hdu_header["OBJECT"]
-        var_header["CUNIT1"] = spec_hdu_header["CUNIT1"]
-        var_header["CTYPE1"] = spec_hdu_header["CTYPE1"]
+        var_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
+        var_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
         var_header["OBJECT"] = spec_hdu_header["OBJECT"]
         var_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
         var_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
@@ -349,7 +419,7 @@ def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     if hdu_index < 0:
         # Try to detect HDU containing spectral data
         for hdu in hdl:
-            if hdu.name.lower() in ['data', 'spec', 'spectrum', 'spectra']:
+            if hdu.name.lower() in valid_names:
                 valid_hdu = hdu
                 break
         else:
@@ -388,13 +458,13 @@ def main():
 
     hdl = fits.open(args.input_cube[0])
 
-    hdu_info = spec_hdu = gethdu(
+    info_hdu = gethdu(
         hdl,
         hdu_index=args.spec_hdu,
-        valid_names=['data', 'spec', 'spectrum', 'spectra'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
-                         "data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read specra!",
+        valid_names=['primary', 'info'],
+        msg_err_notfound="ERROR: Cannot determine which HDU contains cube "
+                         "metadata, try to specify it manually!",
+        msg_index_error="ERROR: Cannot open HDU {} to read metadata!",
         exit_on_errors=False
     )
 
@@ -404,7 +474,7 @@ def main():
         valid_names=['data', 'spec', 'spectrum', 'spectra'],
         msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
                          "data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read specra!"
+        msg_index_error="ERROR: Cannot open HDU {} to read specra!"
     )
 
     var_hdu = gethdu(
@@ -413,7 +483,7 @@ def main():
         valid_names=['stat', 'var', 'variance', 'noise'],
         msg_err_notfound="ERROR: Cannot determine which HDU contains the "
                          "variance data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read the "
+        msg_index_error="ERROR: Cannot open HDU {} to read the "
                         "variance!",
         exit_on_errors=False
     )
@@ -421,10 +491,10 @@ def main():
     mask_hdu = gethdu(
         hdl,
         hdu_index=args.mask_hdu,
-        valid_names=['stat', 'var', 'variance', 'noise'],
+        valid_names=['mask', 'platemask', 'footprint', 'dq'],
         msg_err_notfound="ERROR: Cannot determine which HDU contains the "
                          "mask data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {hdu_index} to read the mask!",
+        msg_index_error="ERROR: Cannot open HDU {} to read the mask!",
         exit_on_errors=False
     )
 
@@ -494,15 +564,32 @@ def main():
     print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
     n_objects = len(sources)
-    n_objects = 100
 
     if args.boss:
         array_spectra = np.zeros((n_objects, trasposed_spec.shape[2]))
         array_variances = np.zeros((n_objects, trasposed_spec.shape[2]))
 
+    obj_ids = np.empty((n_objects, ))
+
+    if args.key_id is None:
+        valid_id_keys = [
+            f"{i}{j}"
+            for i in ['', 'OBJ', 'OBJ_', 'TARGET', 'TARGET_']
+            for j in ['ID', 'NUMBER', 'UID', 'UUID']
+        ]
+
+        for key in valid_id_keys:
+            if key in sources.colnames:
+                key_id = key
+                break
+        else:
+            key_id = None
+    else:
+        key_id = args.key_id
+
     # TODO: add region file handling
     for i, source in enumerate(sources[:n_objects]):
-        progress = i / n_objects
+        progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
         sys.stderr.flush()
         obj_ra = source[args.key_ra]
@@ -535,6 +622,9 @@ def main():
         if cube_footprint is not None:
             mask &= cube_footprint
 
+        if np.sum(mask) == 0:
+            continue
+
         if args.check_images:
             extracted_data += mask
 
@@ -549,12 +639,18 @@ def main():
         my_time = Time.now()
         my_time.format = 'isot'
 
+        if key_id is not None:
+            obj_id = source[key_id]
+        else:
+            obj_id = i
+
         main_header = {
             'CUBE': (basename_with_ext, "Spectral cube used for extraction"),
             'RA': (obj_ra, "Ra of the center of the object"),
             'DEC': (obj_dec, "Dec of the center of the object"),
             'NPIX': (np.sum(mask), 'Number of pixels used for this spectra'),
             'HISTORY': f'Extracted on {str(my_time)}',
+            'ID': obj_id
         }
 
         # Copy the spectral part of the WCS into the new FITS
@@ -569,6 +665,9 @@ def main():
             obj_spectrum_var = None
 
         if args.boss:
+            array_spectra[i] = obj_spectrum
+            array_variances[i] = obj_spectrum_var
+        else:
             hdul = getspsinglefits(
                 main_header, spec_wcs_header,
                 obj_spectrum, spec_hdu.header,
@@ -579,14 +678,13 @@ def main():
                 os.path.join(outdir, outname),
                 overwrite=True
             )
-        else:
-            array_spectra[i] = obj_spectrum
-            array_variances[i] = obj_spectrum_var
 
     if args.boss:
         hdul = getspplatefits(
-            spec_hdu.header,
-            array_spectra,
+            cube_header=info_hdu.header,
+            spec_header=spec_hdu.header,
+            obj_ids=obj_ids,
+            spec_data=array_spectra,
             var_data=array_variances,
             and_mask_data=None,
             or_mask_data=None,
