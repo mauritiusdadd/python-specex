@@ -182,6 +182,17 @@ def argshandler():
     )
 
     parser.add_argument(
+        '--cat-pixelscale', metavar='MAS_PIXEL', type=float, default=1,
+        help='Set the scale size in mas of the major and minor axes. Useful if'
+        'A and B are given in pixels instead of MAS (like in the case of '
+        'catalogs extracted by sextractor). NOTE that this is not the pixel '
+        'scale of the cube but it is the size of a pixel of the image used to '
+        'generate the input catalog. This parameter will be ignored if using '
+        'a region file as input.'
+        'The default value is %(metavar)s=%(default)s.'
+    )
+
+    parser.add_argument(
         '--key-ra', metavar='RA_KEY', type=str, default='ALPHA_J2000',
         help='Set the name of the column from which to read the RA of the '
         'objects. The default value is %(metavar)s=%(default)s.'
@@ -378,10 +389,9 @@ def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     return valid_hdu
 
 
-def parse_regionfile(regionfile, pixel_scale=None, key_ra='ALPHA_J2000',
-                     key_dec='DELTA_J2000', key_a='A_IMAGE', key_b='B_IMAGE',
-                     key_theta='THETA_IMAGE', key_id='NUMBER',
-                     key_kron='KRON_RADIUS'):
+def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
+                     key_a='A_IMAGE', key_b='B_IMAGE', key_theta='THETA_IMAGE',
+                     key_id='NUMBER', key_kron='KRON_RADIUS'):
     """
     Parse a regionfile and return an asrtopy Table with sources information.
 
@@ -480,10 +490,6 @@ def parse_regionfile(regionfile, pixel_scale=None, key_ra='ALPHA_J2000',
             )
             continue
 
-        if pixel_scale is not None:
-            obj_a *= pixel_scale
-            obj_b *= pixel_scale
-
         myt.add_row(
             (obj_name, obj_ra, obj_dec, obj_a, obj_b, obj_theta, 1)
         )
@@ -504,6 +510,7 @@ def main():
     if args.catalog is not None:
         sources = Table.read(args.catalog)
         basename_with_ext = os.path.basename(args.catalog)
+        pixelscale = args.cat_pixelscale
     elif args.regionfile is not None:
         sources = parse_regionfile(
             args.regionfile,
@@ -516,6 +523,7 @@ def main():
             key_kron=args.key_kron,
         )
         basename_with_ext = os.path.basename(args.regionfile)
+        pixelscale = 1.0
     else:
         print(
             "You must provide at least an input catalog or a region file!",
@@ -671,7 +679,7 @@ def main():
             mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
 
         elif mode == 'circular_aperture':
-            mask = (xx_tr**2 + yy_tr**2) < args.aperture_size / 0.06
+            mask = (xx_tr**2 + yy_tr**2) < args.aperture_size / pixelscale
 
         if cube_footprint is not None:
             mask &= cube_footprint
@@ -732,7 +740,8 @@ def main():
     if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         ax.imshow(extracted_data, origin='lower')
-        plt.show()
+        fig.savefig("sext_extraction_map.png")
+        plt.close(fig)
 
 
 if __name__ == '__main__':
