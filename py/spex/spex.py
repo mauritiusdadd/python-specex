@@ -5,9 +5,32 @@ SPEX - SPectra EXtractor.
 
 Extract spectra from spectral data cubes.
 
-Created on Tue Mar 29 11:46:39 2022.
+Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 
-@author: Maurizio D'Addona <mauritiusdadd@gmail.com>
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import os
 import sys
@@ -16,7 +39,7 @@ import argparse
 import numpy as np
 from astropy import units as u
 from astropy import wcs
-from astropy.table import Table, Column
+from astropy.table import Table
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
@@ -82,12 +105,6 @@ def argshandler():
         '--mode', metavar='WORKING_MODE', type=str, default='auto',
         help='Set the working mode of the program. Can be "auto", '
         '"kron'
-    )
-
-    parser.add_argument(
-        '--boss', action='store_true', default=False,
-        help='Write extracted spectra as BOSS spPlate fits instead of a single'
-        'spectrum for each object.'
     )
 
     parser.add_argument(
@@ -220,89 +237,6 @@ def argshandler():
     )
 
     return parser.parse_args()
-
-
-def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
-                   and_mask_data=None, or_mask_data=None, wdisp_data=None,
-                   sky_data=None):
-    spec_hdu = fits.PrimaryHDU()
-    ivar_hdu = fits.ImageHDU()
-    andmsk_hdu = fits.ImageHDU()
-    ormsk_hdu = fits.ImageHDU()
-    wdisp_hdu = fits.ImageHDU()
-    tbl_hdu = fits.BinTableHDU()
-    sky_hdu = fits.ImageHDU()
-
-    spec_hdu.data = spec_data.T
-    spec_hdu.header['PLATEID'] = 0
-
-    try:
-        spec_hdu.header['MJD'] = cube_header['MJD']
-    except KeyError:
-        try:
-            spec_hdu.header['MJD'] = cube_header['MJD-OBS']
-        except KeyError:
-            print(
-                "WARNING: no MJD found in the cube metadata, using extraction "
-                "time instead!",
-                file=sys.stderr
-            )
-            spec_hdu.header['MJD'] = Time.now().mjd
-
-    # See the following link for COEFF0 and COEFF1 definition
-    # https://classic.sdss.org/dr7/products/spectra/read_spSpec.html
-    try:
-        spec_hdu.header["COEFF0"] = spec_header["COEFF0"]
-        spec_hdu.header["COEFF1"] = spec_header["COEFF1"]
-    except KeyError:
-        print(
-            "WARING: wavelength binning of the input cube is not compatible "
-            "with boss log10 binning data model.\n        Computing the best "
-            "values of COEFF0 and COEFF1 for this wavelengt range...",
-            file=sys.stderr
-        )
-        # Compute coeff0 and coeff1 that best approximate wavelenght range
-        # of the datacube
-        crpix = spec_header["CRPIX3"] - 1
-        crval = spec_header["CRVAL3"]
-        cd1 = spec_header["CD3_3"]
-
-        w_end = spec_data.shape[1] - crpix
-
-        coeff0 = np.log10(crval + cd1*(crpix))
-        coeff1 = np.log10(1 + (w_end*cd1)/crval) / w_end
-
-        spec_hdu.header['COEFF0'] = coeff0
-        spec_hdu.header['COEFF1'] = coeff1
-
-    spec_hdu.header["CRVAL1"] = spec_header["CRVAL3"]
-    spec_hdu.header["CD1_1"] = spec_header["CD3_3"]
-    spec_hdu.header["CDELT1"] = spec_header["CD3_3"]
-    spec_hdu.header["CRPIX1"] = spec_header["CRPIX3"]
-    spec_hdu.header['BUNIT'] = spec_header['BUNIT']
-    spec_hdu.header["CUNIT1"] = spec_header["CUNIT3"]
-    spec_hdu.header["CTYPE1"] = spec_header["CTYPE3"]
-
-    if var_data is not None:
-        ivar_hdu.data = 1 / var_data.T
-
-    if wdisp_data is None:
-        wdisp_hdu.data = np.zeros_like(spec_data.T)
-    else:
-        wdisp_hdu.data = wdisp_data.T
-
-    info_table = Table()
-    info_table.add_column(
-        Column(data=obj_ids, name='FIBERID', dtype='>i4')
-    )
-
-    tbl_hdu.data = info_table.as_array()
-
-    hdul = fits.HDUList([
-        spec_hdu, ivar_hdu, andmsk_hdu, ormsk_hdu, wdisp_hdu, tbl_hdu, sky_hdu
-    ])
-
-    return hdul
 
 
 def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
@@ -458,16 +392,6 @@ def main():
 
     hdl = fits.open(args.input_cube[0])
 
-    info_hdu = gethdu(
-        hdl,
-        hdu_index=args.spec_hdu,
-        valid_names=['primary', 'info'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains cube "
-                         "metadata, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read metadata!",
-        exit_on_errors=False
-    )
-
     spec_hdu = gethdu(
         hdl,
         hdu_index=args.spec_hdu,
@@ -565,12 +489,6 @@ def main():
 
     n_objects = len(sources)
 
-    if args.boss:
-        array_spectra = np.zeros((n_objects, trasposed_spec.shape[2]))
-        array_variances = np.zeros((n_objects, trasposed_spec.shape[2]))
-
-    obj_ids = np.empty((n_objects, ))
-
     if args.key_id is None:
         valid_id_keys = [
             f"{i}{j}"
@@ -664,35 +582,11 @@ def main():
         else:
             obj_spectrum_var = None
 
-        if args.boss:
-            array_spectra[i] = obj_spectrum
-            array_variances[i] = obj_spectrum_var
-        else:
-            hdul = getspsinglefits(
-                main_header, spec_wcs_header,
-                obj_spectrum, spec_hdu.header,
-                obj_spectrum_var
-            )
-
-            hdul.writeto(
-                os.path.join(outdir, outname),
-                overwrite=True
-            )
-
-    if args.boss:
-        hdul = getspplatefits(
-            cube_header=info_hdu.header,
-            spec_header=spec_hdu.header,
-            obj_ids=obj_ids,
-            spec_data=array_spectra,
-            var_data=array_variances,
-            and_mask_data=None,
-            or_mask_data=None,
-            wdisp_data=None,
-            sky_data=None
+        hdul = getspsinglefits(
+            main_header, spec_wcs_header,
+            obj_spectrum, spec_hdu.header,
+            obj_spectrum_var
         )
-
-        outname = 'spPlate.fits'
 
         hdul.writeto(
             os.path.join(outdir, outname),
