@@ -1,6 +1,6 @@
 #!/usr/bin/env python
+"""Setup for python-spex."""
 import setuptools
-
 import time
 
 BUILD_INFO = {

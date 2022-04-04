@@ -125,6 +125,12 @@ def argshandler():
     )
 
     parser.add_argument(
+        '--regionfile', metavar='REGFILE', type=str, default=None,
+        help='A region file containing regions from which extract spectra. '
+        'The name of the refion will be used as ID for the spectra'
+    )
+
+    parser.add_argument(
         '--info-hdu', metavar='INFO_HDU', type=int, default=0,
         help='The HDU containing cube metadata. If this argument '
         'Set this to -1 to automatically detect the HDU containing the info. '
@@ -216,7 +222,7 @@ def argshandler():
     )
 
     parser.add_argument(
-        '--key-id', metavar='OBJID_KEY', type=str, default=None,
+        '--key-id', metavar='OBJID_KEY', type=str, default='NUMBER',
         help='Set the name of the column from which to read the id of the '
         'object to which the spectral data belong. If this argument is not '
         'specified then a suitable column will be selected according to its '
@@ -372,6 +378,118 @@ def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     return valid_hdu
 
 
+def parse_regionfile(regionfile, pixel_scale=None, key_ra='ALPHA_J2000',
+                     key_dec='DELTA_J2000', key_a='A_IMAGE', key_b='B_IMAGE',
+                     key_theta='THETA_IMAGE', key_id='NUMBER',
+                     key_kron='KRON_RADIUS'):
+    """
+    Parse a regionfile and return an asrtopy Table with sources information.
+
+    Parameters
+    ----------
+    regionfile : str
+        Path of the regionfile.
+    pixel_scale : float or None, optional
+        The pixel scale in mas/pixel used to compute the dimension of the
+        size of the objects. If None, height and width in the region file will
+        be considered already in pixel units.
+    key_ra : str, optional
+        Name of the column that will contain RA of the objects.
+        The default value is 'ALPHA_J2000'.
+    key_dec : str, optional
+        Name of the column that will contain DEC of the objects
+        The default value is 'DELTA_J2000'.
+    key_a : str, optional
+        Name of the column that will contain the semi major axis.
+        The default value is 'A_IMAGE'.
+    key_b : str, optional
+        Name of the column that will contain the semi minor axis.
+        The default value is 'B_IMAGE'.
+    key_theta : str, optional
+        Name of the column that will contain angle between the major axis and
+        the principa axis of the image.
+        The default value is 'THETA_IMAGE'.
+
+    Returns
+    -------
+    sources : astropy.table.Table
+        The table containing the sources.
+
+    """
+    def degstr2mas(degstr, degsep='°', minsep="'", secsep='"'):
+        deg_sep = degstr.find(degsep)
+        min_sep = degstr.find(minsep)
+        sec_sep = degstr.find(secsep)
+
+        degs = float(degstr[:deg_sep]) if deg_sep >= 0 else 0
+        mins = float(degstr[deg_sep+1:min_sep]) if min_sep >= 0 else 0
+        secs = float(degstr[min_sep+1:sec_sep]) if sec_sep >= 0 else 0
+
+        return secs + 60*mins + 3600*degs
+
+    with open(regionfile, 'r') as f:
+        regions = f.read().splitlines()
+
+    myt = Table(
+        names=[
+            key_id, key_ra, key_dec, key_a, key_b, key_theta, key_kron
+        ],
+        dtype=[
+            'U16', 'float32', 'float32', 'float32',
+            'float32', 'float32', 'float32'
+        ]
+    )
+
+    for j, reg in enumerate(regions):
+        reg = reg.replace(' ', '').lower().split('(')
+        if len(reg) < 2:
+            continue
+
+        regtype = reg[0]
+        regdata = reg[1].split('#')
+        regparams = regdata[0][:-1].split(',')
+        try:
+            regcomments = regdata[1]
+            t_start = regcomments.find('text={') + 6
+            if t_start < 0:
+                obj_name = ''
+            else:
+                t_end = regcomments.find('}', t_start)
+                obj_name = regcomments[t_start:t_end]
+        except IndexError:
+            obj_name = ''
+
+        if not obj_name:
+            obj_name = str(j)
+
+        obj_ra = float(regparams[0])
+        obj_dec = float(regparams[1])
+
+        if regtype == "circle":
+            obj_a = degstr2mas(regparams[2])
+            obj_b = obj_a
+            obj_theta = 0
+        elif regtype == "ellipse" or regtype == "box":
+            obj_a = degstr2mas(regparams[2])
+            obj_b = degstr2mas(regparams[3])
+            obj_theta = float(regparams[4])
+        else:
+            print(
+                f"WARNING: '{regtype}' region type not supported yet!",
+                file=sys.stderr
+            )
+            continue
+
+        if pixel_scale is not None:
+            obj_a *= pixel_scale
+            obj_b *= pixel_scale
+
+        myt.add_row(
+            (obj_name, obj_ra, obj_dec, obj_a, obj_b, obj_theta, 1)
+        )
+    return myt
+
+
 def main():
     """
     Run the main program.
@@ -383,12 +501,31 @@ def main():
     """
     args = argshandler()
 
+    if args.catalog is not None:
+        sources = Table.read(args.catalog)
+        basename_with_ext = os.path.basename(args.catalog)
+    elif args.regionfile is not None:
+        sources = parse_regionfile(
+            args.regionfile,
+            key_ra=args.key_ra,
+            key_dec=args.key_dec,
+            key_a=args.key_a,
+            key_b=args.key_b,
+            key_theta=args.key_theta,
+            key_id=args.key_id,
+            key_kron=args.key_kron,
+        )
+        basename_with_ext = os.path.basename(args.regionfile)
+    else:
+        print(
+            "You must provide at least an input catalog or a region file!",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
     # Get user input from argument parsers helper
 
-    basename_with_ext = os.path.basename(args.catalog)
     basename = os.path.splitext(basename_with_ext)[0]
-
-    sources = Table.read(args.catalog)
 
     hdl = fits.open(args.input_cube[0])
 
@@ -505,7 +642,6 @@ def main():
     else:
         key_id = args.key_id
 
-    # TODO: add region file handling
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
@@ -552,8 +688,6 @@ def main():
             obj_spec_nan_mask = np.isnan(obj_spectrum)
             obj_spectrum[obj_spec_nan_mask] = 0
 
-        outname = f"spec_{source['NUMBER']:06d}.fits"
-
         my_time = Time.now()
         my_time.format = 'isot'
 
@@ -561,6 +695,8 @@ def main():
             obj_id = source[key_id]
         else:
             obj_id = i
+
+        outname = f"spec_{obj_id}.fits"
 
         main_header = {
             'CUBE': (basename_with_ext, "Spectral cube used for extraction"),
