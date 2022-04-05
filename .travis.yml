@@ -11,6 +11,8 @@ jobs:
       python: "3.9"
 
 install:
+  - "chmod +x redrock_venv_setup.sh && ./redrock_venv_setup.sh"
+  - ". ./redrock_venv/bin/activate"
   - "pip install -r requirements.txt"
   - "pip install ."
 
