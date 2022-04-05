@@ -1,5 +1,5 @@
-# python-spex
-[![Build Status](https://app.travis-ci.com/mauritiusdadd/python-spex.svg?token=fRNrxziGGvs3HmNyD6gZ&branch=main)](https://app.travis-ci.com/mauritiusdadd/python-spex)
+# python-spex [![Build Status](https://app.travis-ci.com/mauritiusdadd/python-spex.svg?token=fRNrxziGGvs3HmNyD6gZ&branch=main)](https://app.travis-ci.com/mauritiusdadd/python-spex)
+
 Extract spectra from fits cubes
 
 # SETUP
