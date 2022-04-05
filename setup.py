@@ -2,6 +2,7 @@
 """Setup for python-spex."""
 import setuptools
 import time
+from glob import glob
 
 BUILD_INFO = {
     'date': time.strftime("%Y-%m"),
@@ -24,11 +25,6 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(where="py"),
     package_dir={"": "py"},
-    # data_files=[
-    #     ('share/licenses/spex', ['LICENSE']),
-    #     ('share/man/man1', ['man/spex.1.gz']),
-    #     ('share/man/it/man1', ['man/it/spex.1.gz']),
-    # ],
     python_requires=">=3.7",
     classifiers=[
         # How mature is this project? Common values are

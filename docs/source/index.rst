@@ -6,11 +6,14 @@
 Welcome to python-spex's documentation!
 =======================================
 
+.. automodule:: spex
+   :members:
+
 .. toctree::
+   spex
+   rrspex
    :maxdepth: 2
    :caption: Contents:
-
-
 
 Indices and tables
 ==================

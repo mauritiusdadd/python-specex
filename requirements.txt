@@ -1,3 +1,6 @@
 numpy
+scipy
 astropy
 matplotlib
+sphinx
+sphinx-rtd-theme

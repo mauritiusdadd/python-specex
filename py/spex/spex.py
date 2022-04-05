@@ -39,7 +39,7 @@ import argparse
 import numpy as np
 from astropy import units as u
 from astropy import wcs
-from astropy.table import Table
+from astropy.table import Table, Column
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
@@ -60,14 +60,14 @@ def getpbar(partial, total=None, wid=32, common_char='\u2588',
         Total progress expresses as decimal value.
         If it is not provided or it is None, than
         partial progress will be shown as total progress.
-    wid : TYPE, optional
+    wid : int , optional
         Width in charachters of the progress bar.
         The default is 32.
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    pbar : str
+        A unicode progress bar.
 
     """
     wid -= 2
@@ -254,6 +254,89 @@ def argshandler():
     )
 
     return parser.parse_args()
+
+
+def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
+                   and_mask_data=None, or_mask_data=None, wdisp_data=None,
+                   sky_data=None):
+    spec_hdu = fits.PrimaryHDU()
+    ivar_hdu = fits.ImageHDU()
+    andmsk_hdu = fits.ImageHDU()
+    ormsk_hdu = fits.ImageHDU()
+    wdisp_hdu = fits.ImageHDU()
+    tbl_hdu = fits.BinTableHDU()
+    sky_hdu = fits.ImageHDU()
+
+    spec_hdu.data = spec_data.T
+    spec_hdu.header['PLATEID'] = 0
+
+    try:
+        spec_hdu.header['MJD'] = cube_header['MJD']
+    except KeyError:
+        try:
+            spec_hdu.header['MJD'] = cube_header['MJD-OBS']
+        except KeyError:
+            print(
+                "WARNING: no MJD found in the cube metadata, using extraction "
+                "time instead!",
+                file=sys.stderr
+            )
+            spec_hdu.header['MJD'] = Time.now().mjd
+
+    # See the following link for COEFF0 and COEFF1 definition
+    # https://classic.sdss.org/dr7/products/spectra/read_spSpec.html
+    try:
+        spec_hdu.header["COEFF0"] = spec_header["COEFF0"]
+        spec_hdu.header["COEFF1"] = spec_header["COEFF1"]
+    except KeyError:
+        print(
+            "WARING: wavelength binning of the input cube is not compatible "
+            "with boss log10 binning data model.\n        Computing the best "
+            "values of COEFF0 and COEFF1 for this wavelengt range...",
+            file=sys.stderr
+        )
+        # Compute coeff0 and coeff1 that best approximate wavelenght range
+        # of the datacube
+        crpix = spec_header["CRPIX3"] - 1
+        crval = spec_header["CRVAL3"]
+        cd1 = spec_header["CD3_3"]
+
+        w_end = spec_data.shape[1] - crpix
+
+        coeff0 = np.log10(crval + cd1*(crpix))
+        coeff1 = np.log10(1 + (w_end*cd1)/crval) / w_end
+
+        spec_hdu.header['COEFF0'] = coeff0
+        spec_hdu.header['COEFF1'] = coeff1
+
+    spec_hdu.header["CRVAL1"] = spec_header["CRVAL3"]
+    spec_hdu.header["CD1_1"] = spec_header["CD3_3"]
+    spec_hdu.header["CDELT1"] = spec_header["CD3_3"]
+    spec_hdu.header["CRPIX1"] = spec_header["CRPIX3"]
+    spec_hdu.header['BUNIT'] = spec_header['BUNIT']
+    spec_hdu.header["CUNIT1"] = spec_header["CUNIT3"]
+    spec_hdu.header["CTYPE1"] = spec_header["CTYPE3"]
+
+    if var_data is not None:
+        ivar_hdu.data = 1 / var_data.T
+
+    if wdisp_data is None:
+        wdisp_hdu.data = np.zeros_like(spec_data.T)
+    else:
+        wdisp_hdu.data = wdisp_data.T
+
+    info_table = Table()
+    info_table.add_column(
+        Column(data=obj_ids, name='FIBERID', dtype='>i4')
+    )
+
+    tbl_hdu.data = info_table.as_array()
+
+    hdul = fits.HDUList([
+        spec_hdu, ivar_hdu, andmsk_hdu, ormsk_hdu, wdisp_hdu, tbl_hdu, sky_hdu
+    ])
+
+    return hdul
 
 
 def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
