@@ -12,7 +12,7 @@ jobs:
 
 install:
   - "chmod +x redrock_venv_setup.sh && ./redrock_venv_setup.sh"
-  - ". ./redrock_venv/bin/activate"
+  - ". ./redrock-venv/bin/activate"
   - "pip install -r requirements.txt"
   - "pip install ."
 
