@@ -25,7 +25,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(where="py"),
     package_dir={"": "py"},
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     classifiers=[
         # How mature is this project? Common values are
         #   3 - Alpha
