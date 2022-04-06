@@ -48,7 +48,7 @@ setuptools.setup(
     entry_points={
         'console_scripts': [
             'spex=spex.spex:main',
-            'rrspex=spex.rrspex:main',
+            'rrspex=spex.rrspex:rrspex',
         ],
     },
 )

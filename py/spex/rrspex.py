@@ -46,7 +46,6 @@ from scipy import sparse
 from astropy.io import fits
 from astropy.table import Table
 import astropy.wcs as wcs
-
 import matplotlib.pyplot as plt
 
 from redrock.utils import elapsed, get_mp
@@ -57,7 +56,7 @@ from redrock.zfind import zfind
 from redrock._version import __version__
 from redrock.archetypes import All_archetypes
 
-from lines import getlines
+from .utils import plot_zfit_check
 
 
 def write_zbest(outfile, zbest, template_version, archetype_version):
@@ -220,100 +219,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     return targets, metatable
 
 
-def plot_zfit_check(targets, zfit, outdir=None):
-    """
-    Plot the check images for the fitted targets.
-
-    This function will plot the spectra of the target object along with the
-    spectra of the best matching tamplate and some other info.
-
-    Parameters
-    ----------
-    targets : list of redrock.targets.Target objects
-        A list containing the targets used in redshift estimation process.
-    zfit : astropy.table.Table
-        A table containing the reshift and other info of the input targets.
-    outdir : str or None, optional
-        The output directory in which plots will be saved. If None plots are
-        saved in the current working directory.
-        The default value is None.
-
-    Returns
-    -------
-    None.
-
-    """
-    if (outdir is not None) and (not os.path.isdir(outdir)):
-        os.mkdir(outdir)
-
-    zbest = zfit[zfit['znum'] == 0]
-
-    available_templates = [
-        Template(t)
-        for t in find_templates()
-    ]
-
-    for target in targets:
-        t_best_data = zbest[zbest['targetid'] == target.id][0]
-
-        best_template = None
-        for t in available_templates:
-            if (
-                t.template_type == t_best_data['spectype'] and
-                t.sub_type == t_best_data['subtype']
-            ):
-                best_template = t
-                break
-        else:
-            continue
-
-        for target_spec in target.spectra:
-            template_flux = best_template.eval(
-                t_best_data['coeff'],
-                target_spec.wave,
-                t_best_data['z'],
-            )
-
-            fig, ax = plt.subplots(1, 1, figsize=(20, 5))
-            ax.set_title(f"object: {target.id}")
-            ax.plot(
-                target_spec.wave, target_spec.flux,
-                ls='-',
-                lw=2,
-                alpha=1,
-                label='spectrum'
-            )
-            ax.plot(
-                target_spec.wave, template_flux,
-                ls='-',
-                lw=2,
-                alpha=0.7,
-                label=f'best template [{best_template.full_type}]'
-            )
-
-            # Plotting absorption lines lines
-            lines_to_plot = getlines(
-                line_type='A', wrange=target_spec.wave, z=t_best_data['z']
-            )
-            for line_lam, line_name, line_type in lines_to_plot:
-                ax.axvline(
-                    line_lam, color='green', ls='--', lw=1, alpha=0.7
-                )
-                ax.text(
-                    line_lam, 0.02, line_name, rotation=90,
-                    transform=ax.get_xaxis_transform()
-                )
-
-        _ = ax.legend()
-        plt.tight_layout()
-        figname = f'rrspex_{target.id}.png'
-        if outdir is not None:
-            figname = os.path.join(outdir, figname)
-        fig.savefig(figname, dpi=150)
-        plt.close(fig)
-
-
-def main(options=None, comm=None):
+def rrspex(options=None, comm=None):
     """
     Estimate redshifts for spectra extracted with python-spex using redrock.
 
@@ -329,7 +235,10 @@ def main(options=None, comm=None):
 
     Returns
     -------
-    None.
+    targets : list of redrock.targets.Target objects
+        list of target spectra.
+    zfit : astropy.table.Table
+        Table containing the fit results.
 
     """
     global_start = elapsed(None, "", comm=comm)
@@ -517,7 +426,21 @@ def main(options=None, comm=None):
 
         if args.plot_zfit:
             if comm_rank == 0:
-                plot_zfit_check(targets, zfit, args.checkimg_outdir)
+                available_templates = [
+                    Template(t)
+                    for t in find_templates()
+                ]
+                for target in targets:
+                    fig, ax = plot_zfit_check(
+                        target,
+                        zfit,
+                        plot_template=available_templates
+                    )
+                    figname = f'rrspex_{target.id}.png'
+                    if args.checkimg_outdir is not None:
+                        figname = os.path.join(args.checkimg_outdir, figname)
+                    fig.savefig(figname, dpi=150)
+                    plt.close(fig)
 
         # Write the outputs
         if args.output is not None:
@@ -576,6 +499,8 @@ def main(options=None, comm=None):
         import IPython
         IPython.embed()
 
+    return targets, zfit
+
 
 if __name__ == '__main__':
-    main()
+    rrspex()

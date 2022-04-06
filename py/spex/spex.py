@@ -46,6 +46,8 @@ from astropy.time import Time
 
 import matplotlib.pyplot as plt
 
+import spex
+
 
 def getpbar(partial, total=None, wid=32, common_char='\u2588',
             upper_char='\u2584', lower_char='\u2580'):
@@ -477,6 +479,10 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
                      key_id='NUMBER', key_kron='KRON_RADIUS'):
     """
     Parse a regionfile and return an asrtopy Table with sources information.
+
+    Note that the only supported shape are 'circle', 'ellipse' and 'box',
+    other shapes in the region file will be ignored. Note also that 'box'
+    is treated as the bounding box of an ellipse.
 
     Parameters
     ----------
