@@ -46,7 +46,14 @@ from astropy.time import Time
 
 import matplotlib.pyplot as plt
 
-import spex
+from .utils import plot_zfit_check
+
+try:
+    from .rrspex import rrspex, get_templates
+except ImportError:
+    HAS_RR = False
+else:
+    HAS_RR = True
 
 
 def getpbar(partial, total=None, wid=32, common_char='\u2588',
@@ -86,7 +93,7 @@ def getpbar(partial, total=None, wid=32, common_char='\u2588',
     return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
 
 
-def argshandler():
+def __argshandler():
     """
     Parse the arguments given by the user.
 
@@ -252,7 +259,46 @@ def argshandler():
 
     parser.add_argument(
         '--check-images', action='store_true', default=False,
-        help='Wheter or not to generate check images (cutouts, etc.).'
+        help='Whether or not to generate check images (cutouts, etc.).'
+    )
+
+    parser.add_argument(
+        "--checkimg-outdir", type=str, default='checkimages', required=False,
+        help='Set the directory where check images are saved (when they are '
+        'enabled thorugh the appropriate parameter).'
+    )
+
+    if HAS_RR:
+        rr_help_note = ' NOTE that in order to use this option you must ' \
+                       'have redrock installed and functional.'
+    else:
+        rr_help_note = ' (WARNING: this option is unavailable since redrock' \
+                       ' seems not to be installed).'
+
+    parser.add_argument(
+        "--zbest", type=str, default=None, required=False,
+        help='Whether to find redshift from the spectra. ' + rr_help_note
+    )
+
+    parser.add_argument(
+        "--priors", type=str, default=None, required=False,
+        help='optional redshift prior file. ' + rr_help_note
+    )
+
+    parser.add_argument(
+        "--chi2-scan", type=str, default=None, required=False,
+        help="Load the chi2-scan from the input file. " + rr_help_note
+    )
+
+    parser.add_argument(
+        "--nminima", type=int, default=3, required=False,
+        help="the number of redshift minima to search. " + rr_help_note
+    )
+
+    parser.add_argument(
+        "--mp", type=int, default=0, required=False,
+        help="if not using MPI, the number of multiprocessing processes to use"
+        " (defaults to half of the hardware threads). " + rr_help_note
     )
 
     return parser.parse_args()
@@ -585,7 +631,7 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     return myt
 
 
-def main():
+def spex():
     """
     Run the main program.
 
@@ -594,7 +640,7 @@ def main():
     None.
 
     """
-    args = argshandler()
+    args = __argshandler()
 
     if args.catalog is not None:
         sources = Table.read(args.catalog)
@@ -722,6 +768,7 @@ def main():
     print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
     n_objects = len(sources)
+    n_objects = 2
 
     if args.key_id is None:
         valid_id_keys = [
@@ -739,6 +786,7 @@ def main():
     else:
         key_id = args.key_id
 
+    out_specfiles = []
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
@@ -821,10 +869,49 @@ def main():
             obj_spectrum_var
         )
 
+        out_file_name = os.path.join(outdir, outname)
         hdul.writeto(
-            os.path.join(outdir, outname),
+            out_file_name,
             overwrite=True
         )
+        out_specfiles.append(os.path.realpath(out_file_name))
+
+    if args.checkimg_outdir and not os.path.isdir(args.checkimg_outdir):
+        os.mkdir(args.checkimg_outdir)
+
+    if args.zbest:
+        rrspex_options = [
+            '--zbest', args.zbest,
+            '--checkimg-outdir', args.checkimg_outdir
+        ]
+
+        if args.priors is not None:
+            rrspex_options += ['--priors', args.priors]
+
+        if args.chi2_scan is not None:
+            rrspex_options += ['--chi2-scan', args.chi2_scan]
+
+        if args.nminima is not None:
+            rrspex_options += ['--nminima', f'{args.nminima:d}']
+
+        if args.mp is not None:
+            rrspex_options += ['--mp', f'{args.nminima:d}']
+
+        rrspex_options += out_specfiles
+        targets, zfit = rrspex(options=rrspex_options)
+
+        if args.check_images:
+            for target in targets:
+                fig, ax = plot_zfit_check(
+                    target,
+                    zfit,
+                    plot_template=None
+                )
+                figname = f'rrspex_{target.id}.png'
+                if args.checkimg_outdir is not None:
+                    figname = os.path.join(args.checkimg_outdir, figname)
+                fig.savefig(figname, dpi=150)
+                plt.close(fig)
 
     if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
@@ -834,4 +921,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    spex()

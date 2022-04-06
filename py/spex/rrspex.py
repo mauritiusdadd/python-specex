@@ -59,6 +59,14 @@ from redrock.archetypes import All_archetypes
 from .utils import plot_zfit_check
 
 
+def get_templates():
+    available_templates = [
+        Template(t)
+        for t in find_templates()
+    ]
+    return available_templates
+
+
 def write_zbest(outfile, zbest, template_version, archetype_version):
     """
     Write zbest Table to outfile.
@@ -219,30 +227,21 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     return targets, metatable
 
 
-def rrspex(options=None, comm=None):
+def __argshandler(options=None):
     """
-    Estimate redshifts for spectra extracted with python-spex using redrock.
-
-    This loads targets serially and copies them into a DistTargets class.
-    It then runs redshift fitting and writes the output to a catalog.
+    Handle input arguments.
 
     Parameters
     ----------
-    options : list, optional
-        lLst of commandline options to parse. The default is None.
-    comm : mpi4py.Comm, optional
-        MPI communicator to use. The default is None.
+    options : TYPE, optional
+        DESCRIPTION. The default is None.
 
     Returns
     -------
-    targets : list of redrock.targets.Target objects
-        list of target spectra.
-    zfit : astropy.table.Table
-        Table containing the fit results.
+    args : TYPE
+        DESCRIPTION.
 
     """
-    global_start = elapsed(None, "", comm=comm)
-
     parser = argparse.ArgumentParser(
         description="Estimate redshifts for spectra extracted with"
         "python-spex using redrock interface."
@@ -318,11 +317,39 @@ def rrspex(options=None, comm=None):
     else:
         args = parser.parse_args(options)
 
+    return args
+
+
+def rrspex(options=None, comm=None):
+    """
+    Estimate redshifts for spectra extracted with python-spex using redrock.
+
+    This loads targets serially and copies them into a DistTargets class.
+    It then runs redshift fitting and writes the output to a catalog.
+
+    Parameters
+    ----------
+    options : list, optional
+        lLst of commandline options to parse. The default is None.
+    comm : mpi4py.Comm, optional
+        MPI communicator to use. The default is None.
+
+    Returns
+    -------
+    targets : list of redrock.targets.Target objects
+        list of target spectra.
+    zfit : astropy.table.Table
+        Table containing the fit results.
+
+    """
+    global_start = elapsed(None, "", comm=comm)
     comm_size = 1
     comm_rank = 0
     if comm is not None:
         comm_size = comm.size
         comm_rank = comm.rank
+
+    args = __argshandler(options)
 
     # Check arguments - all processes have this, so just check on the first
     # process
@@ -426,10 +453,7 @@ def rrspex(options=None, comm=None):
 
         if args.plot_zfit:
             if comm_rank == 0:
-                available_templates = [
-                    Template(t)
-                    for t in find_templates()
-                ]
+                available_templates = get_templates()
                 for target in targets:
                     fig, ax = plot_zfit_check(
                         target,

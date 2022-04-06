@@ -47,7 +47,7 @@ setuptools.setup(
     keywords='spectroscopy spectra spectrum spectral cubes',
     entry_points={
         'console_scripts': [
-            'spex=spex.spex:main',
+            'spex=spex.spex:spex',
             'rrspex=spex.rrspex:rrspex',
         ],
     },
