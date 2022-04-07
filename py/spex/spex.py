@@ -140,6 +140,11 @@ def __argshandler():
     )
 
     parser.add_argument(
+        '--nspectra', metavar='N', type=int, default=0,
+        help='number of spectra to extract (usefull for debugging purposes).'
+    )
+
+    parser.add_argument(
         '--info-hdu', metavar='INFO_HDU', type=int, default=0,
         help='The HDU containing cube metadata. If this argument '
         'Set this to -1 to automatically detect the HDU containing the info. '
@@ -768,7 +773,8 @@ def spex():
     print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
     n_objects = len(sources)
-    n_objects = 2
+    if args.nspectra:
+        n_objects = int(args.nspectra)
 
     if args.key_id is None:
         valid_id_keys = [
