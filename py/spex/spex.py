@@ -112,8 +112,21 @@ def __argshandler():
 
     parser.add_argument(
         '--mode', metavar='WORKING_MODE', type=str, default='auto',
-        help='Set the working mode of the program. Can be "auto", '
-        '"kron'
+        help='Set the working mode of the program. Can be one of the following'
+        ' modes: "auto", "kron_ellipse", "kron_circle", "circular_aperture". '
+        'When using "kron_ellipse" mode, the input catalog must contain the '
+        'column for objetcs kron radius, semi-major and semi-minor axes and '
+        'for the rotation angle of the objects. In this mode all the pixels '
+        'whitin this ellipse will be added together to compute the spectra. '
+        '"kron_circular" mode requires the same parameters of the previous '
+        'mode, but a circular aperture is used instead of an ellipse and the '
+        'radius of this aperture is the circularized kron radius (i.e. the '
+        'kron darius multiplied by the axis ratio q = minor-axis/major-axis. '
+        'In circular_aperture mode, no morphological parameters are required '
+        'to be in the input catalog and the aperture size is set using the '
+        'input parameter --aperture-size. In "auto" mode, the best working '
+        'mode is selected based on the parameters available in the input '
+        'catalog.'
     )
 
     parser.add_argument(
@@ -268,7 +281,7 @@ def __argshandler():
     )
 
     parser.add_argument(
-        "--checkimg-outdir", type=str, default='checkimages', required=False,
+        "--checkimg-outdir", type=str, default=None, required=False,
         help='Set the directory where check images are saved (when they are '
         'enabled thorugh the appropriate parameter).'
     )
@@ -882,13 +895,18 @@ def spex():
         )
         out_specfiles.append(os.path.realpath(out_file_name))
 
-    if args.checkimg_outdir and not os.path.isdir(args.checkimg_outdir):
-        os.mkdir(args.checkimg_outdir)
+    if args.checkimg_outdir is not None:
+        check_images_outdir = args.checkimg_outdir
+    else:
+        check_images_outdir = os.path.join(outdir, 'checkimages')
+
+    if not os.path.isdir(check_images_outdir):
+        os.mkdir(check_images_outdir)
 
     if args.zbest:
         rrspex_options = [
             '--zbest', args.zbest,
-            '--checkimg-outdir', args.checkimg_outdir
+            '--checkimg-outdir', check_images_outdir
         ]
 
         if args.priors is not None:
@@ -906,18 +924,16 @@ def spex():
         rrspex_options += out_specfiles
         targets, zfit = rrspex(options=rrspex_options)
 
-        if args.check_images:
-            for target in targets:
-                fig, ax = plot_zfit_check(
-                    target,
-                    zfit,
-                    plot_template=None
-                )
-                figname = f'rrspex_{target.id}.png'
-                if args.checkimg_outdir is not None:
-                    figname = os.path.join(args.checkimg_outdir, figname)
-                fig.savefig(figname, dpi=150)
-                plt.close(fig)
+        for target in targets:
+            fig, ax = plot_zfit_check(
+                target,
+                zfit,
+                plot_template=None
+            )
+            figname = f'r{target.id}.png'
+            figname = os.path.join(check_images_outdir, figname)
+            fig.savefig(figname, dpi=150)
+            plt.close(fig)
 
     if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
