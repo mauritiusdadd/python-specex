@@ -59,12 +59,53 @@ from redrock.archetypes import All_archetypes
 from .utils import plot_zfit_check
 
 
-def get_templates():
-    available_templates = [
-        Template(t)
-        for t in find_templates()
-    ]
+def get_templates(template_types=[], filepath=False):
+    """
+    Get avilable templates.
+
+    Parameters
+    ----------
+    template_types : list of str, optional
+        List of template types to retrieve. If it's empty all available
+        templates will be returned.
+        The default is [].
+    filepath : boot, optional
+        If it's true then return the file paths instead of actual templates.
+
+    Returns
+    -------
+    available_templates : list of redrock.templates.Template or file paths
+        The available templates or the corresponding file paths.
+
+    """
+    available_templates = []
+    for t in find_templates():
+        templ = Template(t)
+        if not template_types or templ.template_type in template_types:
+            if filepath:
+                available_templates.append(t)
+            else:
+                available_templates.append(templ)
+
     return available_templates
+
+
+def get_template_types():
+    """
+    Get the available types of templates.
+
+    Returns
+    -------
+    types : list of str
+        List of types of available templates.
+
+    """
+    templates = [
+        t.template_type
+        for t in get_templates()
+    ]
+    types = set(templates)
+    return types
 
 
 def write_zbest(outfile, zbest, template_version, archetype_version):

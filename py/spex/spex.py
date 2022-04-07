@@ -49,7 +49,7 @@ import matplotlib.pyplot as plt
 from .utils import plot_zfit_check
 
 try:
-    from .rrspex import rrspex, get_templates
+    from .rrspex import rrspex
 except ImportError:
     HAS_RR = False
 else:
@@ -322,6 +322,7 @@ def __argshandler():
     return parser.parse_args()
 
 
+# TODO: resample to constant log(lambda)
 def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
                    and_mask_data=None, or_mask_data=None, wdisp_data=None,
                    sky_data=None):
