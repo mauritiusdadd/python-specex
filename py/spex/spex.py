@@ -37,7 +37,6 @@ import sys
 import argparse
 
 import numpy as np
-from astropy import units as u
 from astropy import wcs
 from astropy.table import Table, Column
 from astropy.io import fits
@@ -46,7 +45,7 @@ from astropy.time import Time
 
 import matplotlib.pyplot as plt
 
-from .utils import plot_zfit_check
+from .utils import plot_zfit_check, getcutout, getlogimg, getvclip
 
 try:
     from .rrspex import rrspex
@@ -220,6 +219,14 @@ def __argshandler():
     )
 
     parser.add_argument(
+        '--cutouts-image', metavar='IMAGE', type=str, default=None,
+        help='The path of a FITS image (grayscale or single/multiext RGB) from'
+        'which to extract cutout of the objects. If this option is not '
+        'specified then the cutouts will be extracted directly from the '
+        'input cube.'
+    )
+
+    parser.add_argument(
         '--key-ra', metavar='RA_KEY', type=str, default='ALPHA_J2000',
         help='Set the name of the column from which to read the RA of the '
         'objects. The default value is %(metavar)s=%(default)s.'
@@ -319,7 +326,13 @@ def __argshandler():
         " (defaults to half of the hardware threads). " + rr_help_note
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.cutouts_image and not os.path.exists(args.cutouts_image):
+        print(f"The file {args.cutouts_image} does not exist!")
+        sys.exit(1)
+
+    return args
 
 
 # TODO: resample to constant log(lambda)
@@ -726,9 +739,12 @@ def spex():
     spectral_wcs = img_wcs.spectral
     wcs_frame = wcs.utils.wcs_to_celestial_frame(img_wcs)
 
+    ra_unit = sources[args.key_ra].unit
+    dec_unit = sources[args.key_dec].unit
+
     obj_sky_coords = SkyCoord(
         sources[args.key_ra], sources[args.key_dec],
-        unit=(u.deg, u.deg),
+        unit=(ra_unit, dec_unit),
         frame=wcs_frame
     )
 
@@ -737,8 +753,8 @@ def spex():
         wcs=celestial_wcs
     )
 
-    sources.add_column(obj_x, name='MUSE_X_IMAGE')
-    sources.add_column(obj_y, name='MUSE_Y_IMAGE')
+    sources.add_column(obj_x, name='CUBE_X_IMAGE')
+    sources.add_column(obj_y, name='CUBE_Y_IMAGE')
 
     img_height, img_width = spec_hdu.data.shape[1], spec_hdu.data.shape[2]
 
@@ -813,8 +829,8 @@ def spex():
         sys.stderr.flush()
         obj_ra = source[args.key_ra]
         obj_dec = source[args.key_dec]
-        xx_tr = xx - source['MUSE_X_IMAGE']
-        yy_tr = yy - source['MUSE_Y_IMAGE']
+        xx_tr = xx - source['CUBE_X_IMAGE']
+        yy_tr = yy - source['CUBE_Y_IMAGE']
 
         if mode == 'kron_ellipse':
             ang = np.deg2rad(source[args.key_theta])
@@ -925,12 +941,45 @@ def spex():
         rrspex_options += out_specfiles
         targets, zfit = rrspex(options=rrspex_options)
 
+        if args.cutouts_image:
+            cutouts_image = fits.getdata(args.cutouts_image).transpose(1, 2, 0)
+            cutouts_wcs = wcs.WCS(fits.getheader(args.cutouts_image))
+            cutout_wcs_frame = wcs.utils.wcs_to_celestial_frame(cutouts_wcs)
+            cutouts_image, cut_vmin, cut_vmax = getlogimg(cutouts_image)
+        else:
+            cutouts_image = trasposed_spec
+            cutouts_wcs = None
+            cutout_wcs_frame = wcs_frame
+            cut_vmin, cut_vmax = None, None
+
         for target in targets:
-            fig, ax = plot_zfit_check(
+            obj = sources[sources[args.key_id] == target.id][0]
+
+            if cutouts_wcs is None:
+                obj_position = (obj['CUBE_X_IMAGE'], obj['CUBE_X_IMAGE'])
+            else:
+                obj_position = SkyCoord(
+                    obj[args.key_ra],
+                    obj[args.key_dec],
+                    unit=(ra_unit, dec_unit),
+                    frame=cutout_wcs_frame
+                )
+
+            cutout_size = 256
+            fig, axs = plot_zfit_check(
                 target,
                 zfit,
-                plot_template=None
+                plot_template=None,
+                cutout=getcutout(
+                    cutouts_image,
+                    position=obj_position,
+                    cutout_size=cutout_size,
+                    wcs=cutouts_wcs,
+                    vmin=cut_vmin,
+                    vmax=cut_vmax
+                )
             )
+
             figname = f'r{target.id}.png'
             figname = os.path.join(check_images_outdir, figname)
             fig.savefig(figname, dpi=150)

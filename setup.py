@@ -2,7 +2,6 @@
 """Setup for python-spex."""
 import setuptools
 import time
-from glob import glob
 
 BUILD_INFO = {
     'date': time.strftime("%Y-%m"),
