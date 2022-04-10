@@ -32,12 +32,107 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
-
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.nddata import Cutout2D
+from astropy.wcs import WCS
+from astropy.io import fits
 
 from .lines import getlines
+
+
+def getpbar(partial, total=None, wid=32, common_char='\u2588',
+            upper_char='\u2584', lower_char='\u2580'):
+    """
+    Return a nice text/unicode progress bar showing partial and total progress.
+
+    Parameters
+    ----------
+    partial : float
+        Partial progress expressed as decimal value.
+    total : float, optional
+        Total progress expresses as decimal value.
+        If it is not provided or it is None, than
+        partial progress will be shown as total progress.
+    wid : int , optional
+        Width in charachters of the progress bar.
+        The default is 32.
+
+    Returns
+    -------
+    pbar : str
+        A unicode progress bar.
+
+    """
+    wid -= 2
+    prog = int((wid)*partial)
+    if total is None:
+        total_prog = prog
+        common_prog = prog
+    else:
+        total_prog = int((wid)*total)
+        common_prog = min(total_prog, prog)
+    pbar_full = common_char*common_prog
+    pbar_full += upper_char*(total_prog - common_prog)
+    pbar_full += lower_char*(prog - common_prog)
+    return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
+
+
+
+
+def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
+           msg_index_error=None, exit_on_errors=True):
+    """
+    Find a valid HDU in a HDUList.
+
+    Parameters
+    ----------
+    hdl : list of astropy.io.fits HDUs
+        A list of HDUs.
+    valid_names : list or tuple of str
+        A list of possible names for the valid HDU.
+    hdu_index : int, optional
+        Manually specify which HDU to use. The default is -1.
+    msg_err_notfound : str or None, optional
+        Error message to be displayed if no valid HDU is found.
+        The default is None.
+    msg_index_error : str or None, optional
+        Error message to be displayed if the specified index is outside the
+        HDU list boundaries.
+        The default is None.
+    exit_on_errors : bool, optional
+        If it is set to True, then exit the main program with an error if a
+        valid HDU is not found, otherwise just return None.
+        The default value is True.
+
+    Returns
+    -------
+    valid_hdu : astropy.io.fits HDU or None
+        The requested HDU.
+
+    """
+    valid_hdu = None
+    if hdu_index < 0:
+        # Try to detect HDU containing spectral data
+        for hdu in hdl:
+            if hdu.name.lower() in valid_names:
+                valid_hdu = hdu
+                break
+        else:
+            if msg_err_notfound:
+                print(msg_err_notfound, file=sys.stderr)
+            if exit_on_errors:
+                sys.exit(1)
+    else:
+        try:
+            valid_hdu = hdl[hdu_index]
+        except IndexError:
+            if msg_index_error:
+                print(msg_index_error.format(hdu_index), file=sys.stderr)
+            if exit_on_errors:
+                sys.exit(1)
+    return valid_hdu
 
 
 def getaspect(ax):
@@ -122,6 +217,9 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
     valid_shape = True
     is_rgb = True
 
+    if wcs is not None:
+        wcs = wcs.celestial
+
     if len(data.shape) > 3:
         valid_shape = False
     elif len(data.shape) == 3:
@@ -163,13 +261,13 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
 
     if is_rgb:
         cutout_r = Cutout2D(
-            data_r, position, cutout_size, wcs=wcs.celestial, copy=True
+            data_r, position, cutout_size, wcs=wcs, copy=True
         )
         cutout_g = Cutout2D(
-            data_g, position, cutout_size, wcs=wcs.celestial, copy=True
+            data_g, position, cutout_size, wcs=wcs, copy=True
         )
         cutout_b = Cutout2D(
-            data_b, position, cutout_size, wcs=wcs.celestial, copy=True
+            data_b, position, cutout_size, wcs=wcs, copy=True
         )
         cutout = np.array([
             cutout_r.data,
@@ -188,14 +286,14 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
         print(vmin, vmax)
     else:
         cutout = Cutout2D(
-            data_gray, position, cutout_size, wcs=wcs.celestial, copy=True
+            data_gray, position, cutout_size, wcs=wcs, copy=True
         ).data
 
     return cutout
 
 
 def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
-                    cutout=None):
+                    cutout=None, wave_units='Angstrom', flux_units=''):
     """
     Plot the check images for the fitted targets.
 
@@ -213,7 +311,11 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
     rest_frame : bool, optional
         Whether to plot the spectrum at restrframe.
     cutout: 2D or 3D numpt.ndarray or None, optional
-        If None, plot the grayscale or RGB image given as numpy.ndarray.
+        If not None, plot the grayscale or RGB image given as numpy.ndarray.
+    wave_units : str, optional
+        The units of the wavelenght grid. The default value id 'Angstrom'
+    flux_units : str, optional
+        The units of the spectum. The default value is ''.
 
     Returns
     -------
@@ -226,6 +328,8 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
         and the second axes containing the cutout of the object.
 
     """
+
+    flux_units = flux_units.replace('**', '^')
     zbest = zfit[zfit['znum'] == 0]
 
     t_best_data = zbest[zbest['targetid'] == target.id][0]
@@ -306,6 +410,24 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
 
     ax.set_xlim(w_min, w_max)
     ax.set_ylim(f_min, f_max)
+    ax.set_xlabel(f'Wavelenght [{wave_units}]')
+    ax.set_ylabel(f'Wavelenght [{flux_units}]')
+
+    splabel = f"z = {t_best_data['z']:.2f} ({t_best_data['spectype']}"
+    splabel += f" {t_best_data['subtype']})" if t_best_data['subtype'] else ')'
+
+    ax.text(
+        0.5, 0.25,
+        splabel,
+        ha='center',
+        va='center',
+        transform=ax.transAxes,
+        bbox={
+            'facecolor': 'white',
+            'edgecolor': 'black',
+            'boxstyle': 'round,pad=0.5',
+        }
+    )
 
     if cutout is not None:
         # Place the image in the upper-right corner of the figure
@@ -337,3 +459,35 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
     _ = ax.legend(loc='upper left')
     plt.tight_layout()
     return fig, axs
+
+
+def stack(data, wave_mask=None):
+    """
+    Stack the spectral cube along wavelength axis.
+
+    Parameters
+    ----------
+    data : numpy.ndarray
+        The spectral datacube.
+    wave_mask : 1D np.ndarray, optional
+        Optional wavelength mask. Wavelenght corresponding to a False will not
+        be used in the stacking. The default is None.
+
+    Returns
+    -------
+    new_data : numpy.ndarray
+        The stacked datacube.
+
+    """
+    img_height, img_width = data.shape[1], data.shape[2]
+    new_data = np.zeros((img_height, img_width))
+    for k, dat in enumerate(data):
+        progress = (k + 1) / len(data)
+        sys.stderr.write(
+            f"\rstacking cube: {getpbar(progress)} {progress:.2%}\r"
+        )
+        sys.stderr.flush()
+        if wave_mask is None or wave_mask[k]:
+            new_data = np.nansum(np.array([new_data, dat]), axis=0)
+    print("", file=sys.stderr)
+    return new_data

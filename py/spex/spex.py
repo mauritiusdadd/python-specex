@@ -42,10 +42,13 @@ from astropy.table import Table, Column
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
+from astropy import units
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
 
-from .utils import plot_zfit_check, getcutout, getlogimg, getvclip
+from .utils import plot_zfit_check, getcutout, getlogimg, gethdu, getpbar
+from .utils import stack
 
 try:
     from .rrspex import rrspex
@@ -53,43 +56,6 @@ except ImportError:
     HAS_RR = False
 else:
     HAS_RR = True
-
-
-def getpbar(partial, total=None, wid=32, common_char='\u2588',
-            upper_char='\u2584', lower_char='\u2580'):
-    """
-    Return a nice text/unicode progress bar showing partial and total progress.
-
-    Parameters
-    ----------
-    partial : float
-        Partial progress expressed as decimal value.
-    total : float, optional
-        Total progress expresses as decimal value.
-        If it is not provided or it is None, than
-        partial progress will be shown as total progress.
-    wid : int , optional
-        Width in charachters of the progress bar.
-        The default is 32.
-
-    Returns
-    -------
-    pbar : str
-        A unicode progress bar.
-
-    """
-    wid -= 2
-    prog = int((wid)*partial)
-    if total is None:
-        total_prog = prog
-        common_prog = prog
-    else:
-        total_prog = int((wid)*total)
-        common_prog = min(total_prog, prog)
-    pbar_full = common_char*common_prog
-    pbar_full += upper_char*(total_prog - common_prog)
-    pbar_full += lower_char*(prog - common_prog)
-    return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
 
 
 def __argshandler():
@@ -201,10 +167,11 @@ def __argshandler():
     )
 
     parser.add_argument(
-        '--aperture-size', metavar='APERTURE_MAS', type=float, default=0.8,
-        help='Set the radius in mas of a fixed circula aperture used in the '
-        '"fixed-aperture" mode. The pixels within this aperture will be used '
-        'for spectra extraction. The default value is %(metavar)s=%(default)s.'
+        '--aperture-size', metavar='APERTURE', type=float, default=0.8,
+        help='Set the radius in arcsecs of a fixed circula aperture used in '
+        'the "fixed-aperture" mode. The pixels within this aperture will be '
+        'used for spectra extraction. '
+        'The default value is %(metavar)s=%(default)s.'
     )
 
     parser.add_argument(
@@ -224,6 +191,12 @@ def __argshandler():
         'which to extract cutout of the objects. If this option is not '
         'specified then the cutouts will be extracted directly from the '
         'input cube.'
+    )
+
+    parser.add_argument(
+        '--cutouts-size', metavar='SIZE', type=float, default=10,
+        help='Size of the cutouts of the object in pixel or arcseconds. '
+        'The default value is %(metavar)s=%(default)s.'
     )
 
     parser.add_argument(
@@ -496,60 +469,6 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
 
     hdul = fits.HDUList(hdu_list)
     return hdul
-
-
-def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
-           msg_index_error=None, exit_on_errors=True):
-    """
-    Find a valid HDU in a HDUList.
-
-    Parameters
-    ----------
-    hdl : list of astropy.io.fits HDUs
-        A list of HDUs.
-    valid_names : list or tuple of str
-        A list of possible names for the valid HDU.
-    hdu_index : int, optional
-        Manually specify which HDU to use. The default is -1.
-    msg_err_notfound : str or None, optional
-        Error message to be displayed if no valid HDU is found.
-        The default is None.
-    msg_index_error : str or None, optional
-        Error message to be displayed if the specified index is outside the
-        HDU list boundaries.
-        The default is None.
-    exit_on_errors : bool, optional
-        If it is set to True, then exit the main program with an error if a
-        valid HDU is not found, otherwise just return None.
-        The default value is True.
-
-    Returns
-    -------
-    valid_hdu : astropy.io.fits HDU or None
-        The requested HDU.
-
-    """
-    valid_hdu = None
-    if hdu_index < 0:
-        # Try to detect HDU containing spectral data
-        for hdu in hdl:
-            if hdu.name.lower() in valid_names:
-                valid_hdu = hdu
-                break
-        else:
-            if msg_err_notfound:
-                print(msg_err_notfound, file=sys.stderr)
-            if exit_on_errors:
-                sys.exit(1)
-    else:
-        try:
-            valid_hdu = hdl[hdu_index]
-        except IndexError:
-            if msg_index_error:
-                print(msg_index_error.format(hdu_index), file=sys.stderr)
-            if exit_on_errors:
-                sys.exit(1)
-    return valid_hdu
 
 
 def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
@@ -944,19 +863,36 @@ def spex():
         if args.cutouts_image:
             cutouts_image = fits.getdata(args.cutouts_image).transpose(1, 2, 0)
             cutouts_wcs = wcs.WCS(fits.getheader(args.cutouts_image))
+            cutouts_wcs = cutouts_wcs.celestial
             cutout_wcs_frame = wcs.utils.wcs_to_celestial_frame(cutouts_wcs)
             cutouts_image, cut_vmin, cut_vmax = getlogimg(cutouts_image)
+            cut_pixelscale = [
+                units.Quantity(sc_val, u).to_value('arcsec')
+                for sc_val, u in zip(
+                    wcs.utils.proj_plane_pixel_scales(cutouts_wcs),
+                    cutouts_wcs.wcs.cunit
+                )
+            ]
         else:
-            cutouts_image = trasposed_spec
+            cutouts_image = stack(spec_hdu.data)
             cutouts_wcs = None
             cutout_wcs_frame = wcs_frame
             cut_vmin, cut_vmax = None, None
+            cut_pixelscale = wcs.utils.proj_plane_pixel_scales(celestial_wcs)
+            cut_pixelscale = [
+                units.Quantity(sc_val, u).to_value('arcsec')
+                for sc_val, u in zip(
+                    wcs.utils.proj_plane_pixel_scales(celestial_wcs),
+                    celestial_wcs.wcs.cunit
+                )
+            ]
+        cut_pixelscale = np.nanmean(cut_pixelscale)
 
         for target in targets:
             obj = sources[sources[args.key_id] == target.id][0]
 
             if cutouts_wcs is None:
-                obj_position = (obj['CUBE_X_IMAGE'], obj['CUBE_X_IMAGE'])
+                obj_position = (obj['CUBE_X_IMAGE'], obj['CUBE_Y_IMAGE'])
             else:
                 obj_position = SkyCoord(
                     obj[args.key_ra],
@@ -965,7 +901,7 @@ def spex():
                     frame=cutout_wcs_frame
                 )
 
-            cutout_size = 256
+            cutout_size = args.cutouts_size / cut_pixelscale
             fig, axs = plot_zfit_check(
                 target,
                 zfit,
@@ -977,8 +913,20 @@ def spex():
                     wcs=cutouts_wcs,
                     vmin=cut_vmin,
                     vmax=cut_vmax
-                )
+                ),
+                wave_units=spec_hdu.header['CUNIT3'],
+                flux_units=spec_hdu.header['BUNIT'],
             )
+
+            aperture = Ellipse(
+                (cutout_size/2.0, cutout_size/2.0),
+                width=args.aperture_size / cut_pixelscale,
+                height=args.aperture_size / cut_pixelscale,
+                edgecolor='green',
+                facecolor='none',
+                fill=False
+            )
+            axs[1].add_patch(aperture)
 
             figname = f'r{target.id}.png'
             figname = os.path.join(check_images_outdir, figname)
