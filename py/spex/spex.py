@@ -891,29 +891,33 @@ def spex():
         for target in targets:
             obj = sources[sources[args.key_id] == target.id][0]
 
+            obj_skycoord = SkyCoord(
+                obj[args.key_ra],
+                obj[args.key_dec],
+                unit=(ra_unit, dec_unit),
+                frame=cutout_wcs_frame
+            )
+
             if cutouts_wcs is None:
                 obj_position = (obj['CUBE_X_IMAGE'], obj['CUBE_Y_IMAGE'])
             else:
-                obj_position = SkyCoord(
-                    obj[args.key_ra],
-                    obj[args.key_dec],
-                    unit=(ra_unit, dec_unit),
-                    frame=cutout_wcs_frame
-                )
+                obj_position = obj_skycoord
 
             cutout_size = args.cutouts_size / cut_pixelscale
+            cutout, scutout_wcs = getcutout(
+                cutouts_image,
+                position=obj_position,
+                cutout_size=cutout_size,
+                wcs=cutouts_wcs,
+                vmin=cut_vmin,
+                vmax=cut_vmax
+            )
+
             fig, axs = plot_zfit_check(
                 target,
                 zfit,
                 plot_template=None,
-                cutout=getcutout(
-                    cutouts_image,
-                    position=obj_position,
-                    cutout_size=cutout_size,
-                    wcs=cutouts_wcs,
-                    vmin=cut_vmin,
-                    vmax=cut_vmax
-                ),
+                cutout=cutout,
                 wave_units=spec_hdu.header['CUNIT3'],
                 flux_units=spec_hdu.header['BUNIT'],
             )
@@ -927,6 +931,27 @@ def spex():
                 fill=False
             )
             axs[1].add_patch(aperture)
+
+            obj_ra_str = obj_skycoord.ra.to_string(
+                unit=units.hourangle, alwayssign=True, precision=4
+            )
+
+            obj_dec_str = obj_skycoord.ra.to_string(
+                unit=units.deg, alwayssign=True, precision=4
+            )
+
+            axs[2].text(
+                0, 0.7,
+                f"RA: {obj_ra_str}\n"
+                f"DEC: {obj_dec_str}\n",
+                ha='left',
+                va='top',
+                transform=axs[2].transAxes,
+                bbox={
+                    'facecolor': 'white',
+                    'edgecolor': 'none',
+                }
+            )
 
             figname = f'r{target.id}.png'
             figname = os.path.join(check_images_outdir, figname)

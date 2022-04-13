@@ -35,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 from astropy.nddata import Cutout2D
 from astropy.wcs import WCS
 from astropy.io import fits
@@ -283,13 +284,15 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
 
         cutout -= np.nanmin(cutout)
         cutout /= np.nanmax(cutout)
-        print(vmin, vmax)
+        cutout_wcs = cutout_r.wcs
     else:
         cutout = Cutout2D(
             data_gray, position, cutout_size, wcs=wcs, copy=True
-        ).data
+        )
+        cutout_wcs = cutout.wcs
+        cutout = cutout.data
 
-    return cutout
+    return cutout, cutout_wcs
 
 
 def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
@@ -328,7 +331,6 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
         and the second axes containing the cutout of the object.
 
     """
-
     flux_units = flux_units.replace('**', '^')
     zbest = zfit[zfit['znum'] == 0]
 
@@ -350,11 +352,16 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
     f_min = 1.0e5
     f_max = 0.0
 
-    fig, ax = plt.subplots(1, 1, figsize=(15, 5))
-    ax.set_title(f"object: {target.id}")
-    ax.set_aspect('auto')
+    fig = plt.figure(figsize=(15, 5))
 
-    axs = [ax, ]
+    gs = GridSpec(2, 6, figure=fig)
+
+    ax0 = fig.add_subplot(gs[:, :-1])
+    ax1 = fig.add_subplot(gs[0, -1])
+    ax2 = fig.add_subplot(gs[1, -1])
+
+    ax0.set_title(f"object: {target.id}")
+    ax0.set_aspect('auto')
 
     for target_spec in target.spectra:
         # If we plot the spectrum at restframe wavelenghts, then we must use
@@ -372,7 +379,7 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
         f_min = np.minimum(f_min, np.nanmin(target_spec.flux))
         f_max = np.maximum(f_max, np.nanmax(target_spec.flux))
 
-        ax.plot(
+        ax0.plot(
             wavelenghts, target_spec.flux,
             ls='-',
             lw=2,
@@ -387,7 +394,7 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
                 lines_z,
             )
 
-            ax.plot(
+            ax0.plot(
                 wavelenghts, template_flux,
                 ls='-',
                 lw=2,
@@ -400,65 +407,58 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
             line_type='A', wrange=wavelenghts, z=lines_z
         )
         for line_lam, line_name, line_type in lines_to_plot:
-            ax.axvline(
+            ax0.axvline(
                 line_lam, color='green', ls='--', lw=1, alpha=0.7
             )
-            ax.text(
+            ax0.text(
                 line_lam, 0.02, line_name, rotation=90,
-                transform=ax.get_xaxis_transform(),
+                transform=ax0.get_xaxis_transform(),
             )
 
-    ax.set_xlim(w_min, w_max)
-    ax.set_ylim(f_min, f_max)
-    ax.set_xlabel(f'Wavelenght [{wave_units}]')
-    ax.set_ylabel(f'Wavelenght [{flux_units}]')
-
-    splabel = f"z = {t_best_data['z']:.2f} ({t_best_data['spectype']}"
-    splabel += f" {t_best_data['subtype']})" if t_best_data['subtype'] else ')'
-
-    ax.text(
-        0.5, 0.25,
-        splabel,
-        ha='center',
-        va='center',
-        transform=ax.transAxes,
-        bbox={
-            'facecolor': 'white',
-            'edgecolor': 'black',
-            'boxstyle': 'round,pad=0.5',
-        }
-    )
+    ax0.set_xlim(w_min, w_max)
+    ax0.set_ylim(f_min, f_max)
+    ax0.set_xlabel(f'Wavelenght [{wave_units}]')
+    ax0.set_ylabel(f'Wavelenght [{flux_units}]')
 
     if cutout is not None:
-        # Place the image in the upper-right corner of the figure
-        # ---------------------------------------------------------------------
-        # We're specifying the position and size in _figure_ coordinates, so
-        # the image will shrink/grow as the figure is resized.
-        # Remove "zorder=-1" to place the image in front of the axes.
-        #
-        # See: https://stackoverflow.com/questions/3609585/how-to-insert-a-small-image-on-the-corner-of-a-plot-with-matplotlib
-        figW, figH = ax.get_figure().get_size_inches()
-        fig_ratio = figH / figW
-
-        cut_ax = fig.add_axes(
-            [0.85, 0.15, 0.1, 0.1 / fig_ratio],
-            anchor='SE',
-            zorder=5
-        )
-        cut_ax.imshow(
+        ax1.imshow(
             cutout,
             origin='lower',
             aspect='auto',
         )
-        cut_ax.get_xaxis().set_visible(False)
-        cut_ax.get_yaxis().set_visible(False)
-        axs.append(cut_ax)
     else:
-        axs.append(None)
+        ax1.text(
+            0.5, 0.25,
+            "NO IMAGE",
+            ha='center',
+            va='center',
+            transform=ax1.transAxes,
+            bbox={
+                'facecolor': 'white',
+                'edgecolor': 'black',
+                'boxstyle': 'round,pad=0.5',
+            }
+        )
+    ax1.axis('off')
+    ax2.axis('off')
 
-    _ = ax.legend(loc='upper left')
+    splabel = f"z = {t_best_data['z']:.2f} ({t_best_data['spectype']}"
+    splabel += f" {t_best_data['subtype']})" if t_best_data['subtype'] else ')'
+
+    ax2.text(
+        0, 0.9,
+        splabel,
+        ha='left',
+        va='top',
+        transform=ax2.transAxes,
+        bbox={
+            'facecolor': 'white',
+            'edgecolor': 'none',
+        }
+    )
+    _ = ax0.legend(loc='upper left')
     plt.tight_layout()
-    return fig, axs
+    return fig, [ax0, ax1, ax2]
 
 
 def stack(data, wave_mask=None):
