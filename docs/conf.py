@@ -35,7 +35,6 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
-    'sphinxcontrib.issuetracker',
 ]
 
 issuetracker = 'github'
