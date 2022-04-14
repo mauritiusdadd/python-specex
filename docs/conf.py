@@ -21,7 +21,9 @@ copyright = "2022, Maurizio D'Addona"
 author = "Maurizio D'Addona"
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.0'
+release = '0.2.2'
+
+github_url = "https://github.com/mauritiusdadd/python-spex"
 
 # -- General configuration ---------------------------------------------------
 
@@ -33,7 +35,6 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
-    'sphinxcontrib.github',
     'sphinxcontrib.issuetracker',
 ]
 
