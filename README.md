@@ -20,4 +20,4 @@ If you want to use the rrspex script and the correspondig module, make sure to i
 
 To build the documentation run the command:
 
-    $ sphinx-build -b html docs/source/ docs/build/html
+    $ sphinx-build -b html docs/ docs/_build/html
