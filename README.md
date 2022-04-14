@@ -1,4 +1,4 @@
-# python-spex [![Build Status](https://app.travis-ci.com/mauritiusdadd/python-spex.svg?token=fRNrxziGGvs3HmNyD6gZ&branch=main)](https://app.travis-ci.com/mauritiusdadd/python-spex)[![Documentation Status](https://readthedocs.org/projects/python-spex/badge/?version=latest)](https://python-spex.readthedocs.io/en/latest/?badge=latest)
+# python-spex [![Build Status](https://app.travis-ci.com/mauritiusdadd/python-spex.svg?token=fRNrxziGGvs3HmNyD6gZ&branch=main)](https://app.travis-ci.com/mauritiusdadd/python-spex) [![Documentation Status](https://readthedocs.org/projects/python-spex/badge/?version=latest)](https://python-spex.readthedocs.io/en/latest/?badge=latest)
 
 Extract spectra from fits cubes
 
@@ -22,3 +22,7 @@ To build the documentation install the reuirements and run sphinx:
 
     $ pip install -r docs/requirements.txt
     $ sphinx-build -b html docs/ docs/_build/html
+
+# DOCUMENTATION
+
+The full documentation is available here: [https://python-spex.readthedocs.io/en/latest/index.html]
