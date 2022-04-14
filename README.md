@@ -18,6 +18,7 @@ If you want to use the rrspex script and the correspondig module, make sure to i
     $ pip install .
 
 
-To build the documentation run the command:
+To build the documentation install the reuirements and run sphinx:
 
+    $ pip install -r docs/requirements.txt
     $ sphinx-build -b html docs/ docs/_build/html

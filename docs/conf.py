@@ -31,8 +31,14 @@ release = '0.1.0'
 extensions = [
     'sphinx.ext.todo',
     'sphinx.ext.viewcode',
-    'sphinx.ext.autodoc'
+    'sphinx.ext.autodoc',
+    'sphinx.ext.intersphinx',
+    'sphinxcontrib.github',
+    'sphinxcontrib.issuetracker',
 ]
+
+issuetracker = 'github'
+issuetracker_project = 'mauritiusdadd/python-spex'
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
