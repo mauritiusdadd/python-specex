@@ -12,6 +12,10 @@ Welcome to python-spex's documentation!
 .. toctree::
    spex
    rrspex
+   lines
+   stack
+   utils
+   zeropoints
    :maxdepth: 2
    :caption: Contents:
 
