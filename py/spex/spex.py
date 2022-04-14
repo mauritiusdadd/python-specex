@@ -926,8 +926,19 @@ def spex():
                 (cutout_size/2.0, cutout_size/2.0),
                 width=args.aperture_size / cut_pixelscale,
                 height=args.aperture_size / cut_pixelscale,
-                edgecolor='green',
+                edgecolor='#0000ff',
                 facecolor='none',
+                ls='-',
+                fill=False
+            )
+            axs[1].add_patch(aperture)
+            aperture = Ellipse(
+                (cutout_size/2.0, cutout_size/2.0),
+                width=args.aperture_size / cut_pixelscale,
+                height=args.aperture_size / cut_pixelscale,
+                edgecolor='#00ff00',
+                facecolor='none',
+                ls='--',
                 fill=False
             )
             axs[1].add_patch(aperture)

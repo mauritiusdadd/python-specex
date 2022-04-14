@@ -277,10 +277,10 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
         ]).transpose(1, 2, 0)
 
         if vmin is not None:
-            cutout[cutout < vmin] = vmin
+            cutout[cutout <= vmin] = vmin
 
         if vmax is not None:
-            cutout[cutout > vmax] = vmax
+            cutout[cutout >= vmax] = vmax
 
         cutout -= np.nanmin(cutout)
         cutout /= np.nanmax(cutout)
@@ -402,13 +402,41 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
                 label=f'best template [{best_template.full_type}]'
             )
 
-        # Plotting absorption lines lines
-        lines_to_plot = getlines(
+        # Plotting absorption lines
+        absorption_lines = getlines(
             line_type='A', wrange=wavelenghts, z=lines_z
         )
-        for line_lam, line_name, line_type in lines_to_plot:
+        for line_lam, line_name, line_type in absorption_lines:
             ax0.axvline(
-                line_lam, color='green', ls='--', lw=1, alpha=0.7
+                line_lam, color='green', ls='--', lw=1, alpha=0.5,
+                label='absorption lines'
+            )
+            ax0.text(
+                line_lam, 0.02, line_name, rotation=90,
+                transform=ax0.get_xaxis_transform(),
+            )
+
+        # Plotting emission lines
+        emission_lines = getlines(
+            line_type='E', wrange=wavelenghts, z=lines_z
+        )
+        for line_lam, line_name, line_type in emission_lines:
+            ax0.axvline(
+                line_lam, color='red', ls='--', lw=1, alpha=0.5,
+                label='emission lines'
+            )
+            ax0.text(
+                line_lam, 0.02, line_name, rotation=90,
+                transform=ax0.get_xaxis_transform(),
+            )
+
+        # Plotting emission/absorption lines
+        emission_lines = getlines(
+            line_type='AE', wrange=wavelenghts, z=lines_z
+        )
+        for line_lam, line_name, line_type in emission_lines:
+            ax0.axvline(
+                line_lam, color='yellow', ls='--', lw=1, alpha=0.5,
             )
             ax0.text(
                 line_lam, 0.02, line_name, rotation=90,
@@ -456,7 +484,14 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
             'edgecolor': 'none',
         }
     )
-    _ = ax0.legend(loc='upper left')
+
+    handles, labels = ax0.get_legend_handles_labels()
+    newLabels, newHandles = [], []
+    for handle, label in zip(handles, labels):
+        if label not in newLabels:
+            newLabels.append(label)
+            newHandles.append(handle)
+    _ = ax0.legend(newHandles, newLabels, loc='upper left')
     plt.tight_layout()
     return fig, [ax0, ax1, ax2]
 

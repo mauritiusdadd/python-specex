@@ -15,7 +15,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name='spex',
-    version='0.2.1',
+    version='0.2.2',
     author='Maurizio D\'Addona',
     author_email='mauritiusdadd@gmail.com',
     url='https://github.com/mauritiusdadd/python-spex',
