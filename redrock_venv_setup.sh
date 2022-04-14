@@ -1,5 +1,32 @@
 #!/bin/bash
 
+args=$(getopt -l "help" -l "noenv" -o "h" -- "$@")
+
+eval set -- "$args"
+
+while [ $# -ge 1 ]; do
+        case "$1" in
+                --)
+                    # No more options left.
+                    shift
+                    break
+                   ;;
+                --noenv)
+                        NO_PYTHON_ENV=1
+                        shift
+                        ;;
+                -h|--help)
+                        echo ""
+                        echo "    -h         Show this help message."
+                        echo "    --noenv    Do not create a virtual python environment"
+                        echo "               and install the package in the current system."
+                        exit 0
+                        ;;
+        esac
+
+        shift
+done
+
 #
 # Utilities needed to download packages
 #
@@ -59,18 +86,21 @@ function install_desi_pkg() (
 # Installation procedure
 #
 
-# Step 1: create a python virtual environment so we do not mess up the
-#         system-wide python installation. Let's also reuse the already
-#         installed packages.
-python3 -m venv --system-site-packages "redrock-venv"
-mkdir -p "redrock-venv/pkg"
-curr_dir="$(pwd)"
+if [ -z $NO_PYTHON_ENV ]; then
 
-# Step 2: activate the virtual environment.
+  # Step 1: create a python virtual environment so we do not mess up the
+  #         system-wide python installation. Let's also reuse the already
+  #         installed packages.
+  python3 -m venv --system-site-packages "redrock-venv"
+  mkdir -p "redrock-venv/pkg"
+  curr_dir="$(pwd)"
 
-. redrock-venv/bin/activate || exit 1
+  # Step 2: activate the virtual environment.
 
-cd "redrock-venv/pkg"
+  . redrock-venv/bin/activate || exit 1
+
+  cd "redrock-venv/pkg"
+fi
 
 # Step 3: install required python packages.
 pip install numpy scipy astropy numba sqlalchemy healpy requests fitsio \
