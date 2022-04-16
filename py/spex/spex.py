@@ -37,6 +37,7 @@ import sys
 import argparse
 
 import numpy as np
+from scipy.signal import savgol_filter
 from astropy import wcs
 from astropy.table import Table, Column
 from astropy.io import fits
@@ -119,7 +120,13 @@ def __argshandler():
 
     parser.add_argument(
         '--nspectra', metavar='N', type=int, default=0,
-        help='number of spectra to extract (usefull for debugging purposes).'
+        help='Number of spectra to extract (usefull for debugging purposes).'
+    )
+
+    parser.add_argument(
+        '--sn-threshold', metavar='SN_THRESH', type=float, default=1.5,
+        help='Set the signal to Noise ratio threshold: objects with their '
+        'spectrum having a SN ratio lower than threshold will be ignored.'
     )
 
     parser.add_argument(
@@ -267,8 +274,7 @@ def __argshandler():
     )
 
     if HAS_RR:
-        rr_help_note = ' NOTE that in order to use this option you must ' \
-                       'have redrock installed and functional.'
+        rr_help_note = ''
     else:
         rr_help_note = ' (WARNING: this option is unavailable since redrock' \
                        ' seems not to be installed).'
@@ -297,6 +303,11 @@ def __argshandler():
         "--mp", type=int, default=0, required=False,
         help="if not using MPI, the number of multiprocessing processes to use"
         " (defaults to half of the hardware threads). " + rr_help_note
+    )
+
+    parser.add_argument(
+        "-t", "--templates", type=str, default=None, required=False,
+        help="template file or directory. " + rr_help_note
     )
 
     args = parser.parse_args()
@@ -784,6 +795,22 @@ def spex():
 
         obj_spectrum = trasposed_spec[mask].sum(axis=0)
 
+        # Smoothing the spectrum to get a crude approximation of the continuum
+        smoothed_spec = savgol_filter(obj_spectrum, 51, 11)
+
+        # Subtract the smoothed spectrum to the spectrum itself to get a
+        # crude estimation of the noise
+        noise_spec = np.nanstd(obj_spectrum - smoothed_spec)
+
+        # Get the mean value of the spectrum
+        obj_mean_spec = np.nanmean(obj_spectrum)
+
+        # Get the mean Signal to Noise ratio
+        sn_spec = obj_mean_spec / np.nanmean(noise_spec)
+
+        if sn_spec < args.sn_threshold:
+            continue
+
         if args.no_nans is True:
             obj_spec_nan_mask = np.isnan(obj_spectrum)
             obj_spectrum[obj_spec_nan_mask] = 0
@@ -804,7 +831,8 @@ def spex():
             'DEC': (obj_dec, "Dec of the center of the object"),
             'NPIX': (np.sum(mask), 'Number of pixels used for this spectra'),
             'HISTORY': f'Extracted on {str(my_time)}',
-            'ID': obj_id
+            'ID': obj_id,
+            'SN': (sn_spec, ""),
         }
 
         # Copy the spectral part of the WCS into the new FITS
@@ -812,9 +840,13 @@ def spex():
 
         if var_hdu is not None:
             obj_spectrum_var = trasposed_var[mask].sum(axis=0)
+            sn_var = obj_mean_spec / np.sqrt(np.nanmean(obj_spectrum_var))
+
             if args.no_nans:
                 max_var = np.nanmax(obj_spectrum_var)
                 obj_spectrum_var[obj_spec_nan_mask] = 3 * max_var
+
+            main_header['SN_VAR'] = (sn_var, "")
         else:
             obj_spectrum_var = None
 
@@ -857,8 +889,22 @@ def spex():
         if args.mp is not None:
             rrspex_options += ['--mp', f'{args.nminima:d}']
 
+        if args.templates is not None:
+            rrspex_options += ['--templates', f'{args.templates}']
+
         rrspex_options += out_specfiles
         targets, zfit = rrspex(options=rrspex_options)
+
+        stacked_cube = stack(spec_hdu.data)
+
+        if args.check_images:
+            fig = plt.figure(figsize=(10, 10))
+            ax = plt.subplot(projection=celestial_wcs)
+            logimg, cvmin, cvmax = getlogimg(stacked_cube)
+            ax.imshow(logimg, origin='lower', vmin=cvmin, vmax=cvmax)
+            fig.savefig("stacked_cube.png")
+            plt.tight_layout()
+            plt.close(fig)
 
         if args.cutouts_image:
             cutouts_image = fits.getdata(args.cutouts_image).transpose(1, 2, 0)
@@ -874,7 +920,7 @@ def spex():
                 )
             ]
         else:
-            cutouts_image = stack(spec_hdu.data)
+            cutouts_image = stacked_cube
             cutouts_wcs = None
             cutout_wcs_frame = wcs_frame
             cut_vmin, cut_vmax = None, None
@@ -952,7 +998,7 @@ def spex():
             )
 
             axs[2].text(
-                0, 0.7,
+                0, 0.5,
                 f"RA: {obj_ra_str}\n"
                 f"DEC: {obj_dec_str}\n",
                 ha='left',

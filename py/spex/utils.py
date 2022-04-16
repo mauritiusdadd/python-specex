@@ -185,8 +185,8 @@ def getvclip(img, vclip=0.5):
         median + vclip*std.
 
     """
-    vmin = np.nanmedian(img) - vclip*np.nanstd(img)
-    vmax = np.nanmedian(img) + vclip*np.nanstd(img)
+    vmin = np.nanmedian(img) - 0.5*vclip*np.nanstd(img)
+    vmax = np.nanmedian(img) + 0.5*vclip*np.nanstd(img)
     return vmin, vmax
 
 
@@ -295,7 +295,7 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
     return cutout, cutout_wcs
 
 
-def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
+def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                     cutout=None, wave_units='Angstrom', flux_units=''):
     """
     Plot the check images for the fitted targets.
@@ -332,16 +332,15 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
 
     """
     flux_units = flux_units.replace('**', '^')
-    zbest = zfit[zfit['znum'] == 0]
 
-    t_best_data = zbest[zbest['targetid'] == target.id][0]
+    t_best_data = zbest[zbest['TARGETID'] == target.id][0]
 
     best_template = None
     if plot_template:
         for t in plot_template:
             if (
-                t.template_type == t_best_data['spectype'] and
-                t.sub_type == t_best_data['subtype']
+                t.template_type == t_best_data['SPECTYPE'] and
+                t.sub_type == t_best_data['SUBTYPE']
             ):
                 best_template = t
                 break
@@ -367,7 +366,7 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
         # If we plot the spectrum at restframe wavelenghts, then we must use
         # rest frame wavelengths also for the lines.
         if rest_frame:
-            wavelenghts = target_spec.wave / (1 + t_best_data['z'])
+            wavelenghts = target_spec.wave / (1 + t_best_data['Z'])
             lines_z = 0
         else:
             wavelenghts = target_spec.wave
@@ -389,7 +388,7 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
 
         if plot_template and best_template:
             template_flux = best_template.eval(
-                t_best_data['coeff'],
+                t_best_data['COEFF'],
                 wavelenghts,
                 lines_z,
             )
@@ -470,8 +469,14 @@ def plot_zfit_check(target, zfit, plot_template=None, rest_frame=True,
     ax1.axis('off')
     ax2.axis('off')
 
-    splabel = f"z = {t_best_data['z']:.2f} ({t_best_data['spectype']}"
-    splabel += f" {t_best_data['subtype']})" if t_best_data['subtype'] else ')'
+    splabel = f"z: {t_best_data['Z']:.2f} ± {t_best_data['ZERR']:.2e}\n"
+    splabel += f"best template: {t_best_data['SPECTYPE']} "
+    splabel += f"{t_best_data['SUBTYPE']}\n" if t_best_data['SUBTYPE'] else'\n'
+    try:
+        splabel += f"SN ratio: {t_best_data['SN']:.2f}\n"
+    except KeyError:
+        pass
+    splabel += f"z-fit warn: {t_best_data['ZWARN']}"
 
     ax2.text(
         0, 0.9,

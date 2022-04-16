@@ -44,7 +44,7 @@ import numpy as np
 from scipy import sparse
 
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import Table, join 
 import astropy.wcs as wcs
 import matplotlib.pyplot as plt
 
@@ -182,6 +182,8 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     """
     targets = []
     targetids = []
+    sn_vals = []
+    sn_var_vals = []
     for j, fits_file in enumerate(spectra_fits_list):
         hdul = fits.open(fits_file)
 
@@ -247,6 +249,8 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
                 "do not match variance data one!"
             )
 
+        main_header = hdul[0].header
+
         # NOTE: Wavelenghts must be in Angstrom units
         pixel = np.arange(len(flux))
         lam = spec_wcs.pixel_to_world(pixel).Angstrom
@@ -257,13 +261,28 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
             R = np.eye(lam.shape[0])
             R = sparse.dia_matrix(R)
 
+        try:
+            s_n = main_header['SN']
+        except KeyError:
+            s_n = -1
+
+        try:
+            s_n_var = main_header['SN_VAR']
+        except KeyError:
+            s_n_var = -1
+
         rrspec = Spectrum(lam, flux, ivar, R, None)
         target = Target(spec_id, [rrspec])
         target.input_file = fits_file
         targets.append(target)
+        targetids.append(spec_id)
+        sn_vals.append(s_n)
+        sn_var_vals.append(s_n_var)
 
     metatable = Table()
     metatable['TARGETID'] = targetids
+    metatable['SN'] = sn_vals
+    metatable['SN_VAR'] = sn_var_vals
 
     return targets, metatable
 
@@ -514,23 +533,28 @@ def rrspex(options=None, comm=None):
                 write_zscan(args.output, scandata, zfit, clobber=True)
             _ = elapsed(start, "Writing zscan data took", comm=comm)
 
+        zbest = None
         if args.zbest:
             start = elapsed(None, "", comm=comm)
             if comm_rank == 0:
                 zbest = zfit[zfit['znum'] == 0]
 
                 # Remove extra columns not needed for zbest
-                zbest.remove_columns(['zz', 'zzchi2', 'znum'])
+                # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
+                zbest.remove_columns(['znum'])
 
                 # Change to upper case like DESI
                 for colname in zbest.colnames:
                     if colname.islower():
                         zbest.rename_column(colname, colname.upper())
 
+                zbest = join(zbest, meta)
+
                 template_version = {
                     t._template.full_type: t._template._version
                     for t in dtemplates
                 }
+
                 archetype_version = None
                 if args.archetypes is not None:
                     archetypes = All_archetypes(
@@ -540,6 +564,7 @@ def rrspex(options=None, comm=None):
                         name: arch._version
                         for name, arch in archetypes.items()
                     }
+
                 write_zbest(
                     args.zbest, zbest, template_version, archetype_version
                 )
@@ -564,7 +589,7 @@ def rrspex(options=None, comm=None):
         import IPython
         IPython.embed()
 
-    return targets, zfit
+    return targets, zbest
 
 
 if __name__ == '__main__':
