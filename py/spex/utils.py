@@ -36,9 +36,8 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+from scipy.signal import savgol_filter
 from astropy.nddata import Cutout2D
-from astropy.wcs import WCS
-from astropy.io import fits
 
 from .lines import getlines
 
@@ -78,8 +77,6 @@ def getpbar(partial, total=None, wid=32, common_char='\u2588',
     pbar_full += upper_char*(total_prog - common_prog)
     pbar_full += lower_char*(prog - common_prog)
     return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
-
-
 
 
 def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
@@ -384,6 +381,14 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
             lw=2,
             alpha=1,
             label='spectrum'
+        )
+
+        ax0.plot(
+            wavelenghts, savgol_filter(target_spec.flux, 51, 11),
+            ls='-',
+            lw=1,
+            alpha=0.8,
+            label='smoothed spectrum'
         )
 
         if plot_template and best_template:

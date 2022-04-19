@@ -52,7 +52,7 @@ from .utils import plot_zfit_check, getcutout, getlogimg, gethdu, getpbar
 from .utils import stack
 
 try:
-    from .rrspex import rrspex
+    from .rrspex import rrspex, get_templates
 except ImportError:
     HAS_RR = False
 else:
@@ -162,15 +162,6 @@ def __argshandler():
     parser.add_argument(
         '--invert-mask', action='store_true', default=False,
         help='Set whether to use the inverse of the cube mask.'
-    )
-
-    parser.add_argument(
-        '--no-nans', action='store_true', default=False,
-        help='Set whether to remove NaNs from the spectrum. If this argument '
-        'is specified, then the extracted spectrum is filtered and NaNs are '
-        'set to zero. If variance extension is '
-        'present, the variances corresponding to NaNs are set to very high '
-        'values.'
     )
 
     parser.add_argument(
@@ -308,6 +299,11 @@ def __argshandler():
     parser.add_argument(
         "-t", "--templates", type=str, default=None, required=False,
         help="template file or directory. " + rr_help_note
+    )
+
+    parser.add_argument(
+        "--debug", action='store_true', default=False,
+        help="Enable some debug otupout on plots and on the console."
     )
 
     args = parser.parse_args()
@@ -753,6 +749,7 @@ def spex():
         key_id = args.key_id
 
     out_specfiles = []
+    spex_apertures = {}  # these values are in physical units (arcsecs)
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
@@ -773,15 +770,32 @@ def spex():
             y_over_b /= source[args.key_b]
             y_over_b = y_over_b ** 2
 
+            spex_apertures[source[key_id]] = (
+                source[args.key_a] * pixelscale,
+                source[args.key_b] * pixelscale,
+                source[args.key_theta]
+            )
+
             mask = (x_over_a + y_over_b) < (1.0/source[args.key_kron])
 
         elif mode == 'kron_circular':
             kron_circular = source[args.key_kron] * source[args.key_b]
             kron_circular /= source[args.key_a]
 
+            spex_apertures[source[key_id]] = (
+                kron_circular * pixelscale,
+                kron_circular * pixelscale,
+                0
+            )
+
             mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
 
         elif mode == 'circular_aperture':
+            spex_apertures[source[key_id]] = (
+                args.aperture_size,
+                args.aperture_size,
+                0
+            )
             mask = (xx_tr**2 + yy_tr**2) < args.aperture_size / pixelscale
 
         if cube_footprint is not None:
@@ -811,10 +825,6 @@ def spex():
         if sn_spec < args.sn_threshold:
             continue
 
-        if args.no_nans is True:
-            obj_spec_nan_mask = np.isnan(obj_spectrum)
-            obj_spectrum[obj_spec_nan_mask] = 0
-
         my_time = Time.now()
         my_time.format = 'isot'
 
@@ -841,10 +851,6 @@ def spex():
         if var_hdu is not None:
             obj_spectrum_var = trasposed_var[mask].sum(axis=0)
             sn_var = obj_mean_spec / np.sqrt(np.nanmean(obj_spectrum_var))
-
-            if args.no_nans:
-                max_var = np.nanmax(obj_spectrum_var)
-                obj_spectrum_var[obj_spec_nan_mask] = 3 * max_var
 
             main_header['SN_VAR'] = (sn_var, "")
         else:
@@ -901,7 +907,13 @@ def spex():
             fig = plt.figure(figsize=(10, 10))
             ax = plt.subplot(projection=celestial_wcs)
             logimg, cvmin, cvmax = getlogimg(stacked_cube)
-            ax.imshow(logimg, origin='lower', vmin=cvmin, vmax=cvmax)
+            ax.imshow(
+                logimg,
+                origin='lower',
+                vmin=cvmin,
+                vmax=cvmax,
+                cmap='jet'
+            )
             fig.savefig("stacked_cube.png")
             plt.tight_layout()
             plt.close(fig)
@@ -934,7 +946,13 @@ def spex():
             ]
         cut_pixelscale = np.nanmean(cut_pixelscale)
 
-        for target in targets:
+        print("", file=sys.stderr)
+        for i, target in enumerate(targets):
+            progress = (i + 1) / len(targets)
+            sys.stderr.write(
+                f"\rGenerating previews {getpbar(progress)} {progress:.2%}\r"
+            )
+            sys.stderr.flush()
             obj = sources[sources[args.key_id] == target.id][0]
 
             obj_skycoord = SkyCoord(
@@ -959,32 +977,47 @@ def spex():
                 vmax=cut_vmax
             )
 
+            if args.debug:
+                plot_templates = get_templates(args.templates)
+            else:
+                plot_templates = None
+
             fig, axs = plot_zfit_check(
                 target,
                 zfit,
-                plot_template=None,
+                plot_template=plot_templates,
                 cutout=cutout,
                 wave_units=spec_hdu.header['CUNIT3'],
                 flux_units=spec_hdu.header['BUNIT'],
             )
 
+            e_wid = spex_apertures[target.id][0] / cut_pixelscale
+            e_hei = spex_apertures[target.id][1] / cut_pixelscale
+            e_ang = spex_apertures[target.id][2]
+
             aperture = Ellipse(
                 (cutout_size/2.0, cutout_size/2.0),
-                width=args.aperture_size / cut_pixelscale,
-                height=args.aperture_size / cut_pixelscale,
+                width=e_wid,
+                height=e_hei,
+                angle=e_ang,
                 edgecolor='#0000ff',
                 facecolor='none',
                 ls='-',
+                lw=1,
+                alpha=0.8,
                 fill=False
             )
             axs[1].add_patch(aperture)
             aperture = Ellipse(
                 (cutout_size/2.0, cutout_size/2.0),
-                width=args.aperture_size / cut_pixelscale,
-                height=args.aperture_size / cut_pixelscale,
+                width=e_wid,
+                height=e_hei,
+                angle=e_ang,
                 edgecolor='#00ff00',
                 facecolor='none',
                 ls='--',
+                lw=1,
+                alpha=0.8,
                 fill=False
             )
             axs[1].add_patch(aperture)

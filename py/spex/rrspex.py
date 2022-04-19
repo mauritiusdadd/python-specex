@@ -59,7 +59,7 @@ from redrock.archetypes import All_archetypes
 from .utils import plot_zfit_check
 
 
-def get_templates(template_types=[], filepath=False):
+def get_templates(template_types=[], filepath=False, templates=None):
     """
     Get avilable templates.
 
@@ -71,6 +71,10 @@ def get_templates(template_types=[], filepath=False):
         The default is [].
     filepath : boot, optional
         If it's true then return the file paths instead of actual templates.
+    templates : str, optional
+        The path of a template file or of a directory containing templates
+        files. If None, templates are searched in the default redrock path.
+        The default value is None.
 
     Returns
     -------
@@ -78,8 +82,11 @@ def get_templates(template_types=[], filepath=False):
         The available templates or the corresponding file paths.
 
     """
+    if templates is not None and os.path.isfile(templates):
+        return [Template(templates), ]
+
     available_templates = []
-    for t in find_templates():
+    for t in find_templates(templates):
         templ = Template(t)
         if not template_types or templ.template_type in template_types:
             if filepath:
@@ -216,7 +223,6 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         else:
             flux = hdul[spec_hdu].data
             spec_wcs = wcs.WCS(hdul[spec_hdu].header)
-        flux = flux.astype('float32')
 
         if var_hdu is None:
             for hdu in hdul:
@@ -254,6 +260,14 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         # NOTE: Wavelenghts must be in Angstrom units
         pixel = np.arange(len(flux))
         lam = spec_wcs.pixel_to_world(pixel).Angstrom
+
+        flux = flux.astype('float32')
+        flux_not_nan_mask = ~np.isnan(flux)
+        flux = flux[flux_not_nan_mask]
+        ivar = ivar[flux_not_nan_mask]
+        lam = lam[flux_not_nan_mask]
+        if wd is not None:
+            wd = wd[flux_not_nan_mask]
 
         # If now wavelenght dispersion information is present, then fallback
         # to a uniform resolution model (i.e. an identiry matrix)
@@ -513,7 +527,9 @@ def rrspex(options=None, comm=None):
 
         if args.plot_zfit:
             if comm_rank == 0:
-                available_templates = get_templates()
+                available_templates = get_templates(
+                    templates_dir=args.templates
+                )
                 for target in targets:
                     fig, ax = plot_zfit_check(
                         target,
