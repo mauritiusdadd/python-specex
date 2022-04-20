@@ -130,6 +130,14 @@ def __argshandler():
     )
 
     parser.add_argument(
+        '--no-nans', action='store_true', default=False,
+        help="This option tells the program to replace eventual NaNs in the"
+        "extracted spectrum with linarly interpolated data. In this case the "
+        "output fits files contain an additional extension named 'NAN_MASK' "
+        "that identifies the previously bad pixels in the spectrum."
+    )
+
+    parser.add_argument(
         '--info-hdu', metavar='INFO_HDU', type=int, default=0,
         help='The HDU containing cube metadata. If this argument '
         'Set this to -1 to automatically detect the HDU containing the info. '
@@ -400,7 +408,7 @@ def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
 
 
 def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
-                    spec_hdu_header, obj_spectrum_var=None):
+                    spec_hdu_header, obj_spectrum_var=None, no_nans=False):
     """
     Generate a fits containing the spectral data.
 
@@ -419,7 +427,10 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
         Header of the HDU of the original cube containing the spectral data.
     obj_spectrum_var : numpy.ndarray (default=None)
         The variance of the spectral data.
-
+    no_nans : bool, optional
+        If true, nan values in the spectrum are replaced by a linear
+        interpolation. In this case an additional extension is added to the
+        fits file, containing a mask for identifying the previously bax pixels.
     Returns
     -------
     hdul : astropy.io.fits.HDUList object
@@ -446,6 +457,13 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
     spec_header["CDELT1"] = spec_hdu_header["CD3_3"]
     spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
 
+    if no_nans:
+        nanmask = np.isnan(obj_spectrum)
+        obj_spectrum[nanmask] = 0
+        obj_spectrum_var[nanmask] = np.nanmax(obj_spectrum_var) * 100.0
+    else:
+        nanmask = None
+
     hdu_list = [
         main_hdu,
         fits.ImageHDU(
@@ -471,6 +489,14 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
                 data=obj_spectrum_var,
                 header=var_header,
                 name='VARIANCE'
+            )
+        )
+
+    if nanmask is not None:
+        hdu_list.append(
+            fits.ImageHDU(
+                data=nanmask.astype('uint8'),
+                name='NAN_MASK'
             )
         )
 
@@ -859,7 +885,7 @@ def spex():
         hdul = getspsinglefits(
             main_header, spec_wcs_header,
             obj_spectrum, spec_hdu.header,
-            obj_spectrum_var
+            obj_spectrum_var, no_nans=args.no_nans
         )
 
         out_file_name = os.path.join(outdir, outname)

@@ -224,6 +224,13 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
             flux = hdul[spec_hdu].data
             spec_wcs = wcs.WCS(hdul[spec_hdu].header)
 
+        for hdu in hdul:
+            if hdu.name.lower() in ['mask', 'nanmask', 'nan_mask', 'nans']:
+                nanmask = hdu.data.astype(bool)
+                break
+        else:
+            nanmask = None
+
         if var_hdu is None:
             for hdu in hdul:
                 if hdu.name.lower() in ['var', 'variance', 'stat']:
@@ -262,7 +269,12 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         lam = spec_wcs.pixel_to_world(pixel).Angstrom
 
         flux = flux.astype('float32')
-        flux_not_nan_mask = ~np.isnan(flux)
+
+        if nanmask is None:
+            flux_not_nan_mask = ~np.isnan(flux)
+        else:
+            flux_not_nan_mask = ~nanmask
+
         flux = flux[flux_not_nan_mask]
         ivar = ivar[flux_not_nan_mask]
         lam = lam[flux_not_nan_mask]
