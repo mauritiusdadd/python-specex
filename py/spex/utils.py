@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from scipy.signal import savgol_filter
 from astropy.nddata import Cutout2D
+from astropy.visualization import ZScaleInterval
 
 from .lines import getlines
 
@@ -163,7 +164,7 @@ def getaspect(ax):
     return disp_ratio / data_ratio
 
 
-def getvclip(img, vclip=0.5):
+def getvclip(img, vclip=0.25, nsamples=1000):
     """
     Get the clipping values to use with imshow function.
 
@@ -182,8 +183,9 @@ def getvclip(img, vclip=0.5):
         median + vclip*std.
 
     """
-    vmin = np.nanmedian(img) - 0.5*vclip*np.nanstd(img)
-    vmax = np.nanmedian(img) + 0.5*vclip*np.nanstd(img)
+    img = np.ma.masked_array(img, mask=np.isnan(img))
+    zsc = ZScaleInterval(nsamples, contrast=vclip, krej=10)
+    vmin, vmax = zsc.get_limits(img)
     return vmin, vmax
 
 
@@ -392,19 +394,29 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
         )
 
         if plot_template and best_template:
-            template_flux = best_template.eval(
-                t_best_data['COEFF'],
-                wavelenghts,
-                lines_z,
-            )
+            try:
+                coeffs = t_best_data['COEFF'][:best_template.nbasis]
+                template_flux = best_template.eval(
+                    coeffs,
+                    wavelenghts,
+                    lines_z,
+                )
 
-            ax0.plot(
-                wavelenghts, template_flux,
-                ls='-',
-                lw=2,
-                alpha=0.7,
-                label=f'best template [{best_template.full_type}]'
-            )
+                ax0.plot(
+                    wavelenghts, template_flux,
+                    ls='-',
+                    lw=1,
+                    alpha=0.7,
+                    c='red',
+                    label=f'best template [{best_template.full_type}]'
+                )
+            except AssertionError:
+                print(
+                    f"Template warning for object {target.id}\n"
+                    f"  nbasis: {best_template.nbasis}\n"
+                    f"  coeffs: {len(coeffs)}",
+                    file=sys.stderr
+                )
 
         # Plotting absorption lines
         absorption_lines = getlines(

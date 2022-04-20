@@ -901,9 +901,10 @@ def spex():
         rrspex_options += out_specfiles
         targets, zfit = rrspex(options=rrspex_options)
 
-        stacked_cube = stack(spec_hdu.data)
+        if args.debug or not args.cutouts_image:
+            stacked_cube = stack(spec_hdu.data)
 
-        if args.check_images:
+        if args.debug:
             fig = plt.figure(figsize=(10, 10))
             ax = plt.subplot(projection=celestial_wcs)
             logimg, cvmin, cvmax = getlogimg(stacked_cube)
@@ -946,6 +947,11 @@ def spex():
             ]
         cut_pixelscale = np.nanmean(cut_pixelscale)
 
+        if args.debug:
+            plot_templates = get_templates(templates=args.templates)
+        else:
+            plot_templates = None
+
         print("", file=sys.stderr)
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)
@@ -976,11 +982,6 @@ def spex():
                 vmin=cut_vmin,
                 vmax=cut_vmax
             )
-
-            if args.debug:
-                plot_templates = get_templates(args.templates)
-            else:
-                plot_templates = None
 
             fig, axs = plot_zfit_check(
                 target,
