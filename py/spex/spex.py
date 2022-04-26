@@ -444,7 +444,13 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
     # how the spectrum was extracted
     main_hdu = fits.PrimaryHDU()
     for key, val in main_header.items():
-        main_hdu.header[key] = val
+        try:
+            main_hdu.header[key] = val
+        except ValueError:
+            print(
+                f"Invalid value for spec header: {key} = {val}",
+                file=sys.stderr
+            )
 
     spec_header = fits.Header()
     spec_header['BUNIT'] = spec_hdu_header['BUNIT']
@@ -692,7 +698,22 @@ def spex():
     wcs_frame = wcs.utils.wcs_to_celestial_frame(img_wcs)
 
     ra_unit = sources[args.key_ra].unit
+    if ra_unit is None:
+        if args.debug:
+            print(
+                "RA data has no units, assuming values are in degrees!",
+                file=sys.stderr
+            )
+        ra_unit = 'deg'
+
     dec_unit = sources[args.key_dec].unit
+    if dec_unit is None:
+        if args.debug:
+            print(
+                "DEC data has no units, assuming values are in degrees!",
+                file=sys.stderr
+            )
+        dec_unit = 'deg'
 
     obj_sky_coords = SkyCoord(
         sources[args.key_ra], sources[args.key_dec],
@@ -780,6 +801,12 @@ def spex():
         progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
         sys.stderr.flush()
+
+        if key_id is not None:
+            obj_id = source[key_id]
+        else:
+            obj_id = i
+
         obj_ra = source[args.key_ra]
         obj_dec = source[args.key_dec]
         xx_tr = xx - source['CUBE_X_IMAGE']
@@ -835,6 +862,15 @@ def spex():
 
         obj_spectrum = trasposed_spec[mask].sum(axis=0)
 
+        if np.sum(~np.isnan(obj_spectrum)) == 0:
+            if args.debug:
+                print(
+                    f"WARNING: object {obj_id} has no spectral data, "
+                    "skipping...",
+                    file=sys.stderr
+                )
+            continue
+
         # Smoothing the spectrum to get a crude approximation of the continuum
         smoothed_spec = savgol_filter(obj_spectrum, 51, 11)
 
@@ -853,11 +889,6 @@ def spex():
 
         my_time = Time.now()
         my_time.format = 'isot'
-
-        if key_id is not None:
-            obj_id = source[key_id]
-        else:
-            obj_id = i
 
         outname = f"spec_{obj_id}.fits"
 
@@ -925,7 +956,7 @@ def spex():
             rrspex_options += ['--templates', f'{args.templates}']
 
         rrspex_options += out_specfiles
-        targets, zfit = rrspex(options=rrspex_options)
+        targets, zfit, scandata = rrspex(options=rrspex_options)
 
         if args.debug or not args.cutouts_image:
             stacked_cube = stack(spec_hdu.data)

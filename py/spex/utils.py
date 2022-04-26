@@ -36,6 +36,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+from matplotlib import patches
 from scipy.signal import savgol_filter
 from astropy.nddata import Cutout2D
 from astropy.visualization import ZScaleInterval
@@ -361,11 +362,19 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     ax0.set_title(f"object: {target.id}")
     ax0.set_aspect('auto')
 
+    try:
+        lam_mask = target.lam_mask
+    except AttributeError:
+        lam_mask = None
+
     for target_spec in target.spectra:
         # If we plot the spectrum at restframe wavelenghts, then we must use
         # rest frame wavelengths also for the lines.
+
         if rest_frame:
             wavelenghts = target_spec.wave / (1 + t_best_data['Z'])
+            if lam_mask is not None:
+                lam_mask = lam_mask / (1 + t_best_data['Z'])
             lines_z = 0
         else:
             wavelenghts = target_spec.wave
@@ -464,6 +473,35 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     ax0.set_xlabel(f'Wavelenght [{wave_units}]')
     ax0.set_ylabel(f'Wavelenght [{flux_units}]')
 
+    # Draw missing data or invalid data regions
+    if lam_mask is not None:
+        for lam_inter in lam_mask:
+            rect = patches.Rectangle(
+                (lam_inter[0], 0),
+                lam_inter[1] - lam_inter[0], 1,
+                transform=ax0.get_xaxis_transform(),
+                linewidth=1,
+                fill=True,
+                edgecolor='black',
+                facecolor='white',
+                hatch='///'
+            )
+            ax0.add_patch(rect)
+            if ((lam_inter[1] > w_min + 100) and (lam_inter[0] < w_max - 100)):
+                ax0.text(
+                    (lam_inter[0] + lam_inter[1]) / 2, 0.5,
+                    "MISSING DATA",
+                    transform=ax0.get_xaxis_transform(),
+                    va='center',
+                    ha='center',
+                    rotation=90,
+                    bbox={
+                        'facecolor': 'white',
+                        'edgecolor': 'black',
+                        'boxstyle': 'round,pad=0.5',
+                    }
+                )
+
     if cutout is not None:
         ax1.imshow(
             cutout,
@@ -486,7 +524,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     ax1.axis('off')
     ax2.axis('off')
 
-    splabel = f"z: {t_best_data['Z']:.2f} ± {t_best_data['ZERR']:.2e}\n"
+    splabel = f"z: {t_best_data['Z']:.4f} ± {t_best_data['ZERR']:.2e}\n"
     splabel += f"best template: {t_best_data['SPECTYPE']} "
     splabel += f"{t_best_data['SUBTYPE']}\n" if t_best_data['SUBTYPE'] else'\n'
     try:
@@ -516,6 +554,42 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     _ = ax0.legend(newHandles, newLabels, loc='upper left')
     plt.tight_layout()
     return fig, [ax0, ax1, ax2]
+
+
+def get_mask_intervals(mask):
+    """
+    Get intervals where mask is True.
+
+    Parameters
+    ----------
+    mask : numpy.ndarry
+        The mask array.
+
+    Returns
+    -------
+    regions : list of 2-tuples
+        List of intervals.
+
+    Example
+    -------
+    >>> mask = (0, 0, 0, 0 ,0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1 ,0 ,0)
+    >>> get_mask_intervals(mask)
+
+    [(5, 8), (10, 11), (14, 19)]
+    """
+    regions = []
+    r_start = -1
+    r_end = 0
+    in_region = False
+    for i, val in enumerate(mask):
+        if val and not in_region:
+            r_start = i
+            in_region = True
+        if in_region and not val:
+            r_end = i-1
+            in_region = False
+            regions.append((r_start, r_end))
+    return regions
 
 
 def stack(data, wave_mask=None):

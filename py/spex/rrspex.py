@@ -56,7 +56,7 @@ from redrock.zfind import zfind
 from redrock._version import __version__
 from redrock.archetypes import All_archetypes
 
-from .utils import plot_zfit_check
+from .utils import plot_zfit_check, get_mask_intervals
 
 
 def get_templates(template_types=[], filepath=False, templates=None):
@@ -275,6 +275,11 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         else:
             flux_not_nan_mask = ~nanmask
 
+        lam_mask = np.array([
+            (lam[m_start], lam[m_end])
+            for m_start, m_end in get_mask_intervals(~flux_not_nan_mask)
+        ])
+
         flux = flux[flux_not_nan_mask]
         ivar = ivar[flux_not_nan_mask]
         lam = lam[flux_not_nan_mask]
@@ -300,6 +305,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         rrspec = Spectrum(lam, flux, ivar, R, None)
         target = Target(spec_id, [rrspec])
         target.input_file = fits_file
+        target.lam_mask = lam_mask
         targets.append(target)
         targetids.append(spec_id)
         sn_vals.append(s_n)
@@ -617,8 +623,8 @@ def rrspex(options=None, comm=None):
         import IPython
         IPython.embed()
 
-    return targets, zbest
+    return targets, zbest, scandata
 
 
 if __name__ == '__main__':
-    rrspex()
+    _ = rrspex()
