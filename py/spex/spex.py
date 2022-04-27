@@ -32,11 +32,15 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+from __future__ import absolute_import, division, print_function
+
 import os
 import sys
 import argparse
 
 import numpy as np
+import multiprocessing
+
 from scipy.signal import savgol_filter
 from astropy import wcs
 from astropy.table import Table, Column
@@ -49,7 +53,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 from .utils import plot_zfit_check, getcutout, getlogimg, gethdu, getpbar
-from .utils import stack
+from .utils import stack, plot_scandata
 
 try:
     from .rrspex import rrspex, get_templates
@@ -289,11 +293,6 @@ def __argshandler():
     )
 
     parser.add_argument(
-        "--chi2-scan", type=str, default=None, required=False,
-        help="Load the chi2-scan from the input file. " + rr_help_note
-    )
-
-    parser.add_argument(
         "--nminima", type=int, default=3, required=False,
         help="the number of redshift minima to search. " + rr_help_note
     )
@@ -319,6 +318,9 @@ def __argshandler():
     if args.cutouts_image and not os.path.exists(args.cutouts_image):
         print(f"The file {args.cutouts_image} does not exist!")
         sys.exit(1)
+
+    if args.mp == 0:
+        args.mp = int(multiprocessing.cpu_count() / 4)
 
     return args
 
@@ -431,6 +433,7 @@ def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
         If true, nan values in the spectrum are replaced by a linear
         interpolation. In this case an additional extension is added to the
         fits file, containing a mask for identifying the previously bax pixels.
+
     Returns
     -------
     hdul : astropy.io.fits.HDUList object
@@ -692,10 +695,19 @@ def spex():
         exit_on_errors=False
     )
 
-    img_wcs = wcs.WCS(spec_hdu.header)
-    celestial_wcs = img_wcs.celestial
-    spectral_wcs = img_wcs.spectral
-    wcs_frame = wcs.utils.wcs_to_celestial_frame(img_wcs)
+    cube_wcs = wcs.WCS(spec_hdu.header)
+    celestial_wcs = cube_wcs.celestial
+    spectral_wcs = cube_wcs.spectral
+    wcs_frame = wcs.utils.wcs_to_celestial_frame(cube_wcs)
+
+    cube_pixelscale = [
+        units.Quantity(sc_val, u).to_value('arcsec')
+        for sc_val, u in zip(
+            wcs.utils.proj_plane_pixel_scales(celestial_wcs),
+            celestial_wcs.wcs.cunit
+        )
+    ]
+    cube_pixelscale = np.nanmean(cube_pixelscale)
 
     ra_unit = sources[args.key_ra].unit
     if ra_unit is None:
@@ -797,6 +809,10 @@ def spex():
 
     out_specfiles = []
     spex_apertures = {}  # these values are in physical units (arcsecs)
+    source_ids = []
+
+    valid_sources_mask = np.zeros(len(sources), dtype=bool)
+
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
@@ -823,7 +839,7 @@ def spex():
             y_over_b /= source[args.key_b]
             y_over_b = y_over_b ** 2
 
-            spex_apertures[source[key_id]] = (
+            spex_apertures[obj_id] = (
                 source[args.key_a] * pixelscale,
                 source[args.key_b] * pixelscale,
                 source[args.key_theta]
@@ -835,7 +851,7 @@ def spex():
             kron_circular = source[args.key_kron] * source[args.key_b]
             kron_circular /= source[args.key_a]
 
-            spex_apertures[source[key_id]] = (
+            spex_apertures[obj_id] = (
                 kron_circular * pixelscale,
                 kron_circular * pixelscale,
                 0
@@ -844,21 +860,19 @@ def spex():
             mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
 
         elif mode == 'circular_aperture':
-            spex_apertures[source[key_id]] = (
+            # NOTE: in this mode, aperture is already in asrcseconds
+            spex_apertures[obj_id] = (
                 args.aperture_size,
                 args.aperture_size,
                 0
             )
-            mask = (xx_tr**2 + yy_tr**2) < args.aperture_size / pixelscale
+            mask = (xx_tr**2 + yy_tr**2) < args.aperture_size / cube_pixelscale
 
         if cube_footprint is not None:
             mask &= cube_footprint
 
         if np.sum(mask) == 0:
             continue
-
-        if args.check_images:
-            extracted_data += mask
 
         obj_spectrum = trasposed_spec[mask].sum(axis=0)
 
@@ -924,7 +938,26 @@ def spex():
             out_file_name,
             overwrite=True
         )
+
+        # If we arrived here, then the object has a vail spectrum and can be
+        # saved. Let's also mark the object as valid and store its ID
         out_specfiles.append(os.path.realpath(out_file_name))
+        source_ids.append(obj_id)
+        valid_sources_mask[i] = True
+
+        # Add also the extracted pixels to the extraction map
+        if args.check_images:
+            extracted_data += mask
+
+    # Discard all invalid sources
+    sources = sources[valid_sources_mask]
+    source_ids = np.array(source_ids)
+
+    if args.debug:
+        print(
+            f"\nExtracted {len(sources)} valid sources\n",
+            file=sys.stderr
+        )
 
     if args.checkimg_outdir is not None:
         check_images_outdir = args.checkimg_outdir
@@ -934,6 +967,9 @@ def spex():
     if not os.path.isdir(check_images_outdir):
         os.mkdir(check_images_outdir)
 
+    # NOTE: for some weird reason redrock hangs if any figure has been
+    #       created using matplotlib. Do all the plottings only after
+    #       redrock has finished!
     if args.zbest:
         rrspex_options = [
             '--zbest', args.zbest,
@@ -943,14 +979,11 @@ def spex():
         if args.priors is not None:
             rrspex_options += ['--priors', args.priors]
 
-        if args.chi2_scan is not None:
-            rrspex_options += ['--chi2-scan', args.chi2_scan]
-
         if args.nminima is not None:
             rrspex_options += ['--nminima', f'{args.nminima:d}']
 
         if args.mp is not None:
-            rrspex_options += ['--mp', f'{args.nminima:d}']
+            rrspex_options += ['--mp', f'{args.mp:d}']
 
         if args.templates is not None:
             rrspex_options += ['--templates', f'{args.templates}']
@@ -1010,13 +1043,14 @@ def spex():
             plot_templates = None
 
         print("", file=sys.stderr)
+
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)
             sys.stderr.write(
                 f"\rGenerating previews {getpbar(progress)} {progress:.2%}\r"
             )
             sys.stderr.flush()
-            obj = sources[sources[args.key_id] == target.id][0]
+            obj = sources[source_ids == target.id][0]
 
             obj_skycoord = SkyCoord(
                 obj[args.key_ra],
@@ -1101,16 +1135,27 @@ def spex():
                 }
             )
 
-            figname = f'r{target.id}.png'
+            figname = f'spectrum_{target.id}.png'
             figname = os.path.join(check_images_outdir, figname)
             fig.savefig(figname, dpi=150)
             plt.close(fig)
+
+            if args.debug:
+                figname = f'scandata_{target.id}.png'
+                figname = os.path.join(check_images_outdir, figname)
+                fig, axs = plot_scandata(target, scandata)
+                fig.savefig(figname, dpi=150)
+                plt.close(fig)
 
     if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         ax.imshow(extracted_data, origin='lower')
         fig.savefig("sext_extraction_map.png")
         plt.close(fig)
+
+    if args.debug:
+        import IPython
+        IPython.embed()
 
 
 if __name__ == '__main__':

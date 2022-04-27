@@ -44,7 +44,7 @@ import numpy as np
 from scipy import sparse
 
 from astropy.io import fits
-from astropy.table import Table, join 
+from astropy.table import Table, join
 import astropy.wcs as wcs
 import matplotlib.pyplot as plt
 
@@ -56,7 +56,7 @@ from redrock.zfind import zfind
 from redrock._version import __version__
 from redrock.archetypes import All_archetypes
 
-from .utils import plot_zfit_check, get_mask_intervals
+from .utils import plot_zfit_check, get_mask_intervals, plot_scandata
 
 
 def get_templates(template_types=[], filepath=False, templates=None):
@@ -160,18 +160,18 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         The index of the HDU that contains the spectral data itself.
         If it is None, then the index is determined automatically by the name
         of the HDU. If this operation fails ValueError exception is raised.
-        The default is None.
+        The default value is None.
     var_hdu : int or None, optional
         The index of the HDU that contains the  variance of the spectral data.
         If it is None, then the index is determined automatically by the name
         of the HDU. If this operation fails ValueError exception is raised.
-        The default is None.
+        The default value is None.
     wd_hdu : int or None, optional
         The index of the HDU that contains the wavelength.
         If it is None, then the index is determined automatically by the name
         of the HDU. If this operation fails, no wavelenght dispersion will be
         used and the spectra will be considered having a uniform resolution.
-        The default is None.
+        The default value is None.
 
     Raises
     ------
@@ -218,7 +218,8 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
                     break
             else:
                 raise ValueError(
-                    "Cannot determine the HDU containing spectral data"
+                    "Cannot determine the HDU containing spectral data: "
+                    f"'{fits_file}'"
                 )
         else:
             flux = hdul[spec_hdu].data
@@ -241,7 +242,8 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
                     break
             else:
                 raise ValueError(
-                    "Cannot determine the HDU containing variance data"
+                    "Cannot determine the HDU containing variance data: "
+                    f"'{fits_file}'"
                 )
         else:
             ivar = 1 / hdul[var_hdu].data
@@ -258,6 +260,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
 
         if flux.shape != ivar.shape:
             raise ValueError(
+                f"'{fits_file}' - "
                 "Spectral data invalid or corruptede: Flux data shape "
                 "do not match variance data one!"
             )
@@ -543,10 +546,15 @@ def rrspex(options=None, comm=None):
 
         _ = elapsed(start, "Computing redshifts took", comm=comm)
 
+        # Change to upper case like DESI
+        for colname in zfit.colnames:
+            if colname.islower():
+                zfit.rename_column(colname, colname.upper())
+
         if args.plot_zfit:
             if comm_rank == 0:
                 available_templates = get_templates(
-                    templates_dir=args.templates
+                    templates=args.templates
                 )
                 for target in targets:
                     fig, ax = plot_zfit_check(
@@ -560,6 +568,14 @@ def rrspex(options=None, comm=None):
                     fig.savefig(figname, dpi=150)
                     plt.close(fig)
 
+                    if args.debug:
+                        figname = f'rrspex_scandata_{target.id}.png'
+                        figname = os.path.join(args.checkimg_outdir, figname)
+                        fig, axs = plot_scandata(target, scandata)
+                        fig.savefig(figname, dpi=150)
+                        plt.close(fig)
+
+
         # Write the outputs
         if args.output is not None:
             start = elapsed(None, "", comm=comm)
@@ -571,11 +587,11 @@ def rrspex(options=None, comm=None):
         if args.zbest:
             start = elapsed(None, "", comm=comm)
             if comm_rank == 0:
-                zbest = zfit[zfit['znum'] == 0]
+                zbest = zfit[zfit['ZNUM'] == 0]
 
                 # Remove extra columns not needed for zbest
                 # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
-                zbest.remove_columns(['znum'])
+                zbest.remove_columns(['ZNUM'])
 
                 # Change to upper case like DESI
                 for colname in zbest.colnames:

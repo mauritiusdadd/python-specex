@@ -295,6 +295,51 @@ def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
     return cutout, cutout_wcs
 
 
+def plot_scandata(target, scandata):
+    """
+    Plot debugging information about zchi2.
+
+    Parameters
+    ----------
+    target : redrock.Target
+        The target object.
+    scandata : dict
+        The full scandata as returned by redrock.
+
+    Returns
+    -------
+    fig : matplotlib.pyplot.Figure
+        The figure of the plot.
+    ax : TYPE
+        The main axis of the plot.
+
+    """
+    try:
+        obj_data = scandata[target.id]
+    except KeyError:
+        return
+
+    template_types = list(obj_data.keys())
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+
+    for template_type in template_types:
+        ax.plot(
+            obj_data[template_type]['redshifts'],
+            obj_data[template_type]['zchi2'],
+            label=f"{template_type}"
+        )
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.set_xlim(left=0.1)
+    ax.set_title(f'{target.id}')
+    ax.set_xlabel("redshift")
+    ax.set_ylabel("Chi2")
+    ax.legend()
+    plt.tight_layout()
+    return fig, ax
+
+
 def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                     cutout=None, wave_units='Angstrom', flux_units=''):
     """
