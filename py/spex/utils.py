@@ -41,11 +41,11 @@ from scipy.signal import savgol_filter
 from astropy.nddata import Cutout2D
 from astropy.visualization import ZScaleInterval
 
-from .lines import getlines
+from .lines import get_lines
 
 
-def getpbar(partial, total=None, wid=32, common_char='\u2588',
-            upper_char='\u2584', lower_char='\u2580'):
+def get_pbar(partial, total=None, wid=32, common_char='\u2588',
+             upper_char='\u2584', lower_char='\u2580'):
     """
     Return a nice text/unicode progress bar showing partial and total progress.
 
@@ -81,8 +81,8 @@ def getpbar(partial, total=None, wid=32, common_char='\u2588',
     return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
 
 
-def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
-           msg_index_error=None, exit_on_errors=True):
+def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
+            msg_index_error=None, exit_on_errors=True):
     """
     Find a valid HDU in a HDUList.
 
@@ -135,7 +135,7 @@ def gethdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     return valid_hdu
 
 
-def getaspect(ax):
+def get_aspect(ax):
     """
     Get ratio between y-axis and x-axis of a matplotlib figure.
 
@@ -165,7 +165,7 @@ def getaspect(ax):
     return disp_ratio / data_ratio
 
 
-def getvclip(img, vclip=0.25, nsamples=1000):
+def get_vclip(img, vclip=0.25, nsamples=1000):
     """
     Get the clipping values to use with imshow function.
 
@@ -190,7 +190,7 @@ def getvclip(img, vclip=0.25, nsamples=1000):
     return vmin, vmax
 
 
-def getlogimg(img, vclip=0.5):
+def get_log_img(img, vclip=0.5):
     """
     Get the image in log scale.
 
@@ -210,11 +210,11 @@ def getlogimg(img, vclip=0.5):
 
     """
     log_img = np.log10(1 + img - np.nanmin(img))
-    return log_img, *getvclip(log_img)
+    return log_img, *get_vclip(log_img)
 
 
-def getcutout(data, position, cutout_size, wcs=None, wave_ranges=None,
-              vmin=None, vmax=None):
+def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None,
+               vmin=None, vmax=None):
     valid_shape = True
     is_rgb = True
 
@@ -473,7 +473,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                 )
 
         # Plotting absorption lines
-        absorption_lines = getlines(
+        absorption_lines = get_lines(
             line_type='A', wrange=wavelenghts, z=lines_z
         )
         for line_lam, line_name, line_type in absorption_lines:
@@ -487,7 +487,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
             )
 
         # Plotting emission lines
-        emission_lines = getlines(
+        emission_lines = get_lines(
             line_type='E', wrange=wavelenghts, z=lines_z
         )
         for line_lam, line_name, line_type in emission_lines:
@@ -501,7 +501,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
             )
 
         # Plotting emission/absorption lines
-        emission_lines = getlines(
+        emission_lines = get_lines(
             line_type='AE', wrange=wavelenghts, z=lines_z
         )
         for line_lam, line_name, line_type in emission_lines:
@@ -660,7 +660,7 @@ def stack(data, wave_mask=None):
     for k, dat in enumerate(data):
         progress = (k + 1) / len(data)
         sys.stderr.write(
-            f"\rstacking cube: {getpbar(progress)} {progress:.2%}\r"
+            f"\rstacking cube: {get_pbar(progress)} {progress:.2%}\r"
         )
         sys.stderr.flush()
         if wave_mask is None or wave_mask[k]:

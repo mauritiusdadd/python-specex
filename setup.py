@@ -2,12 +2,62 @@
 """Setup for python-spex."""
 import setuptools
 import time
-from py.spex.__init__ import __version__ as version
+import os
+import codecs
+
+
+def read(rel_path):
+    """
+    Read a file.
+
+    Parameters
+    ----------
+    rel_path : str
+        The path of the file to read.
+
+    Returns
+    -------
+    str
+        The content of the file.
+
+    """
+    here = os.path.abspath(os.path.dirname(__file__))
+    with codecs.open(os.path.join(here, rel_path), 'r') as fp:
+        return fp.read()
+
+
+def get_version(rel_path):
+    """
+    Get the version of a module.
+
+    Parameters
+    ----------
+    rel_path : str
+        The path of the module file.
+
+    Raises
+    ------
+    RuntimeError
+        If there is no '__version__' line in the file raise this exception.
+
+    Returns
+    -------
+    str
+        The version of the module.
+
+    """
+    for line in read(rel_path).splitlines():
+        if line.startswith('__version__'):
+            delim = '"' if '"' in line else "'"
+            return line.split(delim)[1]
+    else:
+        raise RuntimeError("Unable to find version string.")
+
 
 BUILD_INFO = {
     'date': time.strftime("%Y-%m"),
     'asctime': time.asctime(),
-    'github': ""
+    'github': "https://github.com/mauritiusdadd/python-spex"
 }
 
 
@@ -16,7 +66,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name='spex',
-    version=version,
+    version=get_version("py/spex/__init__.py"),
     author='Maurizio D\'Addona',
     author_email='mauritiusdadd@gmail.com',
     url='https://github.com/mauritiusdadd/python-spex',
@@ -50,6 +100,7 @@ setuptools.setup(
             'spex=spex.spex:spex',
             'rrspex=spex.rrspex:rrspex',
             'zeropointinfo=spex.zeropoints:main',
+            'cubestack=spex.stack:cube_stack'
         ],
     },
 )

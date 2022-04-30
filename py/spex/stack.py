@@ -40,11 +40,46 @@ from astropy.wcs import WCS
 from astropy.io import fits
 import matplotlib.pyplot as plt
 
-from .utils import stack, gethdu
+from .utils import stack, get_hdu
 
 
-def stackandplot(ext, basename, suffix="", is_mask=False, override_wcs=None,
-                 dpi=150, wave_range=None):
+def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
+                   dpi=150, wave_range=None):
+    """
+    Stack and plot a spectral datacube.
+
+    Stack a datacube along the spectral axis and plot the result as a
+    PNG and a FITS file.
+
+    Parameters
+    ----------
+    ext : astropy.io.fits.ImageHDU
+        The fits exension containing the datacube.
+    basename : str
+        The name of the output images.
+    suffix : str, optional
+        An optional suffix for the output image names. The default is "".
+    is_mask : bool, optional
+        If True, the stacked image is trated as a boolean mask where every
+        pixel having non-zero value will be considered as True.
+        The default is False.
+    override_wcs : astropy.wcs.WCS, optional
+        An optional WCS to override the one present in the datacube.
+        The default is None.
+    dpi : int, optional
+        The resolution of the output PNG file. The default is 150.
+    wave_range : TYPE, optional
+        The optional wavelength range to use, if None all the available
+        wavelenghts are used. The default is None.
+
+    Returns
+    -------
+    new_data : numpy.ndarray
+        The stacked image.
+    img_wcs : astropy.wcs.WCS
+        The WCS of the stacked image.
+
+    """
     if ext.data is None:
         return None
 
@@ -150,7 +185,7 @@ def __argshandler(options=None):
     return args
 
 
-def cubestack(options=None):
+def cube_stack(options=None):
     """
     Run the main program of this module.
 
@@ -171,7 +206,7 @@ def cubestack(options=None):
 
     hdl = fits.open(input_file)
 
-    spec_hdu = gethdu(
+    spec_hdu = get_hdu(
         hdl,
         hdu_index=args.spec_hdu,
         valid_names=['data', 'spec', 'spectrum', 'spectra'],
@@ -180,7 +215,7 @@ def cubestack(options=None):
         msg_index_error="ERROR: Cannot open HDU {} to read specra!"
     )
 
-    var_hdu = gethdu(
+    var_hdu = get_hdu(
         hdl,
         hdu_index=args.var_hdu,
         valid_names=['stat', 'var', 'variance', 'noise'],
@@ -191,7 +226,7 @@ def cubestack(options=None):
         exit_on_errors=False
     )
 
-    mask_hdu = gethdu(
+    mask_hdu = get_hdu(
         hdl,
         hdu_index=args.mask_hdu,
         valid_names=['mask', 'platemask', 'footprint', 'dq'],
@@ -201,7 +236,7 @@ def cubestack(options=None):
         exit_on_errors=False
     )
 
-    dat, dat_wcs = stackandplot(
+    dat, dat_wcs = stack_and_plot(
         spec_hdu,
         basename,
         'data',
@@ -209,7 +244,7 @@ def cubestack(options=None):
     )
 
     if args.var_hdu >= 0:
-        var, var_wcs = stackandplot(
+        var, var_wcs = stack_and_plot(
             var_hdu,
             basename,
             'variance',
@@ -218,7 +253,7 @@ def cubestack(options=None):
         )
 
     if args.mask_hdu >= 0:
-        mask, mask_wcs = stackandplot(
+        mask, mask_wcs = stack_and_plot(
             mask_hdu,
             basename,
             'mask',
@@ -229,4 +264,4 @@ def cubestack(options=None):
 
 
 if __name__ == '__main__':
-    cubestack()
+    cube_stack()

@@ -52,7 +52,7 @@ from astropy import units
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
-from .utils import plot_zfit_check, getcutout, getlogimg, gethdu, getpbar
+from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
 from .utils import stack, plot_scandata
 
 try:
@@ -326,9 +326,9 @@ def __argshandler():
 
 
 # TODO: resample to constant log(lambda)
-def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
-                   and_mask_data=None, or_mask_data=None, wdisp_data=None,
-                   sky_data=None):
+def get_spplate_fits(cube_header, spec_header, obj_ids, spec_data,
+                     var_data=None, and_mask_data=None, or_mask_data=None,
+                     wdisp_data=None, sky_data=None):
     spec_hdu = fits.PrimaryHDU()
     ivar_hdu = fits.ImageHDU()
     andmsk_hdu = fits.ImageHDU()
@@ -409,8 +409,8 @@ def getspplatefits(cube_header, spec_header, obj_ids, spec_data, var_data=None,
     return hdul
 
 
-def getspsinglefits(main_header, spec_wcs_header, obj_spectrum,
-                    spec_hdu_header, obj_spectrum_var=None, no_nans=False):
+def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
+                      spec_hdu_header, obj_spectrum_var=None, no_nans=False):
     """
     Generate a fits containing the spectral data.
 
@@ -665,7 +665,7 @@ def spex():
 
     hdl = fits.open(args.input_cube[0])
 
-    spec_hdu = gethdu(
+    spec_hdu = get_hdu(
         hdl,
         hdu_index=args.spec_hdu,
         valid_names=['data', 'spec', 'spectrum', 'spectra'],
@@ -674,7 +674,7 @@ def spex():
         msg_index_error="ERROR: Cannot open HDU {} to read specra!"
     )
 
-    var_hdu = gethdu(
+    var_hdu = get_hdu(
         hdl,
         hdu_index=args.var_hdu,
         valid_names=['stat', 'var', 'variance', 'noise'],
@@ -685,7 +685,7 @@ def spex():
         exit_on_errors=False
     )
 
-    mask_hdu = gethdu(
+    mask_hdu = get_hdu(
         hdl,
         hdu_index=args.mask_hdu,
         valid_names=['mask', 'platemask', 'footprint', 'dq'],
@@ -815,7 +815,7 @@ def spex():
 
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
-        sys.stderr.write(f"\r{getpbar(progress)} {progress:.2%}\r")
+        sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
         sys.stderr.flush()
 
         if key_id is not None:
@@ -927,7 +927,7 @@ def spex():
         else:
             obj_spectrum_var = None
 
-        hdul = getspsinglefits(
+        hdul = get_spsingle_fits(
             main_header, spec_wcs_header,
             obj_spectrum, spec_hdu.header,
             obj_spectrum_var, no_nans=args.no_nans
@@ -997,7 +997,7 @@ def spex():
         if args.debug:
             fig = plt.figure(figsize=(10, 10))
             ax = plt.subplot(projection=celestial_wcs)
-            logimg, cvmin, cvmax = getlogimg(stacked_cube)
+            logimg, cvmin, cvmax = get_log_img(stacked_cube)
             ax.imshow(
                 logimg,
                 origin='lower',
@@ -1014,7 +1014,7 @@ def spex():
             cutouts_wcs = wcs.WCS(fits.getheader(args.cutouts_image))
             cutouts_wcs = cutouts_wcs.celestial
             cutout_wcs_frame = wcs.utils.wcs_to_celestial_frame(cutouts_wcs)
-            cutouts_image, cut_vmin, cut_vmax = getlogimg(cutouts_image)
+            cutouts_image, cut_vmin, cut_vmax = get_log_img(cutouts_image)
             cut_pixelscale = [
                 units.Quantity(sc_val, u).to_value('arcsec')
                 for sc_val, u in zip(
@@ -1047,7 +1047,7 @@ def spex():
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)
             sys.stderr.write(
-                f"\rGenerating previews {getpbar(progress)} {progress:.2%}\r"
+                f"\rGenerating previews {get_pbar(progress)} {progress:.2%}\r"
             )
             sys.stderr.flush()
             obj = sources[source_ids == target.id][0]
@@ -1065,7 +1065,7 @@ def spex():
                 obj_position = obj_skycoord
 
             cutout_size = args.cutouts_size / cut_pixelscale
-            cutout, scutout_wcs = getcutout(
+            cutout, scutout_wcs = get_cutout(
                 cutouts_image,
                 position=obj_position,
                 cutout_size=cutout_size,

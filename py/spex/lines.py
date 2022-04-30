@@ -98,7 +98,7 @@ RESTFRAME_LINES = [
 ]
 
 
-def getlines(name=None, line_type=None, wrange=None, z=0):
+def get_lines(name=None, line_type=None, wrange=None, z=0):
     """
     Return line data according to the given line name and types.
 

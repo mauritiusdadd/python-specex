@@ -575,7 +575,6 @@ def rrspex(options=None, comm=None):
                         fig.savefig(figname, dpi=150)
                         plt.close(fig)
 
-
         # Write the outputs
         if args.output is not None:
             start = elapsed(None, "", comm=comm)
