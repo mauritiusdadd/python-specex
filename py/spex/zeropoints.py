@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SPEX - SPectra EXtractor.
+
+This module provides functions to calculate the zeropoints of a FITS image.
+
+For more information take a look at the following links:
+
+ - https://www.stsci.edu/hst/wfpc2/Wfpc2_dhb/wfpc2_ch52.html
+ - https://www.stsci.edu/hst/instrumentation/acs/data-analysis/zeropoints
+
+Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+"""
 import sys
 import argparse
 import numpy as np
@@ -28,18 +41,28 @@ def get_zeropoint_info(filename, ext=0):
         A dicttionary containing the zero-point information.
         The dictionary contains the following items:
 
-            - exp_time : the exposure time
-            - phot_f_lam : the value of PHOTFLAM. This is the flux of a source
-                           with constant flux per unit wavelength
-                           (in erg s-1 cm-2 A-1) which produces a count rate
-                           of 1 count per second.
-            - phot_p_lam : the pivot wavelength (in Angstrom)
-            - zero_point : the zero point value.
-            - zero_point_p : the zero point value plus 2.5 times log10 of
-                             the exposure time.
-            - zero_point_m : the zero point value minus 2.5 times log10 of
-                             the exposure time.
-            - counts_to_flux : quantity to convert counts to flux units.
+            - exp_time : float
+                The exposure time
+
+            - phot_f_lam : float
+                The value of PHOTFLAM. This is the flux of a source with
+                constant flux per unit wavelength (in erg s-1 cm-2 A-1) which
+                produces a count rate of 1 count per second.
+
+            - phot_p_lam : float
+                the pivot wavelength (in Angstrom)
+
+            - zero_point : sloat
+                the zero point value
+
+            - zero_point_p : float
+                the zero point value plus 2.5 times log10 of the exposure time
+
+            - zero_point_m : float
+                the zero point value minus 2.5 times log10 of the exposure time
+
+            - counts_to_flux : float
+                Quantity to convert counts to flux units
     """
     hdr = fits.getheader(filename, ext=ext)
     phot_f_lam = hdr['PHOTFLAM']
