@@ -591,7 +591,7 @@ def rrspex(options=None, comm=None):
 
                 # Remove extra columns not needed for zbest
                 # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
-                zbest.remove_columns(['ZNUM'])
+                # zbest.remove_columns(['ZNUM'])
 
                 # Change to upper case like DESI
                 for colname in zbest.colnames:
@@ -639,7 +639,7 @@ def rrspex(options=None, comm=None):
         import IPython
         IPython.embed()
 
-    return targets, zbest, scandata
+    return targets, zfit, scandata
 
 
 if __name__ == '__main__':

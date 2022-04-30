@@ -2,6 +2,7 @@
 """Setup for python-spex."""
 import setuptools
 import time
+from py.spex.__init__ import __version__ as version
 
 BUILD_INFO = {
     'date': time.strftime("%Y-%m"),
@@ -15,7 +16,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name='spex',
-    version='0.2.2',
+    version=version,
     author='Maurizio D\'Addona',
     author_email='mauritiusdadd@gmail.com',
     url='https://github.com/mauritiusdadd/python-spex',
@@ -48,6 +49,7 @@ setuptools.setup(
         'console_scripts': [
             'spex=spex.spex:spex',
             'rrspex=spex.rrspex:rrspex',
+            'zeropointinfo=spex.zeropoints:main',
         ],
     },
 )
