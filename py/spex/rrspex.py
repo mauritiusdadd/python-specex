@@ -412,7 +412,9 @@ def rrspex(options=None, comm=None):
         list of target spectra.
     zfit : astropy.table.Table
         Table containing the fit results.
-
+    scandata : dict
+        A dictionary containing the redshift scanning information for each
+        target
     """
     global_start = elapsed(None, "", comm=comm)
     comm_size = 1
@@ -560,19 +562,16 @@ def rrspex(options=None, comm=None):
             _ = elapsed(start, "Writing zscan data took", comm=comm)
 
         zbest = None
+        if comm_rank == 0:
+            zbest = zfit[zfit['ZNUM'] == 0]
+
         if args.zbest:
             start = elapsed(None, "", comm=comm)
             if comm_rank == 0:
-                zbest = zfit[zfit['ZNUM'] == 0]
 
                 # Remove extra columns not needed for zbest
                 # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
                 # zbest.remove_columns(['ZNUM'])
-
-                # Change to upper case like DESI
-                for colname in zbest.colnames:
-                    if colname.islower():
-                        zbest.rename_column(colname, colname.upper())
 
                 zbest = join(zbest, meta)
 
@@ -597,6 +596,12 @@ def rrspex(options=None, comm=None):
 
             _ = elapsed(start, "Writing zbest data took", comm=comm)
 
+        if comm_rank == 0:
+            if (not args.zbest) and (args.output is None):
+                print("")
+                print(zbest)
+                print("")
+
     except Exception:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
@@ -615,7 +620,7 @@ def rrspex(options=None, comm=None):
         import IPython
         IPython.embed()
 
-    return targets, zfit, scandata
+    return targets, zbest, scandata
 
 
 if __name__ == '__main__':
