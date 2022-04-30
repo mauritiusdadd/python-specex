@@ -1,4 +1,4 @@
-# python-spex [![Build Status](https://app.travis-ci.com/mauritiusdadd/python-spex.svg?token=fRNrxziGGvs3HmNyD6gZ&branch=main)](https://app.travis-ci.com/mauritiusdadd/python-spex) [![Documentation Status](https://readthedocs.org/projects/python-spex/badge/?version=latest)](https://python-spex.readthedocs.io/en/latest/?badge=latest)
+# python-spex [![Build Status](https://github.com/mauritiusdadd/python-spex/actions/workflows/build-and-check.yml/badge.svg)](https://github.com/mauritiusdadd/python-spex/actions/workflows/build-and-check.yml) [![Documentation Status](https://readthedocs.org/projects/python-spex/badge/?version=latest)](https://python-spex.readthedocs.io/en/latest/?badge=latest)
 
 Extract spectra from fits cubes
 
