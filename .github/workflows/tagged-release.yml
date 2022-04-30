@@ -33,8 +33,3 @@ jobs:
           files: |
             LICENSE
             README.md
-            redrock_venv_setup.sh
-            requirements.txt
-            setup.py
-            py/*
-            docs/*
