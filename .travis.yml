@@ -16,3 +16,5 @@ install:
 script:
   - rrspex --help
   - spex --help
+  - cubestack --help
+  - zeropointinfo --help
