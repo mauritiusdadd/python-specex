@@ -177,11 +177,11 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
             for j in ['ID', 'NUMBER', 'UID', 'UUID']
         ]
 
-        spec_id = j
+        spec_id = f"ID{j:06}"
         for hdu in hdul:
             for key in valid_id_keys:
                 try:
-                    spec_id = hdu.header[key]
+                    spec_id = f"{str(hdu.header[key]): >6}"
                 except KeyError:
                     continue
                 else:
@@ -383,6 +383,12 @@ def __argshandler(options=None):
         'enabled thorugh the appropriate parameter).'
     )
 
+    parser.add_argument(
+        "--quite", action='store_true', default=False,
+        help="Reduce program output at bare minimum. Do not print fitting "
+        "result,"
+    )
+
     args = None
     if options is None:
         args = parser.parse_args()
@@ -573,7 +579,7 @@ def rrspex(options=None, comm=None):
                 # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
                 # zbest.remove_columns(['ZNUM'])
 
-                zbest = join(zbest, meta)
+                zbest = join(zbest, meta, keys=['TARGETID'])
 
                 template_version = {
                     t._template.full_type: t._template._version
@@ -597,7 +603,7 @@ def rrspex(options=None, comm=None):
             _ = elapsed(start, "Writing zbest data took", comm=comm)
 
         if comm_rank == 0:
-            if (not args.zbest) and (args.output is None):
+            if (not args.zbest) and (args.output is None) and (not args.quite):
                 print("")
                 print(zbest)
                 print("")

@@ -794,9 +794,9 @@ def spex():
         sys.stderr.flush()
 
         if key_id is not None:
-            obj_id = source[key_id]
+            obj_id = f"{str(source[key_id]):0>6}"
         else:
-            obj_id = i
+            obj_id = f"{i:06}"
 
         obj_ra = source[args.key_ra]
         obj_dec = source[args.key_dec]

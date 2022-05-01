@@ -7,15 +7,13 @@ Extract spectra from spectral data cubes.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+from __future__ import absolute_import, division, print_function
+
 import os
 import unittest
 import pathlib
 from astropy.io import fits
-
-
-TEST_FILES = ["spec_synt_e.fits", ]
-Z_FTOL = 0.01
-
+from astropy.table import Table, join
 
 try:
     from spex.rrspex import rrspex
@@ -25,26 +23,41 @@ else:
     HAS_RR = True
 
 
+TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
+Z_FTOL = 0.01
+
+
 class TestRRSpex(unittest.TestCase):
 
     @unittest.skipIf(not HAS_RR, "redrock not installed")
     def test_rrspex_success(self):
         test_files = [
-            os.path.join(pathlib.Path(__file__).parent.resolve(), "data", x)
-            for x in TEST_FILES
+            os.path.join(TEST_DATA_PATH, x)
+            for x in os.listdir(TEST_DATA_PATH)
+            if x.startswith('rrspex_') and x.endswith('_00.fits')
         ]
 
-        obj_z = [fits.getheader(x, ext=0)['OBJ_Z'] for x in test_files]
+        true_z_table = Table(
+            names=['TARGETID', 'TRUE_Z'],
+            dtype=['U10', 'float32']
+        )
 
-        targets, zbest, scandata = rrspex(options=test_files)
+        for file in test_files:
+            header = fits.getheader(file, ext=0)
+            true_z_table.add_row([header['ID'], header['OBJ_Z']])
+
+        options = ['--quite', ] + test_files
+        targets, zbest, scandata = rrspex(options=options)
+
+        zbest = join(true_z_table, zbest, keys=['TARGETID'])
+        print(zbest)
 
         for i, obj in enumerate(zbest):
-            self.assertTrue(
-                abs(obj_z[i] - obj['Z']) <= obj['ZERR'],
-                "computed - fitted redshift absolute difference is greater "
-                "than computed redshift error!"
+            self.assertLessEqual(
+                abs(obj['TRUE_Z'] - obj['Z'])/(1 + obj['TRUE_Z']), Z_FTOL,
+                msg="computed redshift outside f01 limit!"
             )
-            self.assertTrue(
-                abs(obj_z[i] - obj['Z'])/(1 + obj_z[i]) < Z_FTOL,
-                "computed redshift outside f01 limit!"
-            )
+
+if __name__ == '__main__':
+    test = TestRRSpex()
+    test.test_rrspex_success()
