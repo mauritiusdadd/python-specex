@@ -18,7 +18,7 @@ Z_FTOL = 0.01
 
 
 try:
-    from spex.rrspex import rrspex, get_templates
+    from spex.rrspex import rrspex
 except ImportError:
     HAS_RR = False
 else:
@@ -39,4 +39,12 @@ class TestRRSpex(unittest.TestCase):
         targets, zbest, scandata = rrspex(options=test_files)
 
         for i, obj in enumerate(zbest):
-            assert abs(obj_z[i] - obj['Z'])/(1 + obj_z[i]) < Z_FTOL
+            self.assertTrue(
+                abs(obj_z[i] - obj['Z']) <= obj['ZERR'],
+                "computed - fitted redshift absolute difference is greater "
+                "than computed redshift error!"
+            )
+            self.assertTrue(
+                abs(obj_z[i] - obj['Z'])/(1 + obj_z[i]) < Z_FTOL,
+                "computed redshift outside f01 limit!"
+            )
