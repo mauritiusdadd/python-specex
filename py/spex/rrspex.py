@@ -166,6 +166,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     """
     targets = []
     targetids = []
+    specids = []
     sn_vals = []
     sn_var_vals = []
     for j, fits_file in enumerate(spectra_fits_list):
@@ -177,11 +178,12 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
             for j in ['ID', 'NUMBER', 'UID', 'UUID']
         ]
 
-        spec_id = f"ID{j:06}"
+        target_id = f"{j:09}"
+        spec_id = target_id
         for hdu in hdul:
             for key in valid_id_keys:
                 try:
-                    spec_id = f"{str(hdu.header[key]): >6}"
+                    spec_id = hdu.header[key]
                 except KeyError:
                     continue
                 else:
@@ -283,16 +285,18 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
             s_n_var = -1
 
         rrspec = Spectrum(lam, flux, ivar, R, None)
-        target = Target(spec_id, [rrspec])
+        target = Target(target_id, [rrspec])
         target.input_file = fits_file
         target.lam_mask = lam_mask
         targets.append(target)
-        targetids.append(spec_id)
+        targetids.append(target_id)
+        specids.append(spec_id)
         sn_vals.append(s_n)
         sn_var_vals.append(s_n_var)
 
     metatable = Table()
     metatable['TARGETID'] = targetids
+    metatable['SPECID'] = specids
     metatable['SN'] = sn_vals
     metatable['SN_VAR'] = sn_var_vals
 
@@ -536,6 +540,9 @@ def rrspex(options=None, comm=None):
             if colname.islower():
                 zfit.rename_column(colname, colname.upper())
 
+        zfit = join(zfit, meta, keys=['TARGETID'], join_type='left')
+        zfit.remove_column('TARGETID')
+
         if args.plot_zfit:
             if comm_rank == 0:
                 available_templates = get_templates(
@@ -578,8 +585,6 @@ def rrspex(options=None, comm=None):
                 # Remove extra columns not needed for zbest
                 # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
                 # zbest.remove_columns(['ZNUM'])
-
-                zbest = join(zbest, meta, keys=['TARGETID'])
 
                 template_version = {
                     t._template.full_type: t._template._version

@@ -34,11 +34,11 @@ class TestRRSpex(unittest.TestCase):
         test_files = [
             os.path.join(TEST_DATA_PATH, x)
             for x in os.listdir(TEST_DATA_PATH)
-            if x.startswith('rrspex_') and x.endswith('_00.fits')
+            if x.startswith('rrspex_') and x.endswith('.fits')
         ]
 
         true_z_table = Table(
-            names=['TARGETID', 'TRUE_Z'],
+            names=['SPECID', 'TRUE_Z'],
             dtype=['U10', 'float32']
         )
 
@@ -49,7 +49,7 @@ class TestRRSpex(unittest.TestCase):
         options = ['--quite', ] + test_files
         targets, zbest, scandata = rrspex(options=options)
 
-        zbest = join(true_z_table, zbest, keys=['TARGETID'])
+        zbest = join(true_z_table, zbest, keys=['SPECID'])
         print(zbest)
 
         for i, obj in enumerate(zbest):
@@ -57,7 +57,3 @@ class TestRRSpex(unittest.TestCase):
                 abs(obj['TRUE_Z'] - obj['Z'])/(1 + obj['TRUE_Z']), Z_FTOL,
                 msg="computed redshift outside f01 limit!"
             )
-
-if __name__ == '__main__':
-    test = TestRRSpex()
-    test.test_rrspex_success()
