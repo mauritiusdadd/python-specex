@@ -220,10 +220,11 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
                     ivar = hdu.data
                     break
             else:
-                raise ValueError(
-                    "Cannot determine the HDU containing variance data: "
-                    f"'{fits_file}'"
+                print(
+                    "WARNING: Cannot determine the HDU containing variance "
+                    f"data in '{fits_file}'! Using dumb constan variance...",
                 )
+                ivar = np.ones_like(flux)
         else:
             ivar = 1 / hdul[var_hdu].data
 
@@ -288,6 +289,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         target = Target(target_id, [rrspec])
         target.input_file = fits_file
         target.lam_mask = lam_mask
+        target.spec_id = spec_id
         targets.append(target)
         targetids.append(target_id)
         specids.append(spec_id)

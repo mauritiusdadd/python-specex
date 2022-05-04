@@ -444,7 +444,8 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
     if no_nans:
         nanmask = np.isnan(obj_spectrum)
         obj_spectrum[nanmask] = 0
-        obj_spectrum_var[nanmask] = np.nanmax(obj_spectrum_var) * 100.0
+        if obj_spectrum_var is not None:
+            obj_spectrum_var[nanmask] = np.nanmax(obj_spectrum_var) * 100.0
     else:
         nanmask = None
 
@@ -794,7 +795,7 @@ def spex():
         sys.stderr.flush()
 
         if key_id is not None:
-            obj_id = f"{str(source[key_id]):0>6}"
+            obj_id = source[key_id]
         else:
             obj_id = f"{i:06}"
 
@@ -1025,7 +1026,7 @@ def spex():
                 f"\rGenerating previews {get_pbar(progress)} {progress:.2%}\r"
             )
             sys.stderr.flush()
-            obj = sources[source_ids == target.id][0]
+            obj = sources[source_ids == target.spec_id][0]
 
             obj_skycoord = SkyCoord(
                 obj[args.key_ra],
@@ -1058,9 +1059,9 @@ def spex():
                 flux_units=spec_hdu.header['BUNIT'],
             )
 
-            e_wid = spex_apertures[target.id][0] / cut_pixelscale
-            e_hei = spex_apertures[target.id][1] / cut_pixelscale
-            e_ang = spex_apertures[target.id][2]
+            e_wid = spex_apertures[target.spec_id][0] / cut_pixelscale
+            e_hei = spex_apertures[target.spec_id][1] / cut_pixelscale
+            e_ang = spex_apertures[target.spec_id][2]
 
             aperture = Ellipse(
                 (cutout_size/2.0, cutout_size/2.0),
@@ -1110,13 +1111,13 @@ def spex():
                 }
             )
 
-            figname = f'spectrum_{target.id}.png'
+            figname = f'spectrum_{target.spec_id}.png'
             figname = os.path.join(check_images_outdir, figname)
             fig.savefig(figname, dpi=150)
             plt.close(fig)
 
             if args.debug:
-                figname = f'scandata_{target.id}.png'
+                figname = f'scandata_{target.spec_id}.png'
                 figname = os.path.join(check_images_outdir, figname)
                 fig, axs = plot_scandata(target, scandata)
                 fig.savefig(figname, dpi=150)

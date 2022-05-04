@@ -353,7 +353,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     """
     flux_units = flux_units.replace('**', '^')
 
-    t_best_data = zbest[zbest['TARGETID'] == target.id][0]
+    t_best_data = zbest[zbest['SPECID'] == target.spec_id][0]
 
     best_template = None
     if plot_template:
@@ -379,7 +379,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     ax1 = fig.add_subplot(gs[0, -1])
     ax2 = fig.add_subplot(gs[1, -1])
 
-    ax0.set_title(f"object: {target.id}")
+    ax0.set_title(f"object: {target.spec_id}")
     ax0.set_aspect('auto')
 
     try:
@@ -441,7 +441,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                 )
             except AssertionError:
                 print(
-                    f"Template warning for object {target.id}\n"
+                    f"Template warning for object {target.spec_id}\n"
                     f"  nbasis: {best_template.nbasis}\n"
                     f"  coeffs: {len(coeffs)}",
                     file=sys.stderr
