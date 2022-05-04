@@ -38,7 +38,7 @@ else:
     HAS_RR = True
 
 
-def __argshandler():
+def __argshandler(options=None):
     """
     Parse the arguments given by the user.
 
@@ -288,7 +288,11 @@ def __argshandler():
         help="Enable some debug otupout on plots and on the console."
     )
 
-    args = parser.parse_args()
+    args = None
+    if options is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(options)
 
     if args.cutouts_image and not os.path.exists(args.cutouts_image):
         print(f"The file {args.cutouts_image} does not exist!")
@@ -600,7 +604,7 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     return myt
 
 
-def spex():
+def spex(options=None):
     """
     Run the main program.
 
@@ -609,7 +613,7 @@ def spex():
     None.
 
     """
-    args = __argshandler()
+    args = __argshandler(options)
 
     if args.catalog is not None:
         sources = Table.read(args.catalog)

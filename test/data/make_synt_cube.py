@@ -8,14 +8,10 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import numpy as np
 from astropy.io import fits
 from astropy.modeling import models
-import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from redrock.templates import find_templates, Template
-from matplotlib import patches
 from astropy.table import Table
 from astropy.wcs import WCS
-
-from spex import utils
 
 
 class FakeObject():
@@ -211,7 +207,7 @@ class FakeObject():
         waves, flux = self.get_spectrum(wave_range, wave_step)
         image = self.get_image(width, height, seeing)
         cube = image[..., None] * flux
-        noise = np.random.random(size=cube.shape) * 0.01
+        noise = np.random.random(size=cube.shape) * 0.005
         cube = cube + noise
         cube = cube.transpose(2, 0, 1)
         return cube
@@ -286,7 +282,6 @@ def gen_fake_spectrum(wave_range, template, coeffs, z, wave_step=1.0):
 
 def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
                   seeing=1):
-
     waves = get_waves(wave_range, wave_step)
 
     header = fits.Header()
@@ -309,17 +304,15 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
 
     available_templates = [
         f for f in find_templates()
-        if 'ez' not in f and (
-            'star-K' in f or
-            'star-M' in f or
-            'galaxy' in f or
-            'qso' in f
-        )
+        if'galaxy' in f
     ]
 
+    w_padding = width/50
+    h_padding = width/50
+
     obj_attributes = zip(
-        np.random.random(n_objects) * width,
-        np.random.random(n_objects) * height,
+        w_padding + np.random.random(n_objects) * (width - 2*w_padding),
+        h_padding + np.random.random(n_objects) * (height - 2*h_padding),
         np.random.choice(available_templates, n_objects)
     )
 
@@ -343,21 +336,6 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
             print(f"WARNING: Skipping object {j}")
             continue
 
-    stacked_cube = utils.stack(base_cube)
-
-    fig = plt.figure(figsize=(10, 10))
-    ax = plt.subplot()
-
-    log_image, vmin, vmax = utils.get_log_img(stacked_cube)
-
-    ax.imshow(
-        log_image,
-        origin='lower',
-        vmin=vmin,
-        vmax=vmax,
-        cmap='gray'
-    )
-
     myt = Table(
         names=[
             'NUMBER',
@@ -370,6 +348,12 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
             'ALPHA_J2000',
             'DELTA_J2000',
             'TRUE_Z',
+            'TRUE_TYPE',
+            'TRUE_SUBTYPE'
+        ],
+        dtype=[
+            int, float, float, float, float, float, float, float, float, float,
+            'U10', 'U10'
         ]
     )
     regfile_text = 'fk5\n'
@@ -388,20 +372,6 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
         obj_ra = sky_coords.ra.deg
         obj_dec = sky_coords.dec.deg
 
-        ellipse = patches.Ellipse(
-            (obj_x, obj_y),
-            width=obj_a_image,
-            height=obj_b_image,
-            angle=obj_theta_image,
-            edgecolor='red',
-            facecolor='none',
-            ls='-',
-            lw=1,
-            alpha=0.8,
-            fill=False
-        )
-
-        ax.add_patch(ellipse)
         regfile_text += f"ellipse({obj_ra:.6f}, {obj_dec:.6f}, "
         regfile_text += f"{obj_a_image:.4f}, "
         regfile_text += f"{obj_b_image:.4f}, {obj_theta_image:.4f}) "
@@ -409,7 +379,8 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
 
         new_row = [
             i, obj_x, obj_y, obj_a_image, obj_b_image, obj_theta_image,
-            obj_kron, obj_ra, obj_dec, obj.z
+            obj_kron, obj_ra, obj_dec, obj.z, obj.template.template_type,
+            obj.template.sub_type
         ]
 
         myt.add_row(new_row)
@@ -418,10 +389,6 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
         f.write(regfile_text)
 
     myt.write("test_cube_cat.fits", overwrite=True)
-
-    plt.show()
-
-    plt.close(fig)
 
     header['CRVAL3'] = waves[0]
     header['CRPIX3'] = 1.0
@@ -455,7 +422,7 @@ def main():
 
     """
     wave_range = (4500, 8000)
-    gen_fake_cube(256, 256, wave_range, n_objects=30)
+    gen_fake_cube(256, 256, wave_range, n_objects=10, wave_step=2.5)
 
 
 if __name__ == '__main__':

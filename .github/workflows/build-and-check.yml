@@ -54,6 +54,7 @@ jobs:
     - name: Test rrspex
       run: |
         python -m unittest test/test_rrspex.py
+        python -m unittest test/test_spex.py
     - name: Test spex
       run: |
         spex --help
