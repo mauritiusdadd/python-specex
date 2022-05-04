@@ -5,6 +5,8 @@ Generate a synthetic spectral datacube that can be used to test spex module.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+import os
+import pathlib
 import numpy as np
 from astropy.io import fits
 from astropy.modeling import models
@@ -280,7 +282,7 @@ def gen_fake_spectrum(wave_range, template, coeffs, z, wave_step=1.0):
     return wave, flux - np.min(flux)
 
 
-def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
+def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
                   seeing=1):
     waves = get_waves(wave_range, wave_step)
 
@@ -385,10 +387,10 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
 
         myt.add_row(new_row)
 
-    with open("test_cube.reg", "w") as f:
+    with open(os.path.join(out_dir, 'test_cube.reg'), "w") as f:
         f.write(regfile_text)
 
-    myt.write("test_cube_cat.fits", overwrite=True)
+    myt.write(os.path.join(out_dir, 'test_cube_cat.fits'), overwrite=True)
 
     header['CRVAL3'] = waves[0]
     header['CRPIX3'] = 1.0
@@ -409,7 +411,7 @@ def gen_fake_cube(width, height, wave_range, n_objects, wave_step=1.0,
         header=header
     )
 
-    cube_hdu.writeto('test_cube.fits', overwrite=True)
+    cube_hdu.writeto(os.path.join(out_dir, 'test_cube.fits'), overwrite=True)
 
 
 def main():
@@ -422,7 +424,8 @@ def main():
 
     """
     wave_range = (4500, 8000)
-    gen_fake_cube(256, 256, wave_range, n_objects=10, wave_step=2.5)
+    out_dir = pathlib.Path(__file__).parent.resolve()
+    gen_fake_cube(out_dir, 256, 256, wave_range, n_objects=10, wave_step=5)
 
 
 if __name__ == '__main__':
