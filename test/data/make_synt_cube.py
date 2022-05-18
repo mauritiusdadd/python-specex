@@ -425,7 +425,7 @@ def main():
     """
     wave_range = (4500, 8000)
     out_dir = pathlib.Path(__file__).parent.resolve()
-    gen_fake_cube(out_dir, 256, 256, wave_range, n_objects=10, wave_step=5)
+    gen_fake_cube(out_dir, 256, 256, wave_range, n_objects=30, wave_step=1)
 
 
 if __name__ == '__main__':

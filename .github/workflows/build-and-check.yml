@@ -57,11 +57,10 @@ jobs:
         python test/data/make_synt_cube.py
         echo "Testing base rrspex functionality..."
         python -m unittest test/test_rrspex.py
-        echo "Testing base spex functionality..."
-        python -m unittest test/test_spex.py
     - name: Test spex
       run: |
-        spex --help
+        echo "Testing base spex functionality..."
+        python -m unittest test/test_spex.py
     - name: Test cubestack
       run: |
         cubestack --help

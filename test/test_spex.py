@@ -48,7 +48,7 @@ class TestSpex(unittest.TestCase):
         spex_options = [
             '--regionfile', self.test_ref_file,
             '--mode', 'circular_aperture',
-            '--aperture-size', '0.8',
+            '--aperture-size', '0.8', '--zbest', 'zbest_cube.fits',
             '--no-nans', self.test_cube_file
         ]
         spex(options=spex_options)

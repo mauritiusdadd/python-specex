@@ -17,6 +17,7 @@ import numpy as np
 import multiprocessing
 
 from scipy.signal import savgol_filter
+from scipy.stats import median_abs_deviation
 from astropy import wcs
 from astropy.table import Table, Column
 from astropy.io import fits
@@ -160,6 +161,14 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
+        '--anulus-size', metavar='R1,R2', type=str, default='None',
+        help='Set the inner and outer radii in arcsecs of a fixed anular '
+        'aperture used in  the "fixed-aperture" mode. The pixels within this '
+        'anulus will be used to compute the background nearby the objects. If '
+        'The default value is %(metavar)s=%(default)s.'
+    )
+
+    parser.add_argument(
         '--cat-pixelscale', metavar='MAS_PIXEL', type=float, default=1,
         help='Set the scale size in mas of the major and minor axes. Useful if'
         'A and B are given in pixels instead of MAS (like in the case of '
@@ -225,7 +234,7 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
-        '--key-id', metavar='OBJID_KEY', type=str, default='NUMBER',
+        '--key-id', metavar='OBJID_KEY', type=str, default=None,
         help='Set the name of the column from which to read the id of the '
         'object to which the spectral data belong. If this argument is not '
         'specified then a suitable column will be selected according to its '
@@ -675,11 +684,13 @@ def spex(options=None):
         exit_on_errors=False
     )
 
+    # Get spectral and celstial WCS from the cube
     cube_wcs = wcs.WCS(spec_hdu.header)
     celestial_wcs = cube_wcs.celestial
     spectral_wcs = cube_wcs.spectral
     wcs_frame = wcs.utils.wcs_to_celestial_frame(cube_wcs)
 
+    # Get the pixelscale in arcsec/pixel
     cube_pixelscale = [
         units.Quantity(sc_val, u).to_value('arcsec')
         for sc_val, u in zip(
@@ -707,6 +718,7 @@ def spex(options=None):
             )
         dec_unit = 'deg'
 
+    # Get the objects positions in the cube (in pixels)
     obj_sky_coords = SkyCoord(
         sources[args.key_ra], sources[args.key_dec],
         unit=(ra_unit, dec_unit),
@@ -737,11 +749,11 @@ def spex(options=None):
     if var_hdu is not None:
         trasposed_var = var_hdu.data.transpose(1, 2, 0)
 
+    # Chech if there is a footprint mask in the cube
     if mask_hdu is not None:
         cube_footprint = mask_hdu.data.prod(axis=0) == 0
         if args.invert_mask:
             cube_footprint = ~cube_footprint
-
     else:
         cube_footprint = None
 
@@ -771,6 +783,7 @@ def spex(options=None):
     if args.nspectra:
         n_objects = int(args.nspectra)
 
+    # Try to identify the column with object IDs
     if args.key_id is None:
         valid_id_keys = [
             f"{i}{j}"
@@ -779,8 +792,11 @@ def spex(options=None):
         ]
 
         for key in valid_id_keys:
-            if key in sources.colnames:
-                key_id = key
+            if key.lower() in sources.colnames:
+                key_id = key.lower()
+                break
+            elif key.upper() in sources.colnames:
+                key_id = key.upper()
                 break
         else:
             key_id = None
@@ -789,9 +805,25 @@ def spex(options=None):
 
     out_specfiles = []
     spex_apertures = {}  # these values are in physical units (arcsecs)
+    spex_anuli = {}  # these values are in physical units (arcsecs)
     source_ids = []
 
     valid_sources_mask = np.zeros(len(sources), dtype=bool)
+
+    # Check wheter to use anuli to compute background
+    anulus_str = args.anulus_size.lower().strip().split(',')
+
+    anulus_r_in = None
+    anulus_r_out = None
+    if anulus_str and len(anulus_str) == 2:
+        try:
+            anulus_r1 = float(anulus_str[0])
+            anulus_r2 = float(anulus_str[1])
+        except ValueError:
+            pass
+        else:
+            anulus_r_in = min(anulus_r1, anulus_r2)
+            anulus_r_out = max(anulus_r1, anulus_r2)
 
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
@@ -846,7 +878,23 @@ def spex(options=None):
                 args.aperture_size,
                 0
             )
-            mask = (xx_tr**2 + yy_tr**2) < args.aperture_size / cube_pixelscale
+
+            rad_coords = xx_tr**2 + yy_tr**2
+            mask = rad_coords < args.aperture_size / cube_pixelscale
+
+            if anulus_r_in and anulus_r_out:
+                spex_anuli[obj_id] = (
+                    anulus_r_in,
+                    anulus_r_out
+                )
+
+                anulus_mask_out = rad_coords <= anulus_r_out / cube_pixelscale
+                anulus_mask_in = rad_coords > anulus_r_in / cube_pixelscale
+
+                anulus_mask = anulus_mask_in & anulus_mask_out
+            else:
+                spex_anuli[obj_id] = None
+                anulus_mask = None
 
         if cube_footprint is not None:
             mask &= cube_footprint
@@ -855,6 +903,13 @@ def spex(options=None):
             continue
 
         obj_spectrum = trasposed_spec[mask].sum(axis=0)
+        if anulus_mask is not None:
+            # Here we suppose that background vaies very slowly within object
+            # aperture. In this case we can copute the mean background and
+            # subtract it total contribution within the aperture.
+            bkg_spectrum = np.median(trasposed_spec[anulus_mask], axis=0)
+            smoothed_bkg_spectrum = savgol_filter(bkg_spectrum, 51, 11)
+            obj_spectrum -= smoothed_bkg_spectrum*np.sum(mask)
 
         if np.sum(~np.isnan(obj_spectrum)) == 0:
             if args.debug:
@@ -901,6 +956,14 @@ def spex(options=None):
 
         if var_hdu is not None:
             obj_spectrum_var = trasposed_var[mask].sum(axis=0)
+
+            if anulus_mask is not None:
+                # Same consideration as before.
+                bkg_spectrum_var = np.median(
+                    trasposed_var[anulus_mask], axis=0
+                )
+                obj_spectrum_var += bkg_spectrum_var*np.sum(mask)
+
             sn_var = obj_mean_spec / np.sqrt(np.nanmean(obj_spectrum_var))
 
             main_header['SN_VAR'] = (sn_var, "")
@@ -928,6 +991,8 @@ def spex(options=None):
         # Add also the extracted pixels to the extraction map
         if args.check_images:
             extracted_data += mask
+            if anulus_mask is not None:
+                extracted_data -= anulus_mask
 
     # Discard all invalid sources
     sources = sources[valid_sources_mask]
@@ -1004,9 +1069,10 @@ def spex(options=None):
             ]
         else:
             cutouts_image = stacked_cube
+            cutouts_image, cut_vmin, cut_vmax = get_log_img(stacked_cube)
             cutouts_wcs = None
             cutout_wcs_frame = wcs_frame
-            cut_vmin, cut_vmax = None, None
+            # cut_vmin, cut_vmax = None, None
             cut_pixelscale = wcs.utils.proj_plane_pixel_scales(celestial_wcs)
             cut_pixelscale = [
                 units.Quantity(sc_val, u).to_value('arcsec')
@@ -1067,6 +1133,7 @@ def spex(options=None):
             e_hei = spex_apertures[target.spec_id][1] / cut_pixelscale
             e_ang = spex_apertures[target.spec_id][2]
 
+            # Draw extraction aperture
             aperture = Ellipse(
                 (cutout_size/2.0, cutout_size/2.0),
                 width=e_wid,
@@ -1093,6 +1160,66 @@ def spex(options=None):
                 fill=False
             )
             axs[1].add_patch(aperture)
+
+            # Draw background anulus (if any)
+            if spex_anuli[target.spec_id] is not None:
+
+                a_r_in = spex_anuli[target.spec_id][0] / cut_pixelscale
+                a_r_out = spex_anuli[target.spec_id][1] / cut_pixelscale
+
+                # Draw inner radius
+                axs[1].add_patch(Ellipse(
+                    (cutout_size/2.0, cutout_size/2.0),
+                    width=a_r_in,
+                    height=a_r_in,
+                    angle=e_ang,
+                    edgecolor='#00ffff',
+                    facecolor='none',
+                    ls='-',
+                    lw=1,
+                    alpha=0.8,
+                    fill=False
+                ))
+
+                axs[1].add_patch(Ellipse(
+                    (cutout_size/2.0, cutout_size/2.0),
+                    width=a_r_in,
+                    height=a_r_in,
+                    angle=e_ang,
+                    edgecolor='#ffff00',
+                    facecolor='none',
+                    ls='--',
+                    lw=1,
+                    alpha=0.8,
+                    fill=False
+                ))
+
+                # Draw outer radius
+                axs[1].add_patch(Ellipse(
+                    (cutout_size/2.0, cutout_size/2.0),
+                    width=a_r_out,
+                    height=a_r_out,
+                    angle=e_ang,
+                    edgecolor='#00ffff',
+                    facecolor='none',
+                    ls='-',
+                    lw=1,
+                    alpha=0.8,
+                    fill=False
+                ))
+
+                axs[1].add_patch(Ellipse(
+                    (cutout_size/2.0, cutout_size/2.0),
+                    width=a_r_out,
+                    height=a_r_out,
+                    angle=e_ang,
+                    edgecolor='#ffff00',
+                    facecolor='none',
+                    ls='--',
+                    lw=1,
+                    alpha=0.8,
+                    fill=False
+                ))
 
             obj_ra_str = obj_skycoord.ra.to_string(
                 unit=units.hourangle, alwayssign=True, precision=4
@@ -1130,7 +1257,7 @@ def spex(options=None):
     if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         ax.imshow(extracted_data, origin='lower')
-        fig.savefig("sext_extraction_map.png")
+        fig.savefig("sext_extraction_map.png", dpi=150)
         plt.close(fig)
 
     if args.debug:
