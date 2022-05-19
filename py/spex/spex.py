@@ -17,7 +17,6 @@ import numpy as np
 import multiprocessing
 
 from scipy.signal import savgol_filter
-from scipy.stats import median_abs_deviation
 from astropy import wcs
 from astropy.table import Table, Column
 from astropy.io import fits
@@ -29,7 +28,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
-from .utils import stack, plot_scandata
+from .utils import stack, plot_scandata, nannmad, get_residuals
 
 try:
     from .rrspex import rrspex, get_templates
@@ -825,6 +824,13 @@ def spex(options=None):
             anulus_r_in = min(anulus_r1, anulus_r2)
             anulus_r_out = max(anulus_r1, anulus_r2)
 
+    if args.debug:
+        print(
+            f"Read {len(sources[:n_objects])} sources from "
+            "input catalog/regionfile...",
+            file=sys.stderr
+        )
+
     for i, source in enumerate(sources[:n_objects]):
         progress = (i + 1) / n_objects
         sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
@@ -900,6 +906,10 @@ def spex(options=None):
             mask &= cube_footprint
 
         if np.sum(mask) == 0:
+            print(
+                f"WARNING: object {obj_id} has no footprint, skipping...",
+                file=sys.stderr
+            )
             continue
 
         obj_spectrum = trasposed_spec[mask].sum(axis=0)
@@ -920,20 +930,31 @@ def spex(options=None):
                 )
             continue
 
+        # DER-like SNR
+        # https://stdatu.stsci.edu/vodocs/der_snr.pdf
         # Smoothing the spectrum to get a crude approximation of the continuum
         smoothed_spec = savgol_filter(obj_spectrum, 51, 11)
 
         # Subtract the smoothed spectrum to the spectrum itself to get a
         # crude estimation of the noise
-        noise_spec = np.nanstd(obj_spectrum - smoothed_spec)
+        noise_spec = obj_spectrum - smoothed_spec
 
-        # Get the mean value of the spectrum
-        obj_mean_spec = np.nanmean(obj_spectrum)
+        # Get the median value of the spectrum
+        obj_mean_spec = np.nanmedian(obj_spectrum)
 
         # Get the mean Signal to Noise ratio
-        sn_spec = obj_mean_spec / np.nanmean(noise_spec)
+        sn_spec = obj_mean_spec / nannmad(noise_spec)
+
+        # Also consider using something for emission features, like
+        # https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
 
         if sn_spec < args.sn_threshold:
+            if args.debug:
+                print(
+                    f"WARNING: object {obj_id} has SN={sn_spec:.2f} < "
+                    "{args.sn_threshold}, skipping...",
+                    file=sys.stderr
+                )
             continue
 
         my_time = Time.now()
@@ -1089,6 +1110,16 @@ def spex(options=None):
             plot_templates = None
 
         print("", file=sys.stderr)
+
+        for i, target in enumerate(targets):
+            progress = (i + 1) / len(targets)
+            sys.stderr.write(
+                f"\rAnalyzing residuals {get_pbar(progress)} {progress:.2%}\r"
+            )
+            sys.stderr.flush()
+            obj = sources[source_ids == target.spec_id][0]
+
+            residuals = get_residuals(target, zfit, plot_templates)
 
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)

@@ -315,6 +315,11 @@ def plot_scandata(target, scandata):
     return fig, ax
 
 
+def get_residuals(target, zfit, plot_templates):
+    t_best_data = zfit[zfit['SPECID'] == target.spec_id][0]
+    
+
+
 def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                     cutout=None, wave_units='Angstrom', flux_units=''):
     """
@@ -642,3 +647,31 @@ def stack(data, wave_mask=None):
             new_data = np.nansum(np.array([new_data, dat]), axis=0)
     print("", file=sys.stderr)
     return new_data
+
+def nannmad(x, scale=1.48206, axis=None):
+    """
+    Compute the MAD of an array.
+
+    Compute the Median Absolute Deviation of an array ignoring NaNs.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        The input array.
+    scale : float, optional
+        A costant scale factor that depends on the distributuion.
+        See https://en.wikipedia.org/wiki/Median_absolute_deviation.
+        The default is 1.4826.
+    axis : int or None
+        The axis along which to compute the MAD.
+        The default is None.
+
+    Returns
+    -------
+    nmad
+        The NMAD value.
+
+    """
+    x_bar = np.nanmedian(x, axis=axis)
+    mad = np.nanmedian(np.abs(x - x_bar), axis=axis)
+    return scale*mad
