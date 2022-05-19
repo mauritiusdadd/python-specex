@@ -48,7 +48,10 @@ def __argshandler(options=None):
         A Namespace containing the parsed arguments. For more information see
         the python documentation of the argparse module.
     """
-    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser = argparse.ArgumentParser(
+        description='Extract spectra from a datacube and optionally compute '
+        'the redshift using rrspex backend.'
+    )
     parser.add_argument(
         'input_cube', metavar='SPEC_CUBE', type=str, nargs=1,
         help='The spectral cube in fits format from which spectra will be '
@@ -666,9 +669,9 @@ def spex(options=None):
         hdl,
         hdu_index=args.var_hdu,
         valid_names=['stat', 'var', 'variance', 'noise'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains the "
+        msg_err_notfound="WARNING: Cannot determine which HDU contains the "
                          "variance data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read the "
+        msg_index_error="WARNING: Cannot open HDU {} to read the "
                         "variance!",
         exit_on_errors=False
     )
@@ -677,9 +680,9 @@ def spex(options=None):
         hdl,
         hdu_index=args.mask_hdu,
         valid_names=['mask', 'platemask', 'footprint', 'dq'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains the "
+        msg_err_notfound="WARNING: Cannot determine which HDU contains the "
                          "mask data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read the mask!",
+        msg_index_error="WARNING: Cannot open HDU {} to read the mask!",
         exit_on_errors=False
     )
 
