@@ -9,16 +9,19 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 from __future__ import absolute_import, division, print_function
 
+import os
+import gc
 import sys
 import argparse
 import numpy as np
-import matplotlib.pyplot as plt
+import multiprocessing as mp
 
+from astropy import wcs
 from astropy.io import fits
-from astropy.visualization import ZScaleInterval
 from astropy.convolution import Gaussian2DKernel, convolve
 
 from .utils import get_pbar, get_hdu
+from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 
 def __argshandler(options=None):
@@ -179,7 +182,8 @@ def rebin_slice_2d(data, bin_size_x, bin_size_y=None, rebin_function=np.mean):
     return rebinned
 
 
-def get_sn_single_slice(cube_slice, cube_slice_var=None, rebin_size=2):
+def get_sn_single_slice(cube_slice, cube_slice_var=None, rebin_size=2,
+                        kernel_width=1):
     """
     Get Signal to Noise ratio of an image.
 
@@ -197,6 +201,9 @@ def get_sn_single_slice(cube_slice, cube_slice_var=None, rebin_size=2):
     noise_rebin_size : int, optional
         Both imput slice and  cube_slice_var (if provided) are rebinned
         combining NxN pixel into one pixel, where N = 2*rebin_size + 1.
+    kernel_width : float:
+        The std. dev. to be passed to the smoothing gaussian kernel.
+        (For more info see astropy.convolution.Gaussian2DKernel)
 
     Returns
     -------
@@ -205,8 +212,14 @@ def get_sn_single_slice(cube_slice, cube_slice_var=None, rebin_size=2):
     """
     # Compute the SN ratio for each pixel in the slice.
     # First of all, smooth the image using a 2D gaussian kernel.
-    kernel = Gaussian2DKernel(x_stddev=1)  # x_stddev = y_stddev
-    smoothed_slice = convolve(cube_slice, kernel)
+    kernel = Gaussian2DKernel(x_stddev=kernel_width)  # x_stddev = y_stddev
+    smoothed_slice = convolve(
+        cube_slice,
+        kernel,
+        nan_treatment='fill',
+        fill_value='-1',
+        preserve_nan=True
+    )
 
     bin_size = 2 * rebin_size + 1
 
@@ -232,26 +245,110 @@ def get_sn_single_slice(cube_slice, cube_slice_var=None, rebin_size=2):
     return sn_map
 
 
-def get_snr_map(data_hdu, var_hdu, rebin_size=2, wav_rebin_size=4,
-                snr_threshold=1.5):
-    datacube = data_hdu.data
-    datacube_var = var_hdu.data
-    snr_map = np.zeros_like(datacube)
+def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
+                    snr_function=get_spectrum_snr):
+    """
+    Get the SNR map of a spectral datacube.
+
+    Parameters
+    ----------
+    data_hdu : astropy.fits.ImageHDU
+        The HDU containing spectral data.
+    mask_hdu : astropy.fits.ImageHDU, optional
+        The HDU containing data qaulity mask. The default is None.
+    inverse_mask : bool, optional
+        Wether. The default is False.
+
+    Returns
+    -------
+    snr_map : TYPE
+        DESCRIPTION.
+
+    """
+
+    if mask_hdu is None:
+        cube_mask = np.isnan(data_hdu.data)
+    else:
+        cube_mask = mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
+
+    cube_var = var_hdu.data if var_hdu is not None else None
+
+    cube_flux = np.ma.array(data_hdu.data, mask=cube_mask)
+
+    snr_map = np.zeros((cube_flux.shape[1], cube_flux.shape[2]))
+
+    i = 0
+    footprint_size = cube_flux.shape[1] * cube_flux.shape[2]
+    results = {}
+    # Generating jobs...
+    with mp.Pool() as my_pool:
+        for h in range(cube_flux.shape[1]):
+            for k in range(cube_flux.shape[2]):
+                i += 1
+                if (i % 10) == 0:
+                    progress = 0.5 * i / footprint_size
+                    sys.stderr.write(
+                        f"\r{get_pbar(progress)} {progress:.2%}\r"
+                    )
+                    sys.stderr.flush()
+                # The snr of a single spaxel
+                # snr_map[h, k] = get_spectrum_snr(cube_flux[:, h, k])
+                results[h, k] = my_pool.apply_async(
+                    snr_function,
+                    (
+                        cube_flux[:, h, k],
+                        cube_var[:, h, k] if cube_var is not None else None
+                    ),
+                )
+
+        for i, (pos, val) in enumerate(results.items()):
+            if (i % 10) == 0:
+                progress = 0.5 + 0.5 * i / footprint_size
+                sys.stderr.write(
+                    f"\r{get_pbar(progress)} {progress:.2%}\r"
+                )
+                sys.stderr.flush()
+            val.wait()
+            snr_map[pos] = val.get()
+    print("")
+    return snr_map
+
+
+def get_snr_map(data_hdu, var_hdu=None, mask_hdu=None, rebin_size=2,
+                wav_rebin_size=5, inverse_mask=False):
+
+    if mask_hdu is None:
+        cube_mask = np.isnan(data_hdu.data)
+    else:
+        cube_mask = mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
+
+    cube_flux = np.ma.array(data_hdu.data, mask=cube_mask)
+
+    if var_hdu is not None:
+        cube_var = np.ma.array(var_hdu.data, mask=cube_mask)
+    else:
+        cube_var = None
+
+    snr_map = np.zeros_like(cube_flux)
     print("Computing SNR map for each wavelenght slice...", file=sys.stderr)
-    for i in range(datacube.shape[0]):
-        progress = (i + 1) / datacube.shape[0]
+    for i in range(cube_flux.shape[0]):
+        progress = (i + 1) / cube_flux.shape[0]
         sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
         sys.stderr.flush()
         snr_map[i] = get_sn_single_slice(
-            datacube[i],
-            datacube_var[i] if datacube_var is not None else None,
+            cube_flux[i],
+            cube_var[i] if cube_var is not None else None,
             rebin_size=rebin_size
         )
+
+    gc.collect()
+
     snr_map = np.ma.array(snr_map, mask=np.isnan(snr_map))
 
     optimal_wav_size = snr_map.shape[0] - snr_map.shape[0] % wav_rebin_size
     snr_map = snr_map[:optimal_wav_size, ...]
 
+    gc.collect()
     snr_map = snr_map.reshape(
         snr_map.shape[0] // wav_rebin_size,
         wav_rebin_size,
@@ -259,13 +356,14 @@ def get_snr_map(data_hdu, var_hdu, rebin_size=2, wav_rebin_size=4,
         snr_map.shape[2]
     )
 
-    snr_map = np.max(snr_map, axis=1)
-    # snr_map[snr_map < snr_threshold] = 0
-    snr_map = np.mean(snr_map, axis=0)
+    gc.collect()
+    snr_map = np.ma.mean(snr_map, axis=1)
+    snr_map[snr_map < 0] = 0
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    ax.imshow(snr_map, origin='lower')
-    plt.show()
+    gc.collect()
+    snr_map = np.ma.max(snr_map, axis=0)
+
+    return snr_map
 
 
 def main(options=None):
@@ -283,6 +381,9 @@ def main(options=None):
 
     """
     args = __argshandler(options)
+
+    basename_with_ext = os.path.basename(args.input_cube[0])
+    basename = os.path.splitext(basename_with_ext)[0]
 
     hdl = fits.open(args.input_cube[0])
 
@@ -316,4 +417,33 @@ def main(options=None):
         exit_on_errors=False
     )
 
-    snr_map = get_snr_map(spec_hdu, var_hdu)
+    cube_wcs = wcs.WCS(spec_hdu.header)
+    celestial_wcs = cube_wcs.celestial
+
+    """
+    snr_map = get_snr_map(spec_hdu, var_hdu, mask_hdu)
+    snr_map = snr_map.filled(fill_value=np.nan)
+    hdu = fits.PrimaryHDU(data=snr_map, header=celestial_wcs.to_header())
+    hdu.writeto(f"{basename}_snr_map.fits", overwrite=True)
+    """
+
+    print("\nComputing SNR of emission fearures...", file=sys.stderr)
+    snr_map_em = get_snr_spaxels(
+        spec_hdu, var_hdu, mask_hdu,
+        snr_function=get_spectrum_snr_emission
+    )
+    hdu = fits.PrimaryHDU(data=snr_map_em, header=celestial_wcs.to_header())
+    hdu.writeto(f"{basename}_snr_map_em.fits", overwrite=True)
+
+    print("\nComputing SNR of the continuum...", file=sys.stderr)
+    snr_map_cont = get_snr_spaxels(
+        spec_hdu, var_hdu, mask_hdu,
+        snr_function=get_spectrum_snr
+    )
+    hdu = fits.PrimaryHDU(data=snr_map_cont, header=celestial_wcs.to_header())
+    hdu.writeto(f"{basename}_snr_map_cont.fits", overwrite=True)
+
+    snr_map = snr_map_em + snr_map_cont
+    hdu = fits.PrimaryHDU(data=snr_map, header=celestial_wcs.to_header())
+    hdu.writeto(f"{basename}_snr_map_total.fits", overwrite=True)
+

@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
-from .utils import stack, plot_scandata, nannmad, get_residuals
+from .utils import stack, plot_scandata, get_residuals, get_spectrum_snr
 
 try:
     from .rrspex import rrspex, get_templates
@@ -933,20 +933,7 @@ def spex(options=None):
                 )
             continue
 
-        # DER-like SNR
-        # https://stdatu.stsci.edu/vodocs/der_snr.pdf
-        # Smoothing the spectrum to get a crude approximation of the continuum
-        smoothed_spec = savgol_filter(obj_spectrum, 51, 11)
-
-        # Subtract the smoothed spectrum to the spectrum itself to get a
-        # crude estimation of the noise
-        noise_spec = obj_spectrum - smoothed_spec
-
-        # Get the median value of the spectrum
-        obj_mean_spec = np.nanmedian(obj_spectrum)
-
-        # Get the mean Signal to Noise ratio
-        sn_spec = obj_mean_spec / nannmad(noise_spec)
+        sn_spec = get_spectrum_snr(obj_spectrum)
 
         # Also consider using something for emission features, like
         # https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
@@ -988,7 +975,8 @@ def spex(options=None):
                 )
                 obj_spectrum_var += bkg_spectrum_var*np.sum(mask)
 
-            sn_var = obj_mean_spec / np.sqrt(np.nanmean(obj_spectrum_var))
+            sn_var = np.nanmedian(obj_spectrum)
+            sn_var /= np.sqrt(np.nanmean(obj_spectrum_var))
 
             main_header['SN_VAR'] = (sn_var, "")
         else:

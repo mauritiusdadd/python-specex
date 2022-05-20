@@ -672,6 +672,98 @@ def nannmad(x, scale=1.48206, axis=None):
         The NMAD value.
 
     """
-    x_bar = np.nanmedian(x, axis=axis)
-    mad = np.nanmedian(np.abs(x - x_bar), axis=axis)
+    x = np.ma.array(x, mask=np.isnan(x))
+    x_bar = np.ma.median(x, axis=axis)
+    mad = np.ma.median(np.ma.abs(x - x_bar), axis=axis)
     return scale*mad
+
+
+def get_spectrum_snr(flux, smoothing_window=51, smoothing_order=11):
+    """
+    Compute the SRN of a spectrum.
+
+    Parameters
+    ----------
+    flux : numpy.ndarray
+        The spectrum itself.
+    smoothing_window : int, optional
+        Parameter to be passed to the smoothing function.
+        The default is 51.
+    smoothing_order : int, optional
+        Parameter to be passed to the smoothing function.
+        The default is 11.
+
+    Returns
+    -------
+    sn_spec : float
+        The SNR of the spectrum.
+
+    """
+    # DER-like SNR but with a true smoothing
+    # https://stdatu.stsci.edu/vodocs/der_snr.pdf
+    # Smoothing the spectrum to get a crude approximation of the continuum
+    smoothed_spec = savgol_filter(flux, smoothing_window, smoothing_order)
+
+    # Subtract the smoothed spectrum to the spectrum itself to get a
+    # crude estimation of the noise
+    noise_spec = flux - smoothed_spec
+
+    # Get the median value of the spectrum
+    obj_mean_spec = np.nanmedian(flux)
+
+    # Get the mean Signal to Noise ratio
+    sn_spec = obj_mean_spec / nannmad(noise_spec)
+
+    return sn_spec
+
+
+def get_spectrum_snr_emission(flux, var=None, bin_size=50):
+    """
+    Compute the SRN of a spectrum.
+
+    Parameters
+    ----------
+    flux : numpy.ndarray
+        The spectrum itself.
+    smoothing_window : int, optional
+        Parameter to be passed to the smoothing function.
+        The default is 51.
+    smoothing_order : int, optional
+        Parameter to be passed to the smoothing function.
+        The default is 11.
+
+    Returns
+    -------
+    sn_spec : float
+        The SNR of the spectrum.
+
+    """
+
+    # Just ignore negative fluxes!
+    flux[flux < 0] = 0
+    if var is not None:
+        flux = flux / var
+
+    optimal_width = flux.shape[0] - flux.shape[0] % bin_size
+    flux = flux[:optimal_width]
+
+    if np.isnan(flux).all():
+        return np.nan
+    else:
+        flux = np.ma.array(flux, mask=np.isnan(flux))
+
+    # Rebin sub_spec to search for emission features
+    sub_spec = flux.reshape(flux.shape[0] // bin_size, bin_size)
+
+    # Inspired by https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
+    # For each bin we compute the maximum and the median of each bin and
+    # get their difference. This is now our "signal": if there is an
+    # emission line, the maximum value is greater that the median and this
+    # difference will be greater than one
+    sub_diff = np.ma.max(sub_spec, axis=1) - np.ma.median(sub_spec, axis=1)
+
+    # Now let's normalize the vlaues using the median of the difference
+    s_em = sub_diff - np.ma.median(sub_diff)
+    noise_em = nannmad(sub_diff)
+
+    return np.ma.max(s_em / noise_em)

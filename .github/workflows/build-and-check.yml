@@ -61,6 +61,10 @@ jobs:
       run: |
         echo "Testing base spex functionality..."
         python -m unittest test/test_spex.py
+    - name: Test source detection
+      run: |
+        echo "Testing source detection functionality"
+        python -m unittest test/test_sources.py
     - name: Test cubestack
       run: |
         cubestack --help

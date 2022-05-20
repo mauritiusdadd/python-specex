@@ -12,17 +12,8 @@ from __future__ import absolute_import, division, print_function
 import os
 import unittest
 import pathlib
-from astropy.io import fits
-from astropy.table import Table, join
 
 from spex.spex import spex
-
-try:
-    from spex.rrspex import rrspex
-except ImportError:
-    HAS_RR = False
-else:
-    HAS_RR = True
 
 
 TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
@@ -53,10 +44,8 @@ class TestSpex(unittest.TestCase):
         ]
         spex(options=spex_options)
 
-    """
-    @unittest.skipIf(not HAS_RR, "redrock not installed")
-    def test_spex_rrspex_success(self):
-        spex_options = [
-        ]
-        spex(options=spex_options)
-    """
+
+if __name__ == '__main__':
+    mytest = TestSpex()
+    mytest.test_spex_catalog_success()
+    mytest.test_spex_regionfile_success()
