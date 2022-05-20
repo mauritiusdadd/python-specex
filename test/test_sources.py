@@ -20,7 +20,7 @@ TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
 class TestSourceDetection(unittest.TestCase):
 
     test_cube_file = os.path.join(TEST_DATA_PATH, "test_cube.fits")
-    
+
     def test_extract_sources(self):
         main([self.test_cube_file])
 

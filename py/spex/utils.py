@@ -678,7 +678,7 @@ def nannmad(x, scale=1.48206, axis=None):
     return scale*mad
 
 
-def get_spectrum_snr(flux, smoothing_window=51, smoothing_order=11):
+def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     """
     Compute the SRN of a spectrum.
 
@@ -702,14 +702,26 @@ def get_spectrum_snr(flux, smoothing_window=51, smoothing_order=11):
     # DER-like SNR but with a true smoothing
     # https://stdatu.stsci.edu/vodocs/der_snr.pdf
     # Smoothing the spectrum to get a crude approximation of the continuum
+
+    if np.isnan(flux).all():
+        return np.nan
+    else:
+        flux = np.ma.array(flux, mask=np.isnan(flux))
+
+    if var is not None:
+        var = np.ma.array(var, mask=np.isnan(var))
+    else:
+        var = 1.0
+
     smoothed_spec = savgol_filter(flux, smoothing_window, smoothing_order)
+    smoothed_spec = np.ma.array(smoothed_spec, mask=np.isnan(smoothed_spec))
 
     # Subtract the smoothed spectrum to the spectrum itself to get a
     # crude estimation of the noise
     noise_spec = flux - smoothed_spec
 
-    # Get the median value of the spectrum
-    obj_mean_spec = np.nanmedian(flux)
+    # Get the median value of the spectrum, weighted by the variance
+    obj_mean_spec = np.ma.median(flux / var) * np.ma.sum(var)
 
     # Get the mean Signal to Noise ratio
     sn_spec = obj_mean_spec / nannmad(noise_spec)
@@ -741,6 +753,8 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=50):
 
     # Just ignore negative fluxes!
     flux[flux < 0] = 0
+
+    # If we have the variace, we can use it to weight the flux
     if var is not None:
         flux = flux / var
 

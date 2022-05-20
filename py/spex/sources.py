@@ -191,6 +191,12 @@ def get_sn_single_slice(cube_slice, cube_slice_var=None, rebin_size=2,
     signal to noise ratio of each pixel. If a pixel has a SN greather than the
     given threshold then it is considered to belong to a source.
 
+    NOTE
+    ----
+    This function is *very* memory intensive and will probably never be
+    actually used since I wrote more memory-wise functions. I leave it
+    here just as an example.
+
     Parameters
     ----------
     cube_slice : 2D np.ndarray
@@ -311,58 +317,6 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
             val.wait()
             snr_map[pos] = val.get()
     print("")
-    return snr_map
-
-
-def get_snr_map(data_hdu, var_hdu=None, mask_hdu=None, rebin_size=2,
-                wav_rebin_size=5, inverse_mask=False):
-
-    if mask_hdu is None:
-        cube_mask = np.isnan(data_hdu.data)
-    else:
-        cube_mask = mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
-
-    cube_flux = np.ma.array(data_hdu.data, mask=cube_mask)
-
-    if var_hdu is not None:
-        cube_var = np.ma.array(var_hdu.data, mask=cube_mask)
-    else:
-        cube_var = None
-
-    snr_map = np.zeros_like(cube_flux)
-    print("Computing SNR map for each wavelenght slice...", file=sys.stderr)
-    for i in range(cube_flux.shape[0]):
-        progress = (i + 1) / cube_flux.shape[0]
-        sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-        sys.stderr.flush()
-        snr_map[i] = get_sn_single_slice(
-            cube_flux[i],
-            cube_var[i] if cube_var is not None else None,
-            rebin_size=rebin_size
-        )
-
-    gc.collect()
-
-    snr_map = np.ma.array(snr_map, mask=np.isnan(snr_map))
-
-    optimal_wav_size = snr_map.shape[0] - snr_map.shape[0] % wav_rebin_size
-    snr_map = snr_map[:optimal_wav_size, ...]
-
-    gc.collect()
-    snr_map = snr_map.reshape(
-        snr_map.shape[0] // wav_rebin_size,
-        wav_rebin_size,
-        snr_map.shape[1],
-        snr_map.shape[2]
-    )
-
-    gc.collect()
-    snr_map = np.ma.mean(snr_map, axis=1)
-    snr_map[snr_map < 0] = 0
-
-    gc.collect()
-    snr_map = np.ma.max(snr_map, axis=0)
-
     return snr_map
 
 
