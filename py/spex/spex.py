@@ -28,7 +28,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
-from .utils import stack, plot_scandata, get_residuals, get_spectrum_snr
+from .utils import stack, plot_scandata, get_residuals
+from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 try:
     from .rrspex import rrspex, get_templates
@@ -933,15 +934,28 @@ def spex(options=None):
                 )
             continue
 
-        sn_spec = get_spectrum_snr(obj_spectrum)
+        if var_hdu is not None:
+            obj_spectrum_var = trasposed_var[mask].sum(axis=0)
 
-        # Also consider using something for emission features, like
-        # https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
+            if anulus_mask is not None:
+                # Same consideration as before.
+                bkg_spectrum_var = np.median(
+                    trasposed_var[anulus_mask], axis=0
+                )
+                obj_spectrum_var += bkg_spectrum_var*np.sum(mask)
 
-        if sn_spec < args.sn_threshold:
+            sn_var = np.nanmedian(obj_spectrum)
+            sn_var /= np.sqrt(np.nanmean(obj_spectrum_var))
+        else:
+            obj_spectrum_var = None
+
+        sn_spec = get_spectrum_snr(obj_spectrum, obj_spectrum_var)
+        sn_em = get_spectrum_snr_emission(obj_spectrum, obj_spectrum_var)
+
+        if max(sn_spec, sn_em) < args.sn_threshold:
             if args.debug:
                 print(
-                    f"WARNING: object {obj_id} has SN={sn_spec:.2f} < "
+                    f"WARNING: object {obj_id} has SNR={sn_spec:.2f} < "
                     "{args.sn_threshold}, skipping...",
                     file=sys.stderr
                 )
@@ -959,28 +973,12 @@ def spex(options=None):
             'NPIX': (np.sum(mask), 'Number of pixels used for this spectra'),
             'HISTORY': f'Extracted on {str(my_time)}',
             'ID': obj_id,
-            'SN': (sn_spec, ""),
+            'SN': (sn_spec, "SNR of the total spectrum"),
+            'SN_EMISS': (sn_em, "SNR due to emissino lines only")
         }
 
         # Copy the spectral part of the WCS into the new FITS
         spec_wcs_header = spectral_wcs.to_header()
-
-        if var_hdu is not None:
-            obj_spectrum_var = trasposed_var[mask].sum(axis=0)
-
-            if anulus_mask is not None:
-                # Same consideration as before.
-                bkg_spectrum_var = np.median(
-                    trasposed_var[anulus_mask], axis=0
-                )
-                obj_spectrum_var += bkg_spectrum_var*np.sum(mask)
-
-            sn_var = np.nanmedian(obj_spectrum)
-            sn_var /= np.sqrt(np.nanmean(obj_spectrum_var))
-
-            main_header['SN_VAR'] = (sn_var, "")
-        else:
-            obj_spectrum_var = None
 
         hdul = get_spsingle_fits(
             main_header, spec_wcs_header,

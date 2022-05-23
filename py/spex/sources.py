@@ -18,9 +18,13 @@ import multiprocessing as mp
 
 from astropy import wcs
 from astropy.io import fits
+from astropy.table import Table
 from astropy.convolution import Gaussian2DKernel, convolve
 
-from .utils import get_pbar, get_hdu
+from scipy.ndimage import maximum_filter
+from astropy.convolution import Gaussian2DKernel, convolve
+
+from .utils import get_pbar, get_hdu, get_peaks
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 
@@ -320,7 +324,61 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
     return snr_map
 
 
-def main(options=None):
+def get_peaks(image, box_sizes=[3, 5], threshold=0, smoothing_factor=1):
+    """
+    Find local peaks in an image.
+
+    Parameters
+    ----------
+    image : 2D numpy.ndarray
+        The image data.
+    box_size : int, optional
+        The size of the dilation box. The default is 3.
+        See https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.maximum_filter.html
+    threshold : float, optional
+        Peaks with value lower or equal than this value will be discarded.
+    smoothing_factor : float, optional
+        Std. Dev. of the gaussian kernel used to smooth the input image.
+
+    Returns
+    -------
+    peaks : list
+        list of 2-tuples containing the positions of the local maxima.
+
+    """
+
+    if not box_sizes:
+        box_sizes = [3, 5]
+
+    smoothing_kernel = Gaussian2DKernel(x_stddev=1)
+    im_smooth = convolve(
+        image,
+        smoothing_kernel,
+        preserve_nan=True
+    )
+
+    dilated = [
+        maximum_filter(image, size=x) for x in box_sizes
+    ]
+
+    mask = np.ones_like(image, dtype=bool)
+
+    for d_img in dilated[1:]:
+        mask &= im_smooth == d_img
+
+    peaks = np.argwhere(mask)
+
+    valid_peaks = np.array(
+        (x[0], x[1], im_smooth[x[0], x[1]]) for x in peaks
+        if im_smooth[x[0], x[1]] > 0.0
+    )
+
+    tbl = Table(data=valid_peaks, names=['X_IMAGE', 'Y_IMAGE', 'SNR'])
+
+    return tbl
+
+
+def detect_from_cube(options=None):
     """
     Run the main program of this module.
 
@@ -390,14 +448,29 @@ def main(options=None):
     hdu.writeto(f"{basename}_snr_map_em.fits", overwrite=True)
 
     print("\nComputing SNR of the continuum...", file=sys.stderr)
-    snr_map_cont = get_snr_spaxels(
+    snr_map_ct = get_snr_spaxels(
         spec_hdu, var_hdu, mask_hdu,
         snr_function=get_spectrum_snr
     )
-    hdu = fits.PrimaryHDU(data=snr_map_cont, header=celestial_wcs.to_header())
+    hdu = fits.PrimaryHDU(data=snr_map_ct, header=celestial_wcs.to_header())
     hdu.writeto(f"{basename}_snr_map_cont.fits", overwrite=True)
 
-    snr_map = snr_map_em + snr_map_cont
+    smoothing_kernel = Gaussian2DKernel(x_stddev=1.5)
+
+    snr_map_em_smooth = convolve(
+        snr_map_em,
+        smoothing_kernel,
+        preserve_nan=True
+    )
+    snr_map_ct_smooth = convolve(
+        snr_map_ct,
+        smoothing_kernel,
+        preserve_nan=True
+    )
+
+    snr_map_em_smooth[snr_map_em_smooth < 0] = 0
+    snr_map_ct_smooth[snr_map_ct_smooth < 0] = 0
+
+    snr_map = snr_map_em_smooth + snr_map_ct_smooth
     hdu = fits.PrimaryHDU(data=snr_map, header=celestial_wcs.to_header())
     hdu.writeto(f"{basename}_snr_map_total.fits", overwrite=True)
-

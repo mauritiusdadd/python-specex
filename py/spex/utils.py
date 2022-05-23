@@ -9,10 +9,13 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import sys
 import numpy as np
+
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib import patches
+
 from scipy.signal import savgol_filter
+
 from astropy.nddata import Cutout2D
 from astropy.visualization import ZScaleInterval
 
@@ -553,7 +556,11 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     splabel += f"best template: {t_best_data['SPECTYPE']} "
     splabel += f"{t_best_data['SUBTYPE']}\n" if t_best_data['SUBTYPE'] else'\n'
     try:
-        splabel += f"SN ratio: {t_best_data['SN']:.2f}\n"
+        splabel += f"SNR: {t_best_data['SN']:.2f}\n"
+    except KeyError:
+        pass
+    try:
+        splabel += f"SNR (EM): {t_best_data['SN_EMISS']:.2f}\n"
     except KeyError:
         pass
     splabel += f"z-fit warn: {t_best_data['ZWARN']}"
@@ -721,7 +728,7 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     noise_spec = flux - smoothed_spec
 
     # Get the median value of the spectrum, weighted by the variance
-    obj_mean_spec = np.ma.median(flux / var) * np.ma.sum(var)
+    obj_mean_spec = np.ma.sum(flux / var) / np.ma.sum(1 / var)
 
     # Get the mean Signal to Noise ratio
     sn_spec = obj_mean_spec / nannmad(noise_spec)
@@ -731,18 +738,15 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
 
 def get_spectrum_snr_emission(flux, var=None, bin_size=50):
     """
-    Compute the SRN of a spectrum.
+    Compute the SRN of a spectrum considering emission lines only.
 
     Parameters
     ----------
     flux : numpy.ndarray
         The spectrum itself.
-    smoothing_window : int, optional
-        Parameter to be passed to the smoothing function.
-        The default is 51.
-    smoothing_order : int, optional
-        Parameter to be passed to the smoothing function.
-        The default is 11.
+    bin_size : int, optional
+        Bin size to search for emission lines.
+        The default is 50.
 
     Returns
     -------
@@ -750,6 +754,7 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=50):
         The SNR of the spectrum.
 
     """
+    # Inspired by https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
 
     # Just ignore negative fluxes!
     flux[flux < 0] = 0
@@ -769,15 +774,13 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=50):
     # Rebin sub_spec to search for emission features
     sub_spec = flux.reshape(flux.shape[0] // bin_size, bin_size)
 
-    # Inspired by https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
     # For each bin we compute the maximum and the median of each bin and
     # get their difference. This is now our "signal": if there is an
     # emission line, the maximum value is greater that the median and this
     # difference will be greater than one
     sub_diff = np.ma.max(sub_spec, axis=1) - np.ma.median(sub_spec, axis=1)
 
-    # Now let's normalize the vlaues using the median of the difference
-    s_em = sub_diff - np.ma.median(sub_diff)
+    s_em = sub_diff / 3.0*np.ma.median(sub_diff) - 1
     noise_em = nannmad(sub_diff)
 
     return np.ma.max(s_em / noise_em)
