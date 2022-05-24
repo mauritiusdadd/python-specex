@@ -31,6 +31,8 @@ from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
 from .utils import stack, plot_scandata, get_residuals
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
+from .sources import get_spectrum
+
 try:
     from .rrspex import rrspex, get_templates
 except ImportError:
@@ -328,6 +330,12 @@ def get_spplate_fits(cube_header, spec_header, obj_ids, spec_data,
     tbl_hdu = fits.BinTableHDU()
     sky_hdu = fits.ImageHDU()
 
+    if isinstance(spec_data, np.ma.MaskedArray):
+        spec_data = spec_data.filled(np.nan)
+
+    if isinstance(var_data, np.ma.MaskedArray):
+        var_data = var_data.filled(np.nan)
+
     spec_hdu.data = spec_data.T
     spec_hdu.header['PLATEID'] = 0
 
@@ -433,6 +441,12 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
     """
     my_time = Time.now()
     my_time.format = 'isot'
+
+    if isinstance(obj_spectrum, np.ma.MaskedArray):
+        obj_spectrum = obj_spectrum.filled(np.nan)
+
+    if isinstance(obj_spectrum_var, np.ma.MaskedArray):
+        obj_spectrum_var = obj_spectrum_var.filled(np.nan)
 
     # The primary hdu contains no data but a header with information on
     # how the spectrum was extracted
@@ -747,11 +761,6 @@ def spex(options=None):
     if args.check_images:
         extracted_data = np.zeros((img_height, img_width))
 
-    trasposed_spec = spec_hdu.data.transpose(1, 2, 0)
-
-    if var_hdu is not None:
-        trasposed_var = var_hdu.data.transpose(1, 2, 0)
-
     # Chech if there is a footprint mask in the cube
     if mask_hdu is not None:
         cube_footprint = mask_hdu.data.prod(axis=0) == 0
@@ -916,12 +925,33 @@ def spex(options=None):
             )
             continue
 
-        obj_spectrum = trasposed_spec[mask].sum(axis=0)
+        obj_spectrum, obj_spectrum_var = get_spectrum(
+            spec_hdu.data[:, mask],
+            var_hdu.data[:, mask] if var_hdu is not None else None
+        )
+
+        obj_spectrum = obj_spectrum.filled(np.nan)
+        obj_spectrum_var = obj_spectrum_var.filled(np.nan)
+
+        if np.sum(np.isnan(obj_spectrum_var[~np.isnan(obj_spectrum)])) != 0:
+            print(
+                f"\nWARNING: object {obj_id}  is weird! Skipping...\n",
+                file=sys.stderr
+            )
+            continue
+
+        if np.sum(~np.isnan(obj_spectrum)) < 100:
+            print(
+                f"WARNING: object {obj_id} has invalid data...",
+                file=sys.stderr
+            )
+
         if anulus_mask is not None:
+            # TODO: fix here!
             # Here we suppose that background vaies very slowly within object
             # aperture. In this case we can copute the mean background and
             # subtract it total contribution within the aperture.
-            bkg_spectrum = np.median(trasposed_spec[anulus_mask], axis=0)
+            bkg_spectrum = np.median(spec_hdu.data[:, mask], axis=0)
             smoothed_bkg_spectrum = savgol_filter(bkg_spectrum, 51, 11)
             obj_spectrum -= smoothed_bkg_spectrum*np.sum(mask)
 
@@ -934,29 +964,15 @@ def spex(options=None):
                 )
             continue
 
-        if var_hdu is not None:
-            obj_spectrum_var = trasposed_var[mask].sum(axis=0)
-
-            if anulus_mask is not None:
-                # Same consideration as before.
-                bkg_spectrum_var = np.median(
-                    trasposed_var[anulus_mask], axis=0
-                )
-                obj_spectrum_var += bkg_spectrum_var*np.sum(mask)
-
-            sn_var = np.nanmedian(obj_spectrum)
-            sn_var /= np.sqrt(np.nanmean(obj_spectrum_var))
-        else:
-            obj_spectrum_var = None
-
         sn_spec = get_spectrum_snr(obj_spectrum, obj_spectrum_var)
         sn_em = get_spectrum_snr_emission(obj_spectrum, obj_spectrum_var)
+
 
         if max(sn_spec, sn_em) < args.sn_threshold:
             if args.debug:
                 print(
                     f"WARNING: object {obj_id} has SNR={sn_spec:.2f} < "
-                    "{args.sn_threshold}, skipping...",
+                    f"{args.sn_threshold}, skipping...",
                     file=sys.stderr
                 )
             continue
@@ -1108,7 +1124,7 @@ def spex(options=None):
             sys.stderr.flush()
             obj = sources[source_ids == target.spec_id][0]
 
-            residuals = get_residuals(target, zfit, plot_templates)
+            # residuals = get_residuals(target, zfit, plot_templates)
 
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)

@@ -10,7 +10,6 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 from __future__ import absolute_import, division, print_function
 
 import os
-import gc
 import sys
 import argparse
 import numpy as np
@@ -21,10 +20,9 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.convolution import Gaussian2DKernel, convolve
 
-from scipy.ndimage import maximum_filter
-from astropy.convolution import Gaussian2DKernel, convolve
+from scipy.ndimage.morphology import grey_dilation, grey_erosion
 
-from .utils import get_pbar, get_hdu, get_peaks
+from .utils import get_pbar, get_hdu
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 
@@ -281,7 +279,12 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
     else:
         cube_mask = mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
 
-    cube_var = var_hdu.data if var_hdu is not None else None
+    if var_hdu is not None:
+        cube_var = np.ma.array(
+            var_hdu.data, mask=cube_mask & np.isnan(var_hdu.data)
+        )
+    else:
+        cube_var = None
 
     cube_flux = np.ma.array(data_hdu.data, mask=cube_mask)
 
@@ -324,9 +327,63 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
     return snr_map
 
 
-def get_peaks(image, box_sizes=[3, 5], threshold=0, smoothing_factor=1):
+def get_local_maxima(image, threshold=0, smoothing_factor=1):
     """
-    Find local peaks in an image.
+    Find local peaks in an image comparing pixels with their neighbours.
+
+    Parameters
+    ----------
+    image : 2D numpy.ndarray
+        The image data.
+    threshold : float, optional
+        Peaks with value lower or equal than this value will be discarded.
+    smoothing_factor : float, optional
+        Std. Dev. of the gaussian kernel used to smooth the input image.
+
+    Returns
+    -------
+    peaks : list
+        list of 2-tuples containing the positions of the local maxima.
+    """
+    hh, ww = image.shape
+    p_map = np.zeros_like(image)
+
+    smoothing_kernel = Gaussian2DKernel(x_stddev=1)
+    im_smooth = convolve(
+        image,
+        smoothing_kernel,
+        preserve_nan=True
+    )
+
+    for h in range(1, hh-1):
+        for k in range(1, ww-1):
+            if (
+                im_smooth[h, k] > im_smooth[h-1, k] and
+                im_smooth[h, k] > im_smooth[h+1, k] and
+                im_smooth[h, k] > im_smooth[h, k-1] and
+                im_smooth[h, k] > im_smooth[h, k+1]
+            ):
+                p_map[h, k] += 1
+
+    peaks = np.argwhere(p_map > 0)
+
+    valid_peaks = np.array(
+        [
+            (x[0], x[1], im_smooth[x[0], x[1]]) for x in peaks
+            if not np.isnan(im_smooth[x[0], x[1]]) and
+            im_smooth[x[0], x[1]] > threshold
+        ]
+    )
+
+    tbl = Table(data=valid_peaks, names=['Y_IMAGE', 'X_IMAGE', 'SNR'])
+
+    return tbl
+
+
+def get_dilation_maxima(image, box_sizes=[3, 5], threshold=0,
+                        smoothing_factor=1):
+    """
+    Find local peaks in an image using a dilation morphological filter.
 
     Parameters
     ----------
@@ -344,9 +401,7 @@ def get_peaks(image, box_sizes=[3, 5], threshold=0, smoothing_factor=1):
     -------
     peaks : list
         list of 2-tuples containing the positions of the local maxima.
-
     """
-
     if not box_sizes:
         box_sizes = [3, 5]
 
@@ -358,24 +413,171 @@ def get_peaks(image, box_sizes=[3, 5], threshold=0, smoothing_factor=1):
     )
 
     dilated = [
-        maximum_filter(image, size=x) for x in box_sizes
+        grey_dilation(im_smooth, size=x) for x in box_sizes
     ]
 
-    mask = np.ones_like(image, dtype=bool)
+    mask = np.ones_like(im_smooth, dtype=bool)
 
-    for d_img in dilated[1:]:
+    for d_img in dilated:
         mask &= im_smooth == d_img
 
+    # TODO: What happens if we have a region of pixels of euqal values?
+    #       In this case we should find the center of mass of the region?
     peaks = np.argwhere(mask)
 
     valid_peaks = np.array(
-        (x[0], x[1], im_smooth[x[0], x[1]]) for x in peaks
-        if im_smooth[x[0], x[1]] > 0.0
+        [
+            (x[0], x[1], im_smooth[x[0], x[1]]) for x in peaks
+            if not np.isnan(im_smooth[x[0], x[1]]) and
+            im_smooth[x[0], x[1]] > threshold
+        ]
     )
 
-    tbl = Table(data=valid_peaks, names=['X_IMAGE', 'Y_IMAGE', 'SNR'])
+    tbl = Table(data=valid_peaks, names=['Y_IMAGE', 'X_IMAGE', 'SNR'])
 
     return tbl
+
+
+def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
+    if weights is None:
+        sum_weights = 1
+    else:
+        sum_weights = weights[:, None]
+
+    if var_spaxels is not None:
+        if not isinstance(var_spaxels, np.ma.MaskedArray):
+            var_spaxels = np.ma.array(var_spaxels, mask=np.isnan(var_spaxels))
+
+        assert var_spaxels.shape == flux_spaxels.shape
+        sum_weights /= var_spaxels
+
+    if not isinstance(flux_spaxels, np.ma.MaskedArray):
+        flux_spaxels = np.ma.array(flux_spaxels, mask=np.isnan(flux_spaxels))
+
+    spectrum = np.ma.sum(flux_spaxels * sum_weights, axis=-1)
+    spectrum /= np.ma.sum(sum_weights, axis=-1)
+
+    if var_spaxels is None:
+        spectrum_var = np.ma.var(flux_spaxels, axis=-1)
+    else:
+        spectrum_var = np.ma.sum(var_spaxels, axis=-1)
+
+    if average:
+        spectrum_var /= flux_spaxels.shape[-1]
+    else:
+        spectrum *= flux_spaxels.shape[-1]
+
+    return spectrum, spectrum_var
+
+
+def source_clustering(sources_table, data_hdu, var_hdu=None, mask_hdu=None,
+                      snr_function=get_spectrum_snr, max_distance=3,
+                      nmae_threshold=1, inverse_mask=False):
+    def has_a_neighbour(arr, y, x):
+        val = (arr[y+1, x] != -1) or (arr[y-1, x] != -1)
+        val = val or (arr[y, x-1] != -1) or (arr[y, x-1] != -1)
+        val = val or (arr[y-1, x-1] != -1) or (arr[y+1, x+1] != -1)
+        val = val or (arr[y-1, x+1] != -1) or (arr[y+1, x-1] != -1)
+        return val
+
+    if mask_hdu is None:
+        cube_mask = np.isnan(data_hdu.data)
+    else:
+        cube_mask = mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
+
+    if var_hdu is not None:
+        cube_var = np.ma.array(
+            var_hdu.data, mask=cube_mask & np.isnan(var_hdu.data)
+        )
+    else:
+        cube_var = None
+
+    cube_flux = np.ma.array(data_hdu.data, mask=cube_mask)
+
+    source_map = -1 * np.ones((cube_flux.shape[1], cube_flux.shape[2]))
+    source_prob = np.ones((cube_flux.shape[1], cube_flux.shape[2]))
+
+    for sid, source in enumerate(sources_table):
+        progress = sid / len(sources_table)
+        sys.stderr.write(
+            f"\r{get_pbar(progress)} {progress:.2%}\r"
+        )
+        sys.stderr.flush()
+
+        source_x = int(source['X_IMAGE'])
+        source_y = int(source['Y_IMAGE'])
+
+        if source_map[source_y, source_x] >= 0:
+            sid = source_map[source_y, source_x]
+        else:
+            source_map[source_y, source_x] = sid
+
+        base_spectrum = cube_flux[..., source_y, source_x]
+        if cube_var is not None:
+            base_var = cube_var[..., source_y, source_x]
+        else:
+            base_var = None
+
+        base_snr = snr_function(base_spectrum, base_var)
+
+        pixels = []
+        for h in range(-max_distance, max_distance+1):
+            for k in range(-max_distance, max_distance+1):
+                if h == 0 and k == 0:
+                    # this is base_spectrum itself
+                    continue
+                elif (h**2 + k**2) > max_distance**2:
+                    continue
+                new_sp_y = int(source['Y_IMAGE'] + h)
+                new_sp_x = int(source['X_IMAGE'] + k)
+                pixels.append((new_sp_y, new_sp_x, h**2 + k**2))
+
+        pixels.sort(key=lambda tup: tup[2])
+
+        for j, (new_sp_y, new_sp_x, d) in enumerate(pixels):
+            progress = (sid + j/len(pixels)) / len(sources_table)
+            if j % 10 == 0:
+                sys.stderr.write(
+                    f"\r{get_pbar(progress)} {progress:.2%}\r"
+                )
+                sys.stderr.flush()
+            # Add a new pixel to source_map
+
+            if not has_a_neighbour(source_map, new_sp_y, new_sp_x):
+                continue
+
+            _old_map_value = source_map[new_sp_y, new_sp_x]
+            source_map[new_sp_y, new_sp_x] = sid
+
+            # Check wheter we improved the SNR of the total spectrum
+            flux_spaxels = cube_flux[:, source_map == sid]
+
+            if cube_var is not None:
+                var_spaxels = cube_var[:, source_map == sid]
+            else:
+                var_spaxels = None
+
+            new_spectrum, new_var = get_spectrum(
+                flux_spaxels,
+                var_spaxels,
+                average=False
+            )
+
+            new_snr = snr_function(new_spectrum, new_var)
+
+            # if SNR did not improve then remove this pixel from the map
+            if new_snr > base_snr:
+                base_snr = new_snr
+                source_map[new_sp_y, new_sp_x] = sid
+                if _old_map_value != -1:
+                    # We want to add this spaxel to the current source but
+                    # it already belongs to another source... merging
+                    source_map[source_map == _old_map_value] = sid
+                    pass
+            else:
+                source_map[new_sp_y, new_sp_x] = _old_map_value
+
+    return source_map
 
 
 def detect_from_cube(options=None):

@@ -19,8 +19,7 @@ TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
 
 class TestSourceDetection(unittest.TestCase):
 
-    # test_cube_file = os.path.join(TEST_DATA_PATH, "test_cube.fits")
-    test_cube_file = "/home/daddona/dottorato/Y1/muse_cubes/M0416/MACSJ0416_NE_DATACUBE_FINAL_VACUUM_caminha_zap.fits"
+    test_cube_file = os.path.join(TEST_DATA_PATH, "test_cube.fits")
 
     def test_extract_sources(self):
         detect_from_cube([self.test_cube_file])

@@ -322,6 +322,10 @@ def get_residuals(target, zfit, plot_templates):
     t_best_data = zfit[zfit['SPECID'] == target.spec_id][0]
     
 
+def plot_spectrum(flux, variance, rest_frame=False, z=0,
+                  cutout=None, wave_units='Angstrom', flux_units=''):
+    pass
+
 
 def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                     cutout=None, wave_units='Angstrom', flux_units=''):
@@ -728,7 +732,7 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     noise_spec = flux - smoothed_spec
 
     # Get the median value of the spectrum, weighted by the variance
-    obj_mean_spec = np.ma.sum(flux / var) / np.ma.sum(1 / var)
+    obj_mean_spec = np.ma.sum(smoothed_spec / var) / np.ma.sum(1 / var)
 
     # Get the mean Signal to Noise ratio
     sn_spec = obj_mean_spec / nannmad(noise_spec)
