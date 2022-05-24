@@ -15,12 +15,14 @@ import argparse
 import numpy as np
 import multiprocessing as mp
 
+import matplotlib.pyplot as plt
+
 from astropy import wcs
 from astropy.io import fits
 from astropy.table import Table
 from astropy.convolution import Gaussian2DKernel, convolve
 
-from scipy.ndimage.morphology import grey_dilation, grey_erosion
+from scipy.ndimage.morphology import grey_dilation  # , grey_erosion
 
 from .utils import get_pbar, get_hdu
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
@@ -53,7 +55,9 @@ def __argshandler(options=None):
     parser.add_argument(
         '--sn-threshold', metavar='SN_THRESH', type=float, default=1.5,
         help='Set the signal to Noise ratio threshold: objects with their '
-        'spectrum having a SN ratio lower than threshold will be ignored.'
+        'spectrum having a SN ratio lower than threshold will be ignored. '
+        'If SN_THRESH is set to a value equal or lower than 0, SN filtering '
+        'is disabled'
     )
 
     parser.add_argument(
@@ -96,6 +100,17 @@ def __argshandler(options=None):
         help='Set the directory where extracted spectra will be outputed. '
         'If this parameter is not specified, then a new directory will be '
         'created based on the name of the input cube.'
+    )
+
+    parser.add_argument(
+        '--check-images', action='store_true', default=False,
+        help='Whether or not to generate check images.'
+    )
+
+    parser.add_argument(
+        "--checkimg-outdir", type=str, default=None, required=False,
+        help='Set the directory where check images are saved (when they are '
+        'enabled thorugh the appropriate parameter).'
     )
 
     args = None
@@ -273,7 +288,6 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
         DESCRIPTION.
 
     """
-
     if mask_hdu is None:
         cube_mask = np.isnan(data_hdu.data)
     else:
@@ -439,6 +453,30 @@ def get_dilation_maxima(image, box_sizes=[3, 5], threshold=0,
 
 
 def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
+    """
+    Get spectrum from a list of spaxels.
+
+    Parameters
+    ----------
+    flux_spaxels : 2D numpy.ndarray
+        The set of spectralspaxels used to compute the spectrum, in the form of
+        a 2D numpy array where the first axis represents the wavelength and the
+        second axis moves trough the different spaxels.
+    var_spaxels : 2D numpy.ndarray, optional
+        Same format of flux_spaxels but for variace data. The default is None.
+        If none, the variance is computed using the spectra lspaxels.
+    weights : 1D numpy.ndarray or list of float, optional
+        Optional weights for each spaxel. The default is None.
+    average : TYPE, optional
+        Wether to average the spaxels or to sum them. The default is False.
+
+    Returns
+    -------
+    spectrum : 1D numpy.ndarray
+        The spectrum.
+    spectrum_var :  1D numpy.ndarray
+        The variance of the spectrum.
+    """
     if weights is None:
         sum_weights = 1
     else:
@@ -495,7 +533,8 @@ def source_clustering(sources_table, data_hdu, var_hdu=None, mask_hdu=None,
     cube_flux = np.ma.array(data_hdu.data, mask=cube_mask)
 
     source_map = -1 * np.ones((cube_flux.shape[1], cube_flux.shape[2]))
-    source_prob = np.ones((cube_flux.shape[1], cube_flux.shape[2]))
+
+    # source_prob = np.ones((cube_flux.shape[1], cube_flux.shape[2]))
 
     for sid, source in enumerate(sources_table):
         progress = sid / len(sources_table)
@@ -599,6 +638,16 @@ def detect_from_cube(options=None):
     basename_with_ext = os.path.basename(args.input_cube[0])
     basename = os.path.splitext(basename_with_ext)[0]
 
+    if args.outdir is None:
+        outdir = f'{basename}_spectra'
+    else:
+        outdir = args.outdir
+
+    if args.checkimg_outdir is not None:
+        check_images_outdir = args.checkimg_outdir
+    else:
+        check_images_outdir = os.path.join(outdir, 'checkimages')
+
     hdl = fits.open(args.input_cube[0])
 
     spec_hdu = get_hdu(
@@ -647,7 +696,18 @@ def detect_from_cube(options=None):
         snr_function=get_spectrum_snr_emission
     )
     hdu = fits.PrimaryHDU(data=snr_map_em, header=celestial_wcs.to_header())
-    hdu.writeto(f"{basename}_snr_map_em.fits", overwrite=True)
+    hdu.writeto(
+        os.paht.join(outdir, f"{basename}_snr_map_em.fits"),
+        overwrite=True
+    )
+
+    if args.checkimg:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        ax.imsho()
+        fig.savefig(
+            os.path.join(check_images_outdir, f"{basename}_snr_map_em.fits")
+        )
+        plt.tight_layout()
 
     print("\nComputing SNR of the continuum...", file=sys.stderr)
     snr_map_ct = get_snr_spaxels(
@@ -655,7 +715,10 @@ def detect_from_cube(options=None):
         snr_function=get_spectrum_snr
     )
     hdu = fits.PrimaryHDU(data=snr_map_ct, header=celestial_wcs.to_header())
-    hdu.writeto(f"{basename}_snr_map_cont.fits", overwrite=True)
+    hdu.writeto(
+        os.paht.join(outdir, f"{basename}_snr_map_cont.fits"),
+        overwrite=True
+    )
 
     smoothing_kernel = Gaussian2DKernel(x_stddev=1.5)
 
@@ -676,3 +739,11 @@ def detect_from_cube(options=None):
     snr_map = snr_map_em_smooth + snr_map_ct_smooth
     hdu = fits.PrimaryHDU(data=snr_map, header=celestial_wcs.to_header())
     hdu.writeto(f"{basename}_snr_map_total.fits", overwrite=True)
+
+    print("\nDetecting local maxima...", file=sys.stderr)
+    peaks = get_local_maxima(snr_map_ct, threshold=0.1)
+
+    print("\nImage segmentation...", file=sys.stderr)
+    smap = source_clustering(peaks, spec_hdu, var_hdu, max_distance=3)
+    hdu = fits.PrimaryHDU(data=smap, header=celestial_wcs.to_header())
+    hdu.writeto(f"{basename}_segmentation.fits", overwrite=True)

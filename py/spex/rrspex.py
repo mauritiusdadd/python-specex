@@ -169,6 +169,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     specids = []
     sn_vals = []
     sn_var_vals = []
+    sn_em_vals = []
     for j, fits_file in enumerate(spectra_fits_list):
         hdul = fits.open(fits_file)
 
@@ -285,6 +286,11 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         except KeyError:
             s_n_var = -1
 
+        try:
+            s_n_em = main_header['SN_EMISS']
+        except KeyError:
+            s_n_em = -1
+
         rrspec = Spectrum(lam, flux, ivar, R, None)
         target = Target(target_id, [rrspec])
         target.input_file = fits_file
@@ -295,12 +301,14 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         specids.append(spec_id)
         sn_vals.append(s_n)
         sn_var_vals.append(s_n_var)
+        sn_em_vals.append(s_n_em)
 
     metatable = Table()
     metatable['TARGETID'] = targetids
     metatable['SPECID'] = specids
     metatable['SN'] = sn_vals
     metatable['SN_VAR'] = sn_var_vals
+    metatable['SN_EMISS'] = sn_em_vals
 
     return targets, metatable
 

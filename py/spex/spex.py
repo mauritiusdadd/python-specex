@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
-from .utils import stack, plot_scandata, get_residuals
+from .utils import stack, plot_scandata
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 from .sources import get_spectrum
@@ -111,7 +111,9 @@ def __argshandler(options=None):
     parser.add_argument(
         '--sn-threshold', metavar='SN_THRESH', type=float, default=1.5,
         help='Set the signal to Noise ratio threshold: objects with their '
-        'spectrum having a SN ratio lower than threshold will be ignored.'
+        'spectrum having a SN ratio lower than threshold will be ignored. '
+        'If SN_THRESH is set to a value equal or lower than 0, SN filtering '
+        'is disabled'
     )
 
     parser.add_argument(
@@ -517,6 +519,35 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
 
     hdul = fits.HDUList(hdu_list)
     return hdul
+
+
+def speclist2ez(spec_files, spec_hdu_name='SPECTRUM', var_hdu_name='VARIANCE'):
+    """
+    Generate a list of spectra that can be imported into pandora EZ.
+
+    Parameters
+    ----------
+    spec_files : list of str
+        List of file paths.
+    spec_hdu_name : str, optional
+        The name of the HDU containing the spectral data.
+        The default is 'SPECTRUM'.
+    var_hdu_name : str, optional
+        The name of the HDU containing the variance data.
+        The default is 'VARIANCE'.
+
+    Returns
+    -------
+    txt_data : TYPE
+        DESCRIPTION.
+
+    """
+    txt_data = ""
+
+    for file in spec_files:
+        txt_data += f'{file}[{spec_hdu_name}](1) - '
+        txt_data += f'{file}[{var_hdu_name}](1) -\n'
+    return txt_data
 
 
 def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
@@ -967,8 +998,11 @@ def spex(options=None):
         sn_spec = get_spectrum_snr(obj_spectrum, obj_spectrum_var)
         sn_em = get_spectrum_snr_emission(obj_spectrum, obj_spectrum_var)
 
+        if (
+                (args.sn_threshold > 0) and
+                (max(sn_spec, sn_em) < args.sn_threshold)
+           ):
 
-        if max(sn_spec, sn_em) < args.sn_threshold:
             if args.debug:
                 print(
                     f"WARNING: object {obj_id} has SNR={sn_spec:.2f} < "
@@ -1023,6 +1057,9 @@ def spex(options=None):
     # Discard all invalid sources
     sources = sources[valid_sources_mask]
     source_ids = np.array(source_ids)
+
+    with open("spec_list_pandora_ez.txt", 'w') as f:
+        f.write(speclist2ez(out_specfiles))
 
     if args.debug:
         print(
@@ -1125,6 +1162,15 @@ def spex(options=None):
             obj = sources[source_ids == target.spec_id][0]
 
             # residuals = get_residuals(target, zfit, plot_templates)
+
+        # Creating directory to save Chi-2 plots
+        if args.debug:
+            x2_plots_out_dir = os.path.join(
+                check_images_outdir,
+                "X2_plots"
+            )
+            if not os.path.isdir(x2_plots_out_dir):
+                os.mkdir(x2_plots_out_dir)
 
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)
@@ -1285,7 +1331,7 @@ def spex(options=None):
 
             if args.debug:
                 figname = f'scandata_{target.spec_id}.png'
-                figname = os.path.join(check_images_outdir, figname)
+                figname = os.path.join(x2_plots_out_dir, figname)
                 fig, axs = plot_scandata(target, scandata)
                 fig.savefig(figname, dpi=150)
                 plt.close(fig)

@@ -717,10 +717,10 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     if np.isnan(flux).all():
         return np.nan
     else:
-        flux = np.ma.array(flux, mask=np.isnan(flux))
+        flux = np.ma.array(flux.copy(), mask=np.isnan(flux))
 
     if var is not None:
-        var = np.ma.array(var, mask=np.isnan(var))
+        var = np.ma.array(var.copy(), mask=np.isnan(var))
     else:
         var = 1.0
 
@@ -761,10 +761,12 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=50):
     # Inspired by https://www.aanda.org/articles/aa/pdf/2012/03/aa17774-11.pdf
 
     # Just ignore negative fluxes!
+    flux = flux.copy()
     flux[flux < 0] = 0
 
     # If we have the variace, we can use it to weight the flux
     if var is not None:
+        var = var.copy()
         flux = flux / var
 
     optimal_width = flux.shape[0] - flux.shape[0] % bin_size
