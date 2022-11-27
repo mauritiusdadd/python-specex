@@ -193,12 +193,15 @@ def get_log_img(img, vclip=0.5):
     return log_img, *get_vclip(log_img)
 
 
-def loadRGBImage(fits_file):
-    rgb_image = np.array((
-        fits.getdata(fits_file, ext=1),
-        fits.getdata(fits_file, ext=2),
-        fits.getdata(fits_file, ext=3),
-    )).transpose(1, 2, 0)
+def load_rgb_fits(fits_file, ext_r=1, ext_g=2, ext_b=3):
+    try:
+        rgb_image = np.array((
+            fits.getdata(fits_file, ext=ext_r),
+            fits.getdata(fits_file, ext=ext_g),
+            fits.getdata(fits_file, ext=ext_b),
+        )).transpose(1, 2, 0)
+    except IndexError:
+        return None
 
     rgb_image -= np.nanmin(rgb_image)
     rgb_image /= np.nanmax(rgb_image)
@@ -226,7 +229,7 @@ def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None,
         elif data.shape[2] == 2:
             # Who knows what is this?
             raise ValueError(
-                "Only graiscale, RGB and spectral cube are supported!"
+                "Only grayscale, RGB and spectral cube are supported!"
             )
         elif data.shape[2] == 3:
             # RGB image
@@ -363,9 +366,16 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
 
     ax0 = fig.add_subplot(gs[:, :-1])
 
-    if cutout:
+    if cutout is not None:
         ax1 = fig.add_subplot(gs[0, -1])
         ax2 = fig.add_subplot(gs[1, -1])
+
+        ax1.axis('off')
+        ax1.imshow(
+            cutout,
+            origin='lower',
+            aspect='auto',
+        )
     else:
         ax1 = None
         ax2 = fig.add_subplot(gs[:, -1])
@@ -423,7 +433,7 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     )
     for line_lam, line_name, line_type in absorption_lines:
         ax0.axvline(
-            line_lam, color='green', ls='--', lw=1, alpha=0.5,
+            line_lam, color='green', ls='--', lw=0.5, alpha=0.5,
             label='absorption lines'
         )
         ax0.text(
@@ -437,7 +447,7 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     )
     for line_lam, line_name, line_type in emission_lines:
         ax0.axvline(
-            line_lam, color='red', ls='--', lw=1, alpha=0.5,
+            line_lam, color='red', ls='--', lw=0.5, alpha=0.5,
             label='emission lines'
         )
         ax0.text(
@@ -451,7 +461,7 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     )
     for line_lam, line_name, line_type in emission_lines:
         ax0.axvline(
-            line_lam, color='yellow', ls='--', lw=1, alpha=0.5,
+            line_lam, color='yellow', ls='--', lw=0.5, alpha=0.5,
         )
         ax0.text(
             line_lam, 0.02, line_name, rotation=90,
@@ -508,12 +518,13 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     _ = ax0.legend(newHandles, newLabels, loc='upper left')
 
     cell_text = [
-        [f'{key}', f"{val:.4f}"] for key, val in extra_info.items()
+        [f'{key}', f"{val}"] for key, val in extra_info.items()
     ]
 
     ax2.axis("off")
     tbl = ax2.table(
         cellText=cell_text,
+        colWidths=[0.4, 0.6],
         loc='upper center'
     )
     tbl.scale(1, 1.5)
@@ -854,6 +865,7 @@ def stack(data, wave_mask=None):
             new_data = np.nansum(np.array([new_data, dat]), axis=0)
     print("", file=sys.stderr)
     return new_data
+
 
 def nannmad(x, scale=1.48206, axis=None):
     """

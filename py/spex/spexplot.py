@@ -15,11 +15,14 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
+from astropy import units as apu
 from astropy.io import fits
 from astropy import wcs
 from astropy.table import Table, MaskedColumn
+from astropy.coordinates import SkyCoord
 
-from .utils import plot_spectrum, get_pbar, get_hdu
+from .utils import plot_spectrum, get_pbar, get_hdu, load_rgb_fits
+from .utils import get_cutout
 
 
 def __argshandler(options=None):
@@ -97,6 +100,21 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
+        '--cutout', metavar='SOURCE_IMAGE', type=str, default=None,
+        help='path of a FITS image (RGB or grayscale) used to make cutouts '
+        'that will be included in the plots. The size of the cutout can be '
+        'set using the --cutout-size option.'
+    )
+
+    parser.add_argument(
+        '--cutout-size', metavar='SIZE', type=str, default='10arcsec',
+        help='Set the size of the cutout to %(metavar)s. This option '
+        'supports units compatible with astropy (for example "1deg", '
+        '"2arcmin", "5arcsec", etc.). If no unit is specified the size is '
+        'assumed to be in arcseconds. The default cutout size is %(default)s.'
+    )
+
+    parser.add_argument(
         'spectra', metavar='SPECTRUM', type=str, nargs='+',
         help='Input spectra extracted with spex.'
     )
@@ -145,6 +163,22 @@ def spexplot():
     else:
         zcat = None
 
+    if args.cutout is not None:
+        try:
+            big_image = load_rgb_fits(args.cutout)
+        except FileNotFoundError:
+            print(f"ERROR: file not found '{args.cutout}'")
+            sys.exit(1)
+        except IndexError:
+            big_image = {
+                'data': fits.getdata(args.cutout),
+                'wcs': wcs.WCS(fits.getheader(args.cutout))
+            }
+
+        cutout_size = apu.Quantity(args.cutout_size)
+    else:
+        big_image = None
+
     for j, spectrum_fits_file in enumerate(args.spectra):
         progress = j / len(args.spectra)
         sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
@@ -186,8 +220,8 @@ def spexplot():
                 continue
 
             try:
-                ra = main_header['RA']
-                dec = main_header['DEC']
+                object_ra = main_header['RA']
+                object_dec = main_header['DEC']
                 object_id = main_header['ID']
                 extraction_mode = main_header['EXT_MODE']
                 spex_apertures = json.loads(main_header['EXT_APER'])
@@ -196,11 +230,19 @@ def spexplot():
                     f"Skipping file with invalid header: {spectrum_fits_file}"
                 )
                 continue
+            else:
+                obj_center = SkyCoord(
+                    object_ra, object_dec,
+                    unit='deg'
+                )
 
-            info_dict = {}
+            info_dict = {
+                'RA': obj_center.ra.to_string(precision=2),
+                'DEC': obj_center.dec.to_string(precision=2),
+            }
             for key in ['Z', 'SN', 'SN_EMISS']:
                 try:
-                    info_dict[key] = main_header[key]
+                    info_dict[key] = f"{main_header[key]:.4f}"
                 except KeyError:
                     continue
 
@@ -233,8 +275,8 @@ def spexplot():
                 restframe = args.restframe
                 info_dict['Z'] = object_z
             else:
-                # If no zcat is provided, check if redshift information is stored
-                # in the spectrum itself
+                # If no zcat is provided, check if redshift information is
+                # stored in the spectrum itself
                 if 'Z' in info_dict:
                     object_z = info_dict['Z']
                 else:
@@ -251,6 +293,14 @@ def spexplot():
             pixel = np.arange(len(flux_data))
             wavelenghts = spec_wcs.pixel_to_world(pixel).Angstrom
 
+            if big_image is not None:
+                cutout, cutout_wcs = get_cutout(
+                    big_image['data'],
+                    position=obj_center,
+                    cutout_size=cutout_size,
+                    wcs=big_image['wcs']
+                )
+
             fig, axs = plot_spectrum(
                 wavelenghts,
                 flux_data,
@@ -258,6 +308,7 @@ def spexplot():
                 nan_mask=nan_mask,
                 redshift=object_z,
                 restframe=restframe,
+                cutout=cutout,
                 plot_title=f"object {object_id}",
                 flux_units=flux_units,
                 wavelengt_units=wavelenght_units,
