@@ -173,7 +173,7 @@ def cube_stack(options=None):
 
     input_file = sys.argv[1]
 
-    basename = os.path.basename(args.input_cube)
+    basename = os.path.basename(args.input_cube[0])
     basename = os.path.splitext(basename)[0]
 
     if args.outdir is not None:

@@ -33,4 +33,4 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from . import *
 
-__version__ = '0.3.2'
+__version__ = '0.4.1'

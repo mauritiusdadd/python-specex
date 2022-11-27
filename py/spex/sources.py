@@ -288,10 +288,9 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
         DESCRIPTION.
 
     """
-    if mask_hdu is None:
-        cube_mask = np.isnan(data_hdu.data)
-    else:
-        cube_mask = mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
+    cube_mask = np.isnan(data_hdu.data)
+    if mask_hdu is not None:
+        cube_mask &= mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
 
     if var_hdu is not None:
         cube_var = np.ma.array(
@@ -312,7 +311,7 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
         for h in range(cube_flux.shape[1]):
             for k in range(cube_flux.shape[2]):
                 i += 1
-                if (i % 10) == 0:
+                if (i % 100) == 0:
                     progress = 0.5 * i / footprint_size
                     sys.stderr.write(
                         f"\r{get_pbar(progress)} {progress:.2%}\r"
@@ -320,6 +319,10 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
                     sys.stderr.flush()
                 # The snr of a single spaxel
                 # snr_map[h, k] = get_spectrum_snr(cube_flux[:, h, k])
+
+                if cube_flux[:, h, k].mask.all():
+                    continue
+
                 results[h, k] = my_pool.apply_async(
                     snr_function,
                     (
@@ -329,7 +332,7 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
                 )
 
         for i, (pos, val) in enumerate(results.items()):
-            if (i % 10) == 0:
+            if (i % 100) == 0:
                 progress = 0.5 + 0.5 * i / footprint_size
                 sys.stderr.write(
                     f"\r{get_pbar(progress)} {progress:.2%}\r"
@@ -643,10 +646,16 @@ def detect_from_cube(options=None):
     else:
         outdir = args.outdir
 
+    if not os.path.isdir(outdir):
+        os.mkdir(outdir)
+
     if args.checkimg_outdir is not None:
         check_images_outdir = args.checkimg_outdir
     else:
         check_images_outdir = os.path.join(outdir, 'checkimages')
+
+    if args.check_images and not os.path.isdir(check_images_outdir):
+        os.mkdir(check_images_outdir)
 
     hdl = fits.open(args.input_cube[0])
 
@@ -697,11 +706,11 @@ def detect_from_cube(options=None):
     )
     hdu = fits.PrimaryHDU(data=snr_map_em, header=celestial_wcs.to_header())
     hdu.writeto(
-        os.paht.join(outdir, f"{basename}_snr_map_em.fits"),
+        os.path.join(outdir, f"{basename}_snr_map_em.fits"),
         overwrite=True
     )
 
-    if args.checkimg:
+    if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         ax.imsho()
         fig.savefig(
@@ -716,7 +725,7 @@ def detect_from_cube(options=None):
     )
     hdu = fits.PrimaryHDU(data=snr_map_ct, header=celestial_wcs.to_header())
     hdu.writeto(
-        os.paht.join(outdir, f"{basename}_snr_map_cont.fits"),
+        os.path.join(outdir, f"{basename}_snr_map_cont.fits"),
         overwrite=True
     )
 
@@ -747,3 +756,7 @@ def detect_from_cube(options=None):
     smap = source_clustering(peaks, spec_hdu, var_hdu, max_distance=3)
     hdu = fits.PrimaryHDU(data=smap, header=celestial_wcs.to_header())
     hdu.writeto(f"{basename}_segmentation.fits", overwrite=True)
+
+
+if __name__ == '__main__':
+    detect_from_cube()

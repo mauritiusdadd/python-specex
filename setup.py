@@ -100,7 +100,8 @@ setuptools.setup(
             'spex=spex.spex:spex',
             'rrspex=spex.rrspex:rrspex',
             'zeropointinfo=spex.zeropoints:main',
-            'cubestack=spex.stack:cube_stack'
+            'cubestack=spex.stack:cube_stack',
+            'spexplot=spex.spexplot:spexplot'
         ],
     },
 )

@@ -11,6 +11,7 @@ from __future__ import absolute_import, division, print_function
 
 import os
 import sys
+import json
 import argparse
 
 import numpy as np
@@ -28,7 +29,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
-from .utils import stack, plot_scandata
+
+from .utils import stack, plot_scandata, loadRGBImage
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 from .sources import get_spectrum
@@ -473,13 +475,12 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
     spec_header["CDELT1"] = spec_hdu_header["CD3_3"]
     spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
 
+    nanmask = np.isnan(obj_spectrum)
+
     if no_nans:
-        nanmask = np.isnan(obj_spectrum)
         obj_spectrum[nanmask] = 0
         if obj_spectrum_var is not None:
             obj_spectrum_var[nanmask] = np.nanmax(obj_spectrum_var) * 100.0
-    else:
-        nanmask = None
 
     hdu_list = [
         main_hdu,
@@ -509,13 +510,12 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
             )
         )
 
-    if nanmask is not None:
-        hdu_list.append(
-            fits.ImageHDU(
-                data=nanmask.astype('uint8'),
-                name='NAN_MASK'
-            )
+    hdu_list.append(
+        fits.ImageHDU(
+            data=nanmask.astype('uint8'),
+            name='NAN_MASK'
         )
+    )
 
     hdul = fits.HDUList(hdu_list)
     return hdul
@@ -648,6 +648,8 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
             obj_a = degstr2mas(regparams[2])
             obj_b = degstr2mas(regparams[3])
             obj_theta = float(regparams[4])
+        elif regtype == 'polygon':
+            pass
         else:
             print(
                 f"WARNING: '{regtype}' region type not supported yet!",
@@ -923,14 +925,21 @@ def spex(options=None):
 
         elif mode == 'circular_aperture':
             # NOTE: in this mode, aperture is already in asrcseconds
-            spex_apertures[obj_id] = (
-                args.aperture_size,
-                args.aperture_size,
-                0
-            )
+            try:
+                spex_apertures[obj_id] = (
+                    args.aperture_size,
+                    args.aperture_size,
+                    0
+                )
+            except TypeError:
+                print(
+                    f"WARNING: object {obj_id} has an invalid ID, skipping...",
+                    file=sys.stderr
+                )
+                continue
 
             rad_coords = xx_tr**2 + yy_tr**2
-            mask = rad_coords < args.aperture_size / cube_pixelscale
+            mask = rad_coords < args.aperture_size / (2 * cube_pixelscale)
 
             if anulus_r_in and anulus_r_out:
                 spex_anuli[obj_id] = (
@@ -1024,7 +1033,12 @@ def spex(options=None):
             'HISTORY': f'Extracted on {str(my_time)}',
             'ID': obj_id,
             'SN': (sn_spec, "SNR of the total spectrum"),
-            'SN_EMISS': (sn_em, "SNR due to emissino lines only")
+            'SN_EMISS': (sn_em, "SNR due to emissino lines only"),
+            'EXT_MODE': (mode, "Spex extraction mode"),
+            'EXT_APER': (
+                json.dumps(spex_apertures[obj_id]),
+                "Apertures used in spex"
+            )
         }
 
         # Copy the spectral part of the WCS into the new FITS
@@ -1118,8 +1132,17 @@ def spex(options=None):
             plt.close(fig)
 
         if args.cutouts_image:
-            cutouts_image = fits.getdata(args.cutouts_image).transpose(1, 2, 0)
-            cutouts_wcs = wcs.WCS(fits.getheader(args.cutouts_image))
+            try:
+                cutouts_image = fits.getdata(
+                    args.cutouts_image
+                ).transpose(1, 2, 0)
+            except ValueError:
+                cutout_dict = loadRGBImage(args.cutouts_image)
+                cutouts_image = cutout_dict['data']
+                cutouts_wcs = cutout_dict['wcs']
+            else:
+                cutouts_wcs = wcs.WCS(fits.getheader(args.cutouts_image))
+
             cutouts_wcs = cutouts_wcs.celestial
             cutout_wcs_frame = wcs.utils.wcs_to_celestial_frame(cutouts_wcs)
             cutouts_image, cut_vmin, cut_vmax = get_log_img(cutouts_image)

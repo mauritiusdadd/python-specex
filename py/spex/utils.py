@@ -16,8 +16,10 @@ from matplotlib import patches
 
 from scipy.signal import savgol_filter
 
+from astropy.io import fits
 from astropy.nddata import Cutout2D
 from astropy.visualization import ZScaleInterval
+from astropy.wcs import WCS
 
 from .lines import get_lines
 
@@ -191,6 +193,21 @@ def get_log_img(img, vclip=0.5):
     return log_img, *get_vclip(log_img)
 
 
+def loadRGBImage(fits_file):
+    rgb_image = np.array((
+        fits.getdata(fits_file, ext=1),
+        fits.getdata(fits_file, ext=2),
+        fits.getdata(fits_file, ext=3),
+    )).transpose(1, 2, 0)
+
+    rgb_image -= np.nanmin(rgb_image)
+    rgb_image /= np.nanmax(rgb_image)
+
+    rgb_wcs = WCS(fits.getheader(fits_file, ext=1))
+
+    return {'data': rgb_image, 'wcs': rgb_wcs}
+
+
 def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None,
                vmin=None, vmax=None):
     valid_shape = True
@@ -320,11 +337,188 @@ def plot_scandata(target, scandata):
 
 def get_residuals(target, zfit, plot_templates):
     t_best_data = zfit[zfit['SPECID'] == target.spec_id][0]
-    
 
-def plot_spectrum(flux, variance, rest_frame=False, z=0,
-                  cutout=None, wave_units='Angstrom', flux_units=''):
-    pass
+
+def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
+                  cutout=None, plot_title="", redshift=0, extra_info={},
+                  wavelengt_units=None, flux_units=None, smoothing=None):
+
+    if nan_mask is not None:
+        lam_mask = np.array([
+            (wavelengts[m_start], wavelengts[m_end])
+            for m_start, m_end in get_mask_intervals(nan_mask)
+        ])
+    else:
+        lam_mask = None
+
+    w_min = 1.0e5
+    w_max = 0.0
+
+    f_min = 1.0e5
+    f_max = 0.0
+
+    fig = plt.figure(figsize=(15, 5))
+
+    gs = GridSpec(2, 6, figure=fig)
+
+    ax0 = fig.add_subplot(gs[:, :-1])
+
+    if cutout:
+        ax1 = fig.add_subplot(gs[0, -1])
+        ax2 = fig.add_subplot(gs[1, -1])
+    else:
+        ax1 = None
+        ax2 = fig.add_subplot(gs[:, -1])
+
+    ax0.set_title(plot_title)
+    ax0.set_aspect('auto')
+
+    if restframe:
+        wavelenghts = wavelengts / (1 + redshift)
+        if lam_mask is not None:
+            lam_mask = lam_mask / (1 + redshift)
+        lines_z = 0
+    else:
+        wavelenghts = wavelengts
+        lines_z = redshift
+
+    w_min = np.minimum(w_min, np.nanmin(wavelenghts))
+    w_max = np.maximum(w_max, np.nanmax(wavelenghts))
+
+    f_min = np.minimum(f_min, np.nanmin(flux))
+    f_max = np.maximum(f_max, np.nanmax(flux))
+
+    if not smoothing:
+        ax0.plot(
+            wavelenghts, flux,
+            ls='-',
+            lw=0.5,
+            alpha=1,
+            color='black',
+            label='spectrum'
+        )
+    else:
+        window_size = 4*smoothing + 1
+        smoothed_flux = savgol_filter(flux, window_size, 3)
+        ax0.plot(
+            wavelenghts, flux,
+            ls='-',
+            lw=1,
+            alpha=0.5,
+            color='gray',
+            label='original spectrum'
+        )
+        ax0.plot(
+            wavelenghts, smoothed_flux,
+            ls='-',
+            lw=0.4,
+            alpha=1.0,
+            color='black',
+            label='smoothed spectrum'
+        )
+
+    # Plotting absorption lines
+    absorption_lines = get_lines(
+        line_type='A', wrange=wavelenghts, z=lines_z
+    )
+    for line_lam, line_name, line_type in absorption_lines:
+        ax0.axvline(
+            line_lam, color='green', ls='--', lw=1, alpha=0.5,
+            label='absorption lines'
+        )
+        ax0.text(
+            line_lam, 0.02, line_name, rotation=90,
+            transform=ax0.get_xaxis_transform(),
+        )
+
+    # Plotting emission lines
+    emission_lines = get_lines(
+        line_type='E', wrange=wavelenghts, z=lines_z
+    )
+    for line_lam, line_name, line_type in emission_lines:
+        ax0.axvline(
+            line_lam, color='red', ls='--', lw=1, alpha=0.5,
+            label='emission lines'
+        )
+        ax0.text(
+            line_lam, 0.02, line_name, rotation=90,
+            transform=ax0.get_xaxis_transform(),
+        )
+
+    # Plotting emission/absorption lines
+    emission_lines = get_lines(
+        line_type='AE', wrange=wavelenghts, z=lines_z
+    )
+    for line_lam, line_name, line_type in emission_lines:
+        ax0.axvline(
+            line_lam, color='yellow', ls='--', lw=1, alpha=0.5,
+        )
+        ax0.text(
+            line_lam, 0.02, line_name, rotation=90,
+            transform=ax0.get_xaxis_transform(),
+        )
+
+    ax0.set_xlim(w_min, w_max)
+    ax0.set_ylim(f_min, f_max)
+    if wavelengt_units:
+        ax0.set_xlabel(f'Wavelenght [{wavelengt_units}]')
+    else:
+        ax0.set_xlabel('Wavelenght')
+
+    if flux_units:
+        ax0.set_ylabel(f'Flux [{flux_units}]')
+    else:
+        ax0.set_xlabel('Flux')
+
+    # Draw missing data or invalid data regions
+    if lam_mask is not None:
+        for lam_inter in lam_mask:
+            rect = patches.Rectangle(
+                (lam_inter[0], 0),
+                lam_inter[1] - lam_inter[0], 1,
+                transform=ax0.get_xaxis_transform(),
+                linewidth=1,
+                fill=True,
+                edgecolor='black',
+                facecolor='white',
+                hatch='///'
+            )
+            ax0.add_patch(rect)
+            if ((lam_inter[1] > w_min + 100) and (lam_inter[0] < w_max - 100)):
+                ax0.text(
+                    (lam_inter[0] + lam_inter[1]) / 2, 0.5,
+                    "MISSING DATA",
+                    transform=ax0.get_xaxis_transform(),
+                    va='center',
+                    ha='center',
+                    rotation=90,
+                    bbox={
+                        'facecolor': 'white',
+                        'edgecolor': 'black',
+                        'boxstyle': 'round,pad=0.5',
+                    }
+                )
+
+    handles, labels = ax0.get_legend_handles_labels()
+    newLabels, newHandles = [], []
+    for handle, label in zip(handles, labels):
+        if label not in newLabels:
+            newLabels.append(label)
+            newHandles.append(handle)
+    _ = ax0.legend(newHandles, newLabels, loc='upper left')
+
+    cell_text = [
+        [f'{key}', f"{val:.4f}"] for key, val in extra_info.items()
+    ]
+
+    ax2.axis("off")
+    tbl = ax2.table(
+        cellText=cell_text,
+        loc='upper center'
+    )
+    tbl.scale(1, 1.5)
+
+    return fig, [ax0, ax1, ax2]
 
 
 def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
@@ -421,8 +615,9 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
         ax0.plot(
             wavelenghts, target_spec.flux,
             ls='-',
-            lw=2,
-            alpha=1,
+            lw=1,
+            alpha=0.3,
+            color='gray',
             label='spectrum'
         )
 
@@ -431,6 +626,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
             ls='-',
             lw=1,
             alpha=0.8,
+            color='black',
             label='smoothed spectrum'
         )
 
@@ -503,7 +699,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
     ax0.set_xlim(w_min, w_max)
     ax0.set_ylim(f_min, f_max)
     ax0.set_xlabel(f'Wavelenght [{wave_units}]')
-    ax0.set_ylabel(f'Wavelenght [{flux_units}]')
+    ax0.set_ylabel(f'Flux [{flux_units}]')
 
     # Draw missing data or invalid data regions
     if lam_mask is not None:
@@ -740,7 +936,7 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     return sn_spec
 
 
-def get_spectrum_snr_emission(flux, var=None, bin_size=50):
+def get_spectrum_snr_emission(flux, var=None, bin_size=150):
     """
     Compute the SRN of a spectrum considering emission lines only.
 
@@ -776,6 +972,9 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=50):
         return np.nan
     else:
         flux = np.ma.array(flux, mask=np.isnan(flux))
+
+    if flux.mask.all():
+        return np.nan
 
     # Rebin sub_spec to search for emission features
     sub_spec = flux.reshape(flux.shape[0] // bin_size, bin_size)
