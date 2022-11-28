@@ -26,11 +26,10 @@ from astropy.time import Time
 from astropy import units
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
 
-from .utils import plot_zfit_check, get_cutout, get_log_img, get_hdu, get_pbar
+from .utils import plot_zfit_check, get_log_img, get_hdu, get_pbar
 
-from .utils import stack, plot_scandata, loadRGBImage
+from .utils import stack, plot_scandata
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 
 from .sources import get_spectrum
@@ -1131,44 +1130,6 @@ def spex(options=None):
             plt.tight_layout()
             plt.close(fig)
 
-        if args.cutouts_image:
-            try:
-                cutouts_image = fits.getdata(
-                    args.cutouts_image
-                ).transpose(1, 2, 0)
-            except ValueError:
-                cutout_dict = loadRGBImage(args.cutouts_image)
-                cutouts_image = cutout_dict['data']
-                cutouts_wcs = cutout_dict['wcs']
-            else:
-                cutouts_wcs = wcs.WCS(fits.getheader(args.cutouts_image))
-
-            cutouts_wcs = cutouts_wcs.celestial
-            cutout_wcs_frame = wcs.utils.wcs_to_celestial_frame(cutouts_wcs)
-            cutouts_image, cut_vmin, cut_vmax = get_log_img(cutouts_image)
-            cut_pixelscale = [
-                units.Quantity(sc_val, u).to_value('arcsec')
-                for sc_val, u in zip(
-                    wcs.utils.proj_plane_pixel_scales(cutouts_wcs),
-                    cutouts_wcs.wcs.cunit
-                )
-            ]
-        else:
-            cutouts_image = stacked_cube
-            cutouts_image, cut_vmin, cut_vmax = get_log_img(stacked_cube)
-            cutouts_wcs = None
-            cutout_wcs_frame = wcs_frame
-            # cut_vmin, cut_vmax = None, None
-            cut_pixelscale = wcs.utils.proj_plane_pixel_scales(celestial_wcs)
-            cut_pixelscale = [
-                units.Quantity(sc_val, u).to_value('arcsec')
-                for sc_val, u in zip(
-                    wcs.utils.proj_plane_pixel_scales(celestial_wcs),
-                    celestial_wcs.wcs.cunit
-                )
-            ]
-        cut_pixelscale = np.nanmean(cut_pixelscale)
-
         if args.debug:
             plot_templates = get_templates(templates=args.templates)
         else:
@@ -1176,6 +1137,7 @@ def spex(options=None):
 
         print("", file=sys.stderr)
 
+        """
         for i, target in enumerate(targets):
             progress = (i + 1) / len(targets)
             sys.stderr.write(
@@ -1185,6 +1147,7 @@ def spex(options=None):
             obj = sources[source_ids == target.spec_id][0]
 
             # residuals = get_residuals(target, zfit, plot_templates)
+        """
 
         # Creating directory to save Chi-2 plots
         if args.debug:
@@ -1201,150 +1164,13 @@ def spex(options=None):
                 f"\rGenerating previews {get_pbar(progress)} {progress:.2%}\r"
             )
             sys.stderr.flush()
-            obj = sources[source_ids == target.spec_id][0]
-
-            obj_skycoord = SkyCoord(
-                obj[args.key_ra],
-                obj[args.key_dec],
-                unit=(ra_unit, dec_unit),
-                frame=cutout_wcs_frame
-            )
-
-            if cutouts_wcs is None:
-                obj_position = (obj['CUBE_X_IMAGE'], obj['CUBE_Y_IMAGE'])
-            else:
-                obj_position = obj_skycoord
-
-            cutout_size = args.cutouts_size / cut_pixelscale
-            cutout, scutout_wcs = get_cutout(
-                cutouts_image,
-                position=obj_position,
-                cutout_size=cutout_size,
-                wcs=cutouts_wcs,
-                vmin=cut_vmin,
-                vmax=cut_vmax
-            )
 
             fig, axs = plot_zfit_check(
                 target,
                 zfit,
                 plot_template=plot_templates,
-                cutout=cutout,
                 wave_units=spec_hdu.header['CUNIT3'],
                 flux_units=spec_hdu.header['BUNIT'],
-            )
-
-            e_wid = spex_apertures[target.spec_id][0] / cut_pixelscale
-            e_hei = spex_apertures[target.spec_id][1] / cut_pixelscale
-            e_ang = spex_apertures[target.spec_id][2]
-
-            # Draw extraction aperture
-            aperture = Ellipse(
-                (cutout_size/2.0, cutout_size/2.0),
-                width=e_wid,
-                height=e_hei,
-                angle=e_ang,
-                edgecolor='#0000ff',
-                facecolor='none',
-                ls='-',
-                lw=1,
-                alpha=0.8,
-                fill=False
-            )
-            axs[1].add_patch(aperture)
-            aperture = Ellipse(
-                (cutout_size/2.0, cutout_size/2.0),
-                width=e_wid,
-                height=e_hei,
-                angle=e_ang,
-                edgecolor='#00ff00',
-                facecolor='none',
-                ls='--',
-                lw=1,
-                alpha=0.8,
-                fill=False
-            )
-            axs[1].add_patch(aperture)
-
-            # Draw background anulus (if any)
-            if spex_anuli[target.spec_id] is not None:
-
-                a_r_in = spex_anuli[target.spec_id][0] / cut_pixelscale
-                a_r_out = spex_anuli[target.spec_id][1] / cut_pixelscale
-
-                # Draw inner radius
-                axs[1].add_patch(Ellipse(
-                    (cutout_size/2.0, cutout_size/2.0),
-                    width=a_r_in,
-                    height=a_r_in,
-                    angle=e_ang,
-                    edgecolor='#00ffff',
-                    facecolor='none',
-                    ls='-',
-                    lw=1,
-                    alpha=0.8,
-                    fill=False
-                ))
-
-                axs[1].add_patch(Ellipse(
-                    (cutout_size/2.0, cutout_size/2.0),
-                    width=a_r_in,
-                    height=a_r_in,
-                    angle=e_ang,
-                    edgecolor='#ffff00',
-                    facecolor='none',
-                    ls='--',
-                    lw=1,
-                    alpha=0.8,
-                    fill=False
-                ))
-
-                # Draw outer radius
-                axs[1].add_patch(Ellipse(
-                    (cutout_size/2.0, cutout_size/2.0),
-                    width=a_r_out,
-                    height=a_r_out,
-                    angle=e_ang,
-                    edgecolor='#00ffff',
-                    facecolor='none',
-                    ls='-',
-                    lw=1,
-                    alpha=0.8,
-                    fill=False
-                ))
-
-                axs[1].add_patch(Ellipse(
-                    (cutout_size/2.0, cutout_size/2.0),
-                    width=a_r_out,
-                    height=a_r_out,
-                    angle=e_ang,
-                    edgecolor='#ffff00',
-                    facecolor='none',
-                    ls='--',
-                    lw=1,
-                    alpha=0.8,
-                    fill=False
-                ))
-
-            obj_ra_str = obj_skycoord.ra.to_string(
-                unit=units.hourangle, alwayssign=True, precision=4
-            )
-
-            obj_dec_str = obj_skycoord.ra.to_string(
-                unit=units.deg, alwayssign=True, precision=4
-            )
-
-            axs[2].text(
-                0, 0.5,
-                f"RA: {obj_ra_str}\n"
-                f"DEC: {obj_dec_str}\n",
-                ha='left',
-                va='top',
-                transform=axs[2].transAxes,
-                bbox={
-                    'facecolor': 'white',
-                    'edgecolor': 'none',
-                }
             )
 
             figname = f'spectrum_{target.spec_id}.png'

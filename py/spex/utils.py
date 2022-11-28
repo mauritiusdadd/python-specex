@@ -204,15 +204,14 @@ def load_rgb_fits(fits_file, ext_r=1, ext_g=2, ext_b=3):
         return None
 
     rgb_image -= np.nanmin(rgb_image)
-    rgb_image /= np.nanmax(rgb_image)
+    rgb_image = rgb_image / np.nanmax(rgb_image)
 
     rgb_wcs = WCS(fits.getheader(fits_file, ext=1))
 
     return {'data': rgb_image, 'wcs': rgb_wcs}
 
 
-def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None,
-               vmin=None, vmax=None):
+def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None):
     valid_shape = True
     is_rgb = True
 
@@ -274,14 +273,6 @@ def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None,
             cutout_b.data
         ]).transpose(1, 2, 0)
 
-        if vmin is not None:
-            cutout[cutout <= vmin] = vmin
-
-        if vmax is not None:
-            cutout[cutout >= vmax] = vmax
-
-        cutout -= np.nanmin(cutout)
-        cutout /= np.nanmax(cutout)
         cutout_wcs = cutout_r.wcs
     else:
         cutout = Cutout2D(
@@ -342,61 +333,95 @@ def get_residuals(target, zfit, plot_templates):
     t_best_data = zfit[zfit['SPECID'] == target.spec_id][0]
 
 
-def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
-                  cutout=None, plot_title="", redshift=0, extra_info={},
-                  wavelengt_units=None, flux_units=None, smoothing=None):
+def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
+                  restframe=False, cutout=None, cutout_vmin=None,
+                  cutout_vmax=None, plot_title="", redshift=0,
+                  wavelengt_units=None, flux_units=None, smoothing=None,
+                  extra_info={}):
 
     if nan_mask is not None:
         lam_mask = np.array([
-            (wavelengts[m_start], wavelengts[m_end])
+            (wavelenghts[m_start], wavelenghts[m_end])
             for m_start, m_end in get_mask_intervals(nan_mask)
         ])
+        var_max = np.nanmax(variance[~nan_mask])
     else:
         lam_mask = None
 
     w_min = 1.0e5
     w_max = 0.0
 
-    f_min = 1.0e5
-    f_max = 0.0
+    if restframe:
+        wavelenghts = wavelenghts / (1 + redshift)
+        if lam_mask is not None:
+            lam_mask = lam_mask / (1 + redshift)
+        lines_z = 0
+    else:
+        wavelenghts = wavelenghts
+        lines_z = redshift
+
+    w_min = np.nanmin(wavelenghts)
+    w_max = np.nanmax(wavelenghts)
+
+    if wavelengt_units:
+        x_label = f'Wavelenght [{wavelengt_units}]'
+    else:
+        x_label = 'Wavelenght'
+
+    if flux_units:
+        y_label = f'Flux [{flux_units}]'
+    else:
+        y_label = 'Flux'
 
     fig = plt.figure(figsize=(15, 5))
 
-    gs = GridSpec(2, 6, figure=fig)
+    gs = GridSpec(6, 6, figure=fig, hspace=0.1)
 
-    ax0 = fig.add_subplot(gs[:, :-1])
+    if variance is not None:
+        ax0 = fig.add_subplot(gs[:4, :-1])
+        ax4 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
+
+        ax4.plot(
+            wavelenghts, variance,
+            ls='-',
+            lw=0.5,
+            alpha=0.75,
+            color='black',
+            label='variance',
+            zorder=0
+        )
+        ax4.set_xlabel(x_label)
+        ax4.set_ylabel('Variance')
+
+        ax4.set_xlim(w_min, w_max)
+        ax4.set_ylim(1, var_max)
+        ax4.set_yscale('log')
+        ax0.label_outer()
+    else:
+        ax0 = fig.add_subplot(gs[:, :-1])
+        ax0.set_xlabel(x_label)
+
+    ax0.set_ylabel(y_label)
+
+    ax0.set_xlim(w_min, w_max)
 
     if cutout is not None:
-        ax1 = fig.add_subplot(gs[0, -1])
-        ax2 = fig.add_subplot(gs[1, -1])
+        ax1 = fig.add_subplot(gs[:3, -1])
+        ax2 = fig.add_subplot(gs[3:, -1])
 
         ax1.axis('off')
         ax1.imshow(
             cutout,
             origin='lower',
             aspect='auto',
+            vmin=cutout_vmin,
+            vmax=cutout_vmax
         )
     else:
         ax1 = None
         ax2 = fig.add_subplot(gs[:, -1])
 
-    ax0.set_title(plot_title)
     ax0.set_aspect('auto')
-
-    if restframe:
-        wavelenghts = wavelengts / (1 + redshift)
-        if lam_mask is not None:
-            lam_mask = lam_mask / (1 + redshift)
-        lines_z = 0
-    else:
-        wavelenghts = wavelengts
-        lines_z = redshift
-
-    w_min = np.minimum(w_min, np.nanmin(wavelenghts))
-    w_max = np.maximum(w_max, np.nanmax(wavelenghts))
-
-    f_min = np.minimum(f_min, np.nanmin(flux))
-    f_max = np.maximum(f_max, np.nanmax(flux))
 
     if not smoothing:
         ax0.plot(
@@ -405,7 +430,8 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
             lw=0.5,
             alpha=1,
             color='black',
-            label='spectrum'
+            label='spectrum',
+            zorder=0
         )
     else:
         window_size = 4*smoothing + 1
@@ -414,17 +440,19 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
             wavelenghts, flux,
             ls='-',
             lw=1,
-            alpha=0.5,
+            alpha=0.35,
             color='gray',
-            label='original spectrum'
+            label='original spectrum',
+            zorder=0
         )
         ax0.plot(
             wavelenghts, smoothed_flux,
             ls='-',
             lw=0.4,
             alpha=1.0,
-            color='black',
-            label='smoothed spectrum'
+            color='#03488c',
+            label='smoothed spectrum',
+            zorder=1
         )
 
     # Plotting absorption lines
@@ -433,12 +461,13 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     )
     for line_lam, line_name, line_type in absorption_lines:
         ax0.axvline(
-            line_lam, color='green', ls='--', lw=0.5, alpha=0.5,
+            line_lam, color='green', ls='--', lw=0.7, alpha=0.5,
             label='absorption lines'
         )
         ax0.text(
             line_lam, 0.02, line_name, rotation=90,
             transform=ax0.get_xaxis_transform(),
+            zorder=99
         )
 
     # Plotting emission lines
@@ -447,12 +476,14 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     )
     for line_lam, line_name, line_type in emission_lines:
         ax0.axvline(
-            line_lam, color='red', ls='--', lw=0.5, alpha=0.5,
-            label='emission lines'
+            line_lam, color='red', ls='--', lw=0.7, alpha=0.75,
+            label='emission lines',
+            zorder=2
         )
         ax0.text(
             line_lam, 0.02, line_name, rotation=90,
             transform=ax0.get_xaxis_transform(),
+            zorder=99
         )
 
     # Plotting emission/absorption lines
@@ -461,24 +492,15 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
     )
     for line_lam, line_name, line_type in emission_lines:
         ax0.axvline(
-            line_lam, color='yellow', ls='--', lw=0.5, alpha=0.5,
+            line_lam, color='yellow', ls='--', lw=0.5, alpha=0.9,
+            label='emission/absorption lines',
+            zorder=3
         )
         ax0.text(
             line_lam, 0.02, line_name, rotation=90,
             transform=ax0.get_xaxis_transform(),
+            zorder=99
         )
-
-    ax0.set_xlim(w_min, w_max)
-    ax0.set_ylim(f_min, f_max)
-    if wavelengt_units:
-        ax0.set_xlabel(f'Wavelenght [{wavelengt_units}]')
-    else:
-        ax0.set_xlabel('Wavelenght')
-
-    if flux_units:
-        ax0.set_ylabel(f'Flux [{flux_units}]')
-    else:
-        ax0.set_xlabel('Flux')
 
     # Draw missing data or invalid data regions
     if lam_mask is not None:
@@ -491,7 +513,18 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
                 fill=True,
                 edgecolor='black',
                 facecolor='white',
-                hatch='///'
+                zorder=10
+            )
+            rect = patches.Rectangle(
+                (lam_inter[0], 0),
+                lam_inter[1] - lam_inter[0], 1,
+                transform=ax0.get_xaxis_transform(),
+                linewidth=1,
+                fill=True,
+                edgecolor='black',
+                facecolor='white',
+                hatch='///',
+                zorder=11
             )
             ax0.add_patch(rect)
             if ((lam_inter[1] > w_min + 100) and (lam_inter[0] < w_max - 100)):
@@ -506,7 +539,8 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
                         'facecolor': 'white',
                         'edgecolor': 'black',
                         'boxstyle': 'round,pad=0.5',
-                    }
+                    },
+                    zorder=12
                 )
 
     handles, labels = ax0.get_legend_handles_labels()
@@ -515,7 +549,15 @@ def plot_spectrum(wavelengts, flux, variance, nan_mask=None, restframe=False,
         if label not in newLabels:
             newLabels.append(label)
             newHandles.append(handle)
-    _ = ax0.legend(newHandles, newLabels, loc='upper left')
+
+    _ = ax0.legend(
+        newHandles, newLabels,
+        loc='upper center',
+        fancybox=True,
+        shadow=False,
+        bbox_to_anchor=(0.5, 1.15),
+        ncol=len(newHandles)
+    )
 
     cell_text = [
         [f'{key}', f"{val}"] for key, val in extra_info.items()

@@ -57,3 +57,8 @@ class TestRRSpex(unittest.TestCase):
                 abs(obj['TRUE_Z'] - obj['Z'])/(1 + obj['TRUE_Z']), Z_FTOL,
                 msg="computed redshift outside f01 limit!"
             )
+
+
+if __name__ == '__main__':
+    mytest = TestRRSpex()
+    mytest.test_rrspex_success()

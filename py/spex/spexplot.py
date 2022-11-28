@@ -128,7 +128,7 @@ def __argshandler(options=None):
     return args
 
 
-def spexplot():
+def spexplot(options=None):
     """
     Run the spexplot program.
 
@@ -137,7 +137,7 @@ def spexplot():
     None.
 
     """
-    args = __argshandler()
+    args = __argshandler(options)
 
     if args.zcat is not None:
         zcat = Table.read(args.zcat)
@@ -237,6 +237,7 @@ def spexplot():
                 )
 
             info_dict = {
+                'ID': f"{object_id}",
                 'RA': obj_center.ra.to_string(precision=2),
                 'DEC': obj_center.dec.to_string(precision=2),
             }
@@ -287,7 +288,10 @@ def spexplot():
             spec_wcs = wcs.WCS(spec_hdu.header)
             var_data = var_hdu.data
 
-            nan_mask = nan_mask_hdu.data if nan_mask_hdu is not None else None
+            if nan_mask_hdu is not None:
+                nan_mask = nan_mask_hdu.data == 1
+            else:
+                nan_mask = None
 
             # NOTE: Wavelenghts must be in Angstrom units
             pixel = np.arange(len(flux_data))
@@ -300,6 +304,12 @@ def spexplot():
                     cutout_size=cutout_size,
                     wcs=big_image['wcs']
                 )
+                cutout_vmin = np.nanmin(big_image['data'])
+                cutout_vmax = np.nanmax(big_image['data'])
+            else:
+                cutout = None
+                cutout_vmin = None
+                cutout_vmax = None
 
             fig, axs = plot_spectrum(
                 wavelenghts,
@@ -309,6 +319,8 @@ def spexplot():
                 redshift=object_z,
                 restframe=restframe,
                 cutout=cutout,
+                cutout_vmin=cutout_vmin,
+                cutout_vmax=cutout_vmax,
                 plot_title=f"object {object_id}",
                 flux_units=flux_units,
                 wavelengt_units=wavelenght_units,
