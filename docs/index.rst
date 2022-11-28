@@ -12,6 +12,7 @@ Welcome to python-spex's documentation!
 .. toctree::
    spex
    rrspex
+   spexplot
    lines
    stack
    utils
