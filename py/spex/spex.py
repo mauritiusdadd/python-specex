@@ -1169,7 +1169,7 @@ def spex(options=None):
                 target,
                 zfit,
                 plot_template=plot_templates,
-                wave_units=spec_hdu.header['CUNIT3'],
+                wavelengt_units=spec_hdu.header['CUNIT3'],
                 flux_units=spec_hdu.header['BUNIT'],
             )
 

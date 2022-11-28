@@ -344,9 +344,14 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
             (wavelenghts[m_start], wavelenghts[m_end])
             for m_start, m_end in get_mask_intervals(nan_mask)
         ])
-        var_max = np.nanmax(variance[~nan_mask])
+
+        if variance is not None:
+            var_max = np.nanmax(variance[~nan_mask])
+        else:
+            var_max = 1
     else:
         lam_mask = None
+        var_max = 1
 
     w_min = 1.0e5
     w_max = 0.0
@@ -574,8 +579,8 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
     return fig, [ax0, ax1, ax2]
 
 
-def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
-                    cutout=None, wave_units='Angstrom', flux_units=''):
+def plot_zfit_check(target, zbest, plot_template=None, restframe=True,
+                    wavelengt_units='Angstrom', flux_units=''):
     """
     Plot the check images for the fitted targets.
 
@@ -592,8 +597,6 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
         If not None, plot the best matching tamplate.
     rest_frame : bool, optional
         Whether to plot the spectrum at restrframe.
-    cutout: 2D or 3D numpt.ndarray or None, optional
-        If not None, plot the grayscale or RGB image given as numpy.ndarray.
     wave_units : str, optional
         The units of the wavelenght grid. The default value id 'Angstrom'
     flux_units : str, optional
@@ -614,6 +617,27 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
 
     t_best_data = zbest[zbest['SPECID'] == target.spec_id][0]
 
+    info_dict = {
+        'ID': f"{target.spec_id}",
+        'Z': f"z: {t_best_data['Z']:.4f} ± {t_best_data['ZERR']:.2e}\n",
+        'Template': f"{t_best_data['SPECTYPE']} {t_best_data['SUBTYPE']}",
+        'SNR': f"{t_best_data['SN']:.2f}\n",
+        'SNR (EM)': f"{t_best_data['SN_EMISS']:.2f}\n",
+        'ZWARN': f"{t_best_data['ZWARN']}"
+    }
+
+    fig, axs = plot_spectrum(
+        target.spectra[0].wave,
+        target.spectra[0].flux,
+        nan_mask=target.lam_mask,
+        cutout=None,
+        redshift=t_best_data['Z'],
+        restframe=restframe,
+        wavelengt_units=wavelengt_units,
+        flux_units=flux_units,
+        extra_info=info_dict
+    )
+
     best_template = None
     if plot_template:
         for t in plot_template:
@@ -624,76 +648,17 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                 best_template = t
                 break
 
-    w_min = 1.0e5
-    w_max = 0.0
-
-    f_min = 1.0e5
-    f_max = 0.0
-
-    fig = plt.figure(figsize=(15, 5))
-
-    gs = GridSpec(2, 6, figure=fig)
-
-    ax0 = fig.add_subplot(gs[:, :-1])
-    ax1 = fig.add_subplot(gs[0, -1])
-    ax2 = fig.add_subplot(gs[1, -1])
-
-    ax0.set_title(f"object: {target.spec_id}")
-    ax0.set_aspect('auto')
-
-    try:
-        lam_mask = target.lam_mask
-    except AttributeError:
-        lam_mask = None
-
-    for target_spec in target.spectra:
-        # If we plot the spectrum at restframe wavelenghts, then we must use
-        # rest frame wavelengths also for the lines.
-
-        if rest_frame:
-            wavelenghts = target_spec.wave / (1 + t_best_data['Z'])
-            if lam_mask is not None:
-                lam_mask = lam_mask / (1 + t_best_data['Z'])
-            lines_z = 0
-        else:
-            wavelenghts = target_spec.wave
-            lines_z = t_best_data['z']
-
-        w_min = np.minimum(w_min, np.nanmin(wavelenghts))
-        w_max = np.maximum(w_max, np.nanmax(wavelenghts))
-
-        f_min = np.minimum(f_min, np.nanmin(target_spec.flux))
-        f_max = np.maximum(f_max, np.nanmax(target_spec.flux))
-
-        ax0.plot(
-            wavelenghts, target_spec.flux,
-            ls='-',
-            lw=1,
-            alpha=0.3,
-            color='gray',
-            label='spectrum'
-        )
-
-        ax0.plot(
-            wavelenghts, savgol_filter(target_spec.flux, 51, 11),
-            ls='-',
-            lw=1,
-            alpha=0.8,
-            color='black',
-            label='smoothed spectrum'
-        )
-
-        if plot_template and best_template:
+        if best_template:
             try:
                 coeffs = t_best_data['COEFF'][:best_template.nbasis]
                 template_flux = best_template.eval(
                     coeffs,
-                    wavelenghts,
-                    lines_z,
+                    target.spectra[0].wave,
+                    0 if restframe else t_best_data['Z'],
                 )
 
-                ax0.plot(
-                    wavelenghts, template_flux,
+                axs[0].plot(
+                    target.spectra[0].wave, template_flux,
                     ls='-',
                     lw=1,
                     alpha=0.7,
@@ -708,137 +673,7 @@ def plot_zfit_check(target, zbest, plot_template=None, rest_frame=True,
                     file=sys.stderr
                 )
 
-        # Plotting absorption lines
-        absorption_lines = get_lines(
-            line_type='A', wrange=wavelenghts, z=lines_z
-        )
-        for line_lam, line_name, line_type in absorption_lines:
-            ax0.axvline(
-                line_lam, color='green', ls='--', lw=1, alpha=0.5,
-                label='absorption lines'
-            )
-            ax0.text(
-                line_lam, 0.02, line_name, rotation=90,
-                transform=ax0.get_xaxis_transform(),
-            )
-
-        # Plotting emission lines
-        emission_lines = get_lines(
-            line_type='E', wrange=wavelenghts, z=lines_z
-        )
-        for line_lam, line_name, line_type in emission_lines:
-            ax0.axvline(
-                line_lam, color='red', ls='--', lw=1, alpha=0.5,
-                label='emission lines'
-            )
-            ax0.text(
-                line_lam, 0.02, line_name, rotation=90,
-                transform=ax0.get_xaxis_transform(),
-            )
-
-        # Plotting emission/absorption lines
-        emission_lines = get_lines(
-            line_type='AE', wrange=wavelenghts, z=lines_z
-        )
-        for line_lam, line_name, line_type in emission_lines:
-            ax0.axvline(
-                line_lam, color='yellow', ls='--', lw=1, alpha=0.5,
-            )
-            ax0.text(
-                line_lam, 0.02, line_name, rotation=90,
-                transform=ax0.get_xaxis_transform(),
-            )
-
-    ax0.set_xlim(w_min, w_max)
-    ax0.set_ylim(f_min, f_max)
-    ax0.set_xlabel(f'Wavelenght [{wave_units}]')
-    ax0.set_ylabel(f'Flux [{flux_units}]')
-
-    # Draw missing data or invalid data regions
-    if lam_mask is not None:
-        for lam_inter in lam_mask:
-            rect = patches.Rectangle(
-                (lam_inter[0], 0),
-                lam_inter[1] - lam_inter[0], 1,
-                transform=ax0.get_xaxis_transform(),
-                linewidth=1,
-                fill=True,
-                edgecolor='black',
-                facecolor='white',
-                hatch='///'
-            )
-            ax0.add_patch(rect)
-            if ((lam_inter[1] > w_min + 100) and (lam_inter[0] < w_max - 100)):
-                ax0.text(
-                    (lam_inter[0] + lam_inter[1]) / 2, 0.5,
-                    "MISSING DATA",
-                    transform=ax0.get_xaxis_transform(),
-                    va='center',
-                    ha='center',
-                    rotation=90,
-                    bbox={
-                        'facecolor': 'white',
-                        'edgecolor': 'black',
-                        'boxstyle': 'round,pad=0.5',
-                    }
-                )
-
-    if cutout is not None:
-        ax1.imshow(
-            cutout,
-            origin='lower',
-            aspect='auto',
-        )
-    else:
-        ax1.text(
-            0.5, 0.25,
-            "NO IMAGE",
-            ha='center',
-            va='center',
-            transform=ax1.transAxes,
-            bbox={
-                'facecolor': 'white',
-                'edgecolor': 'black',
-                'boxstyle': 'round,pad=0.5',
-            }
-        )
-    ax1.axis('off')
-    ax2.axis('off')
-
-    splabel = f"z: {t_best_data['Z']:.4f} ± {t_best_data['ZERR']:.2e}\n"
-    splabel += f"best template: {t_best_data['SPECTYPE']} "
-    splabel += f"{t_best_data['SUBTYPE']}\n" if t_best_data['SUBTYPE'] else'\n'
-    try:
-        splabel += f"SNR: {t_best_data['SN']:.2f}\n"
-    except KeyError:
-        pass
-    try:
-        splabel += f"SNR (EM): {t_best_data['SN_EMISS']:.2f}\n"
-    except KeyError:
-        pass
-    splabel += f"z-fit warn: {t_best_data['ZWARN']}"
-
-    ax2.text(
-        0, 0.9,
-        splabel,
-        ha='left',
-        va='top',
-        transform=ax2.transAxes,
-        bbox={
-            'facecolor': 'white',
-            'edgecolor': 'none',
-        }
-    )
-
-    handles, labels = ax0.get_legend_handles_labels()
-    newLabels, newHandles = [], []
-    for handle, label in zip(handles, labels):
-        if label not in newLabels:
-            newLabels.append(label)
-            newHandles.append(handle)
-    _ = ax0.legend(newHandles, newLabels, loc='upper left')
-    plt.tight_layout()
-    return fig, [ax0, ax1, ax2]
+    return fig, axs
 
 
 def get_mask_intervals(mask):

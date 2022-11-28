@@ -514,6 +514,7 @@ def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
 def source_clustering(sources_table, data_hdu, var_hdu=None, mask_hdu=None,
                       snr_function=get_spectrum_snr, max_distance=3,
                       nmae_threshold=1, inverse_mask=False):
+
     def has_a_neighbour(arr, y, x):
         val = (arr[y+1, x] != -1) or (arr[y-1, x] != -1)
         val = val or (arr[y, x-1] != -1) or (arr[y, x-1] != -1)
@@ -585,7 +586,10 @@ def source_clustering(sources_table, data_hdu, var_hdu=None, mask_hdu=None,
                 sys.stderr.flush()
             # Add a new pixel to source_map
 
-            if not has_a_neighbour(source_map, new_sp_y, new_sp_x):
+            try:
+                if not has_a_neighbour(source_map, new_sp_y, new_sp_x):
+                    continue
+            except IndexError:
                 continue
 
             _old_map_value = source_map[new_sp_y, new_sp_x]

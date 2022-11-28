@@ -21,7 +21,7 @@ copyright = "2022, Maurizio D'Addona"
 author = "Maurizio D'Addona"
 
 # The full version, including alpha/beta/rc tags
-release = '0.2.2'
+release = '0.4.1'
 
 github_url = "https://github.com/mauritiusdadd/python-spex"
 

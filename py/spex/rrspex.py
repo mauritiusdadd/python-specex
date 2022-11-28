@@ -294,7 +294,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         rrspec = Spectrum(lam, flux, ivar, R, None)
         target = Target(target_id, [rrspec])
         target.input_file = fits_file
-        target.lam_mask = lam_mask
+        target.lam_mask = flux_not_nan_mask
         target.spec_id = spec_id
         targets.append(target)
         targetids.append(target_id)
