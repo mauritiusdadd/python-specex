@@ -335,10 +335,67 @@ def get_residuals(target, zfit, plot_templates):
 
 def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
                   restframe=False, cutout=None, cutout_vmin=None,
-                  cutout_vmax=None, plot_title="", redshift=0,
-                  wavelengt_units=None, flux_units=None, smoothing=None,
+                  cutout_vmax=None, redshift=None, smoothing=None,
+                  wavelengt_units=None, flux_units=None,
                   extra_info={}):
+    """
+    Plot a spectrum.
 
+    Parameters
+    ----------
+    wavelenghts : numpy.ndarray 1D
+        An array containing the wavelenghts.
+    flux : numpy.ndarray 1D
+        An array containing the fluxes corresponding to the wavelenghts.
+    variance : numpy.ndarray 1D, optional
+        An array containing the variances corresponding to the wavelenghts.
+        If it is None, then the variance is not plotted. The default is None.
+    nan_mask : numpy.ndarray 1D of ndtype=bool, optional
+        An array of dtype=bool that contains eventual invalid fluxes that need
+        to be masked out (ie. nan_mask[j] = True means that wavelenghts[j],
+        flux[j] and variance[j] are masked). If it is None, then no mask is
+        applyed. The default is None.
+    restframe : bool, optional
+        If True, then the spectrum is plotted in the observer restframe
+        (ie. the spectrum is de-redshifted before plotting). In order to use
+        this option, a valid redshift must be specified.
+        The default is False.
+    cutout : numpy.ndarray 2D or 3D, optional
+        A grayscale or RGB image to be shown alongside the spectrum.
+        If None, no image is shown. The default is None.
+    cutout_vmin : float, optional
+        The value to be interpreted as black in the cutout image.
+        If it is None, the value is determined automatically.
+        The default is None.
+    cutout_vmax : float, optional
+        The value to be interpreted as white in the cutout image.
+        If it is None, the value is determined automatically.
+        The default is None.
+    redshift : float, optional
+        The redshift of the spectrum. If None then no emission/absorption
+        line is plotted and restframe option is ignored. The default is None.
+    smoothing : int or None, optional
+        If an integer greater than zero is passed to this parameter, then the
+        value is used as the window size of scipy.filter.savgol_filter used to
+        smooth the flux of the spectum. If this value is 0 or None then no
+        smoothing is performed. The default is None.
+    wavelengt_units : str, optional
+        The units of the wavelenghts. The default is None.
+    flux_units : str, optional
+        The units of the fluxes. The default is None.
+    extra_info : dict of {str: str, ...}, optional
+        A dictionary containing extra information to be shown in the plot.
+        Both keys and values of the dictionary must be strings. This dict is
+        rendered as a table of two columns filled with the keys and the values.
+        The default is {}.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The figure containing the plots.
+    axs: list of matplotlib.axes._subplots.AxesSubplots
+        A list of the axes subplots in the figure.
+    """
     if nan_mask is not None:
         lam_mask = np.array([
             (wavelenghts[m_start], wavelenghts[m_end])
@@ -356,7 +413,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
     w_min = 1.0e5
     w_max = 0.0
 
-    if restframe:
+    if restframe and redshift is not None:
         wavelenghts = wavelenghts / (1 + redshift)
         if lam_mask is not None:
             lam_mask = lam_mask / (1 + redshift)
@@ -460,52 +517,53 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
             zorder=1
         )
 
-    # Plotting absorption lines
-    absorption_lines = get_lines(
-        line_type='A', wrange=wavelenghts, z=lines_z
-    )
-    for line_lam, line_name, line_type in absorption_lines:
-        ax0.axvline(
-            line_lam, color='green', ls='--', lw=0.7, alpha=0.5,
-            label='absorption lines'
+    if redshift is not None:
+        # Plotting absorption lines
+        absorption_lines = get_lines(
+            line_type='A', wrange=wavelenghts, z=lines_z
         )
-        ax0.text(
-            line_lam, 0.02, line_name, rotation=90,
-            transform=ax0.get_xaxis_transform(),
-            zorder=99
-        )
+        for line_lam, line_name, line_type in absorption_lines:
+            ax0.axvline(
+                line_lam, color='green', ls='--', lw=0.7, alpha=0.5,
+                label='absorption lines'
+            )
+            ax0.text(
+                line_lam, 0.02, line_name, rotation=90,
+                transform=ax0.get_xaxis_transform(),
+                zorder=99
+            )
 
-    # Plotting emission lines
-    emission_lines = get_lines(
-        line_type='E', wrange=wavelenghts, z=lines_z
-    )
-    for line_lam, line_name, line_type in emission_lines:
-        ax0.axvline(
-            line_lam, color='red', ls='--', lw=0.7, alpha=0.75,
-            label='emission lines',
-            zorder=2
+        # Plotting emission lines
+        emission_lines = get_lines(
+            line_type='E', wrange=wavelenghts, z=lines_z
         )
-        ax0.text(
-            line_lam, 0.02, line_name, rotation=90,
-            transform=ax0.get_xaxis_transform(),
-            zorder=99
-        )
+        for line_lam, line_name, line_type in emission_lines:
+            ax0.axvline(
+                line_lam, color='red', ls='--', lw=0.7, alpha=0.75,
+                label='emission lines',
+                zorder=2
+            )
+            ax0.text(
+                line_lam, 0.02, line_name, rotation=90,
+                transform=ax0.get_xaxis_transform(),
+                zorder=99
+            )
 
-    # Plotting emission/absorption lines
-    emission_lines = get_lines(
-        line_type='AE', wrange=wavelenghts, z=lines_z
-    )
-    for line_lam, line_name, line_type in emission_lines:
-        ax0.axvline(
-            line_lam, color='yellow', ls='--', lw=0.5, alpha=0.9,
-            label='emission/absorption lines',
-            zorder=3
+        # Plotting emission/absorption lines
+        emission_lines = get_lines(
+            line_type='AE', wrange=wavelenghts, z=lines_z
         )
-        ax0.text(
-            line_lam, 0.02, line_name, rotation=90,
-            transform=ax0.get_xaxis_transform(),
-            zorder=99
-        )
+        for line_lam, line_name, line_type in emission_lines:
+            ax0.axvline(
+                line_lam, color='yellow', ls='--', lw=0.5, alpha=0.9,
+                label='emission/absorption lines',
+                zorder=3
+            )
+            ax0.text(
+                line_lam, 0.02, line_name, rotation=90,
+                transform=ax0.get_xaxis_transform(),
+                zorder=99
+            )
 
     # Draw missing data or invalid data regions
     if lam_mask is not None:
