@@ -1,4 +1,4 @@
-spex.rrspex module
+spex.spexplot module
 =======================================
 
 .. automodule:: spex.spexplot

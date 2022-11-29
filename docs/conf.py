@@ -12,7 +12,8 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../py'))
+import spex
+sys.path.insert(0, os.path.abspath('..'))
 
 # -- Project information -----------------------------------------------------
 
@@ -21,7 +22,7 @@ copyright = "2022, Maurizio D'Addona"
 author = "Maurizio D'Addona"
 
 # The full version, including alpha/beta/rc tags
-release = '0.4.1'
+release = spex.__version__
 
 github_url = "https://github.com/mauritiusdadd/python-spex"
 
