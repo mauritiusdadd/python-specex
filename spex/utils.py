@@ -19,7 +19,9 @@ from scipy.signal import savgol_filter
 from astropy.io import fits
 from astropy.nddata import Cutout2D
 from astropy.visualization import ZScaleInterval
-from astropy.wcs import WCS
+from astropy import wcs as apwcs
+from astropy import units as apu
+from astropy import coordinates
 
 from .lines import get_lines
 
@@ -194,6 +196,32 @@ def get_log_img(img, vclip=0.5):
 
 
 def load_rgb_fits(fits_file, ext_r=1, ext_g=2, ext_b=3):
+    """
+    Load an RGB image from a FITS file.
+
+    Parameters
+    ----------
+    fits_file : str
+        The path of the fits file.
+    ext_r : int, optional
+        The index of the extension containing the red channel.
+        The default is 1.
+    ext_g : int, optional
+        The index of the extension containing the green channel.
+        The default is 2.
+    ext_b : int, optional
+        The index of the extension containing the blue channel.
+        The default is 3.
+
+    Returns
+    -------
+    dict
+        The dictionary contains the following key: value pairs:
+            'data': 3D numpy.ndarray
+                The actual image data.
+            'wcs': astropy.wcs.WCS
+                The WCS of the image.
+    """
     try:
         rgb_image = np.array((
             fits.getdata(fits_file, ext=ext_r),
@@ -206,12 +234,49 @@ def load_rgb_fits(fits_file, ext_r=1, ext_g=2, ext_b=3):
     rgb_image -= np.nanmin(rgb_image)
     rgb_image = rgb_image / np.nanmax(rgb_image)
 
-    rgb_wcs = WCS(fits.getheader(fits_file, ext=1))
+    rgb_wcs = apwcs.WCS(fits.getheader(fits_file, ext=1))
 
     return {'data': rgb_image, 'wcs': rgb_wcs}
 
 
-def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None):
+def get_rgb_cutout(data, position, cutout_size, wcs=None):
+    """
+    Get a cutout from a bigger image of from a datacube.
+
+    For more information see astropy.nddata.Cutout2D.
+
+    Parameters
+    ----------
+    data : np.ndarray 2D or 3D
+        A grayscale or RGB image data or datacube. If a datacube is passed as
+        input, then the datacube is sliced in three parts and each part is
+        tacked along the spectral dimension.
+    position : astropy.coordinates.SkyCoord
+        The sky coordinate of the center of the cutout.
+    cutout_size : int, array_like, or Quantity
+        The size of the cutout array along each axis. If size is a scalar
+        number or a scalar Quantity, then a square cutout of size will be
+        created. If size has two elements, they should be in (ny, nx) order.
+        Scalar numbers in size are assumed to be in units of pixels.
+    wcs : TYPE, optional
+        A WCS object associated with the input data array.
+        If wcs is not None, then the returned cutout object will contain
+        a copy of the updated WCS for the cutout data array.
+        The default is None.
+
+    Raises
+    ------
+    ValueError
+        DESCRIPTION.
+
+    Returns
+    -------
+    cutout : TYPE
+        DESCRIPTION.
+    cutout_wcs : TYPE
+        DESCRIPTION.
+
+    """
     valid_shape = True
     is_rgb = True
 
@@ -237,14 +302,13 @@ def get_cutout(data, position, cutout_size, wcs=None, wave_ranges=None):
             data_b = data[..., 2]
         else:
             # Probably a spectral datacube
-            if wave_ranges is None:
-                wave_indexes = np.arange(data.shape[2])
-                w_mask_r = wave_indexes > (data.shape[2] * 0.66)
-                w_mask_b = wave_indexes < (data.shape[2] * 0.33)
-                w_mask_g = ~(w_mask_r | w_mask_b)
-                data_r = np.nansum(data[..., w_mask_r], axis=-1)
-                data_g = np.nansum(data[..., w_mask_g], axis=-1)
-                data_b = np.nansum(data[..., w_mask_b], axis=-1)
+            wave_indexes = np.arange(data.shape[2])
+            w_mask_r = wave_indexes > (data.shape[2] * 0.66)
+            w_mask_b = wave_indexes < (data.shape[2] * 0.33)
+            w_mask_g = ~(w_mask_r | w_mask_b)
+            data_r = np.nansum(data[..., w_mask_r], axis=-1)
+            data_g = np.nansum(data[..., w_mask_g], axis=-1)
+            data_b = np.nansum(data[..., w_mask_b], axis=-1)
     elif len(data.shape) == 2:
         is_rgb = False
         data_gray = data
@@ -329,15 +393,78 @@ def plot_scandata(target, scandata):
     return fig, ax
 
 
-def get_residuals(target, zfit, plot_templates):
-    t_best_data = zfit[zfit['SPECID'] == target.spec_id][0]
+def get_ellipse_skypoints(center: coordinates.SkyCoord,
+                          a: apu.quantity.Quantity,
+                          b: apu.quantity.Quantity,
+                          angle: apu.quantity.Quantity = 0*apu.deg,
+                          n_points: int = 25) -> list:
+    """
+    Get points of an ellips on the skyplane.
+
+    Parameters
+    ----------
+    center : astropy.coordinates.SkyCoord
+        DESCRIPTION.
+    a : apu.quantity.Quantity
+        Angular size of the semi-major axis.
+    b : apu.quantity.Quantity
+        Angular size of the semi-mino axis.
+    angle : apu.quantity.Quantity, optional
+        Rotation angle of the semi-major axis respect to the RA axis.
+        The default is 0 deg.
+    n_points : int, optional
+        Number of points to return. The default is 25.
+
+    Returns
+    -------
+    ellipse_points : list of coordinates.SkyCoord
+        List of SkyCoord corresponding to the points of the ellipse.
+
+    Example
+    -------
+    >>> from astropy import units as u
+    >>> from astropy.coordinates import SkyCoord
+    >>> from spex.utils import get_ellipse_skypoints
+    >>> ellipse_center = SkyCoord(
+    ...     '11:51:00.2993', '-28:05:34.731',
+    ...     unit=['hourangle', 'deg']
+    ... )
+    >>> a = 2 * u.arcsec
+    >>> b = 1 * u.arcsec
+    >>> angle = 45 * u.deg
+    >>> world_points = get_ellipse_skypoints(
+    ...     center=ellipse_center,
+    ...     a=a, b=b,
+    ...     angle=angle
+    ... )
+    """
+    ellipse_points = []
+
+    # Check if a is actually greater than b, otherwise swap them
+    if a < b:
+        _tmp = a
+        a = b
+        b = _tmp
+
+    for theta in np.linspace(0, 2*np.pi, n_points, endpoint=True):
+        total_angle = -theta + angle.to(apu.rad).value
+        radius = a*b / np.sqrt(
+            (a*np.cos(total_angle))**2 + (b*np.sin(total_angle))**2
+        )
+        new_point = center.directional_offset_by(
+            position_angle=apu.Quantity(theta, apu.rad),
+            separation=radius
+        )
+
+        ellipse_points.append(new_point)
+    return ellipse_points
 
 
 def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
                   restframe=False, cutout=None, cutout_vmin=None,
-                  cutout_vmax=None, redshift=None, smoothing=None,
-                  wavelengt_units=None, flux_units=None,
-                  extra_info={}):
+                  cutout_vmax=None, cutout_wcs=None, redshift=None,
+                  smoothing=None, wavelengt_units=None, flux_units=None,
+                  extra_info={}, extraction_info={}):
     """
     Plot a spectrum.
 
@@ -363,6 +490,8 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
     cutout : numpy.ndarray 2D or 3D, optional
         A grayscale or RGB image to be shown alongside the spectrum.
         If None, no image is shown. The default is None.
+    cutout_wcs : astropy.wcs.WCS, optional
+        An optional WCS for the cutout. The default is None.
     cutout_vmin : float, optional
         The value to be interpreted as black in the cutout image.
         If it is None, the value is determined automatically.
@@ -387,6 +516,11 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
         A dictionary containing extra information to be shown in the plot.
         Both keys and values of the dictionary must be strings. This dict is
         rendered as a table of two columns filled with the keys and the values.
+        The default is {}.
+    extraction_info: dict, optionale
+        This dictionary must contain extraction information from spex. If not
+        empty or None, extraction information are used to plot the apertures
+        used by spex over the cutout (if provided).
         The default is {}.
 
     Returns
@@ -437,8 +571,13 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
 
     fig = plt.figure(figsize=(15, 5))
 
+    # Make a grid of plots
     gs = GridSpec(6, 6, figure=fig, hspace=0.1)
 
+    # If variance data are present, then make two plots on the left of the
+    # figure. The top one is for the spectrum and the bottom one is for the
+    # variance. Otherwise just make a bigger plot on the left only for the
+    # spectrum.
     if variance is not None:
         ax0 = fig.add_subplot(gs[:4, :-1])
         ax4 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
@@ -464,27 +603,88 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
         ax0.set_xlabel(x_label)
 
     ax0.set_ylabel(y_label)
-
     ax0.set_xlim(w_min, w_max)
 
+    # Plot a cutout
     if cutout is not None:
-        ax1 = fig.add_subplot(gs[:3, -1])
+        ax1 = fig.add_subplot(gs[:3, -1], projection=cutout_wcs)
         ax2 = fig.add_subplot(gs[3:, -1])
+
+        if cutout_wcs is not None:
+            ra_cunit, dec_cunit = cutout_wcs.celestial.wcs.cunit
+        else:
+            ra_cunit = apu.deg
+            dec_cunit = apu.deg
 
         ax1.axis('off')
         ax1.imshow(
             cutout,
             origin='lower',
-            aspect='auto',
+            aspect='equal',
             vmin=cutout_vmin,
             vmax=cutout_vmax
         )
+        ax1.set_aspect(1)
+
+        # Check if there are info about the spex extraction
+        try:
+            ext_mode = extraction_info['mode']
+            ext_apertures = extraction_info['apertures']
+            e_ra = extraction_info['aperture_ra']
+            e_dec = extraction_info['aperture_dec']
+        except (TypeError, KeyError):
+            # No extraction info present, just ignore
+            pass
+        else:
+            # If there are extraction info, read the information
+            e_wid, e_hei, e_ang = ext_apertures
+
+            e_cc = coordinates.SkyCoord(
+                e_ra, e_dec,
+                unit=(ra_cunit, dec_cunit),
+                frame=apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
+            )
+
+            # and then draw extraction apertures
+            if ext_mode.lower() in [
+                    'kron_ellipse', 'kron_circular', 'circular_aperture'
+            ]:
+                e_world_points = get_ellipse_skypoints(
+                    e_cc,
+                    a=0.5*e_hei,
+                    b=0.5*e_wid,
+                    angle=e_ang
+                )
+
+                e_world_points_values = np.array([
+                    [x.ra.value, x.dec.value] for x in e_world_points
+                ])
+
+                ax1.plot(
+                    e_world_points_values[..., 0],
+                    e_world_points_values[..., 1],
+                    color='#0000ff',
+                    ls='-',
+                    lw=0.8,
+                    alpha=0.7,
+                    transform=ax1.get_transform('fk5')
+                )
+                ax1.plot(
+                    e_world_points_values[..., 0],
+                    e_world_points_values[..., 1],
+                    color='#00ff00',
+                    ls='--',
+                    lw=0.8,
+                    alpha=0.7,
+                    transform=ax1.get_transform('fk5')
+                )
     else:
         ax1 = None
         ax2 = fig.add_subplot(gs[:, -1])
 
     ax0.set_aspect('auto')
 
+    # Plot only original spectrum or also a smoothed version
     if not smoothing:
         ax0.plot(
             wavelenghts, flux,

@@ -161,10 +161,11 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
-        '--aperture-size', metavar='APERTURE', type=float, default=0.8,
-        help='Set the radius in arcsecs of a fixed circula aperture used in '
-        'the "fixed-aperture" mode. The pixels within this aperture will be '
-        'used for spectra extraction. '
+        '--aperture-size', metavar='APERTURE', type=str, default='0.8mas',
+        help='Set the diameter of a fixed circula aperture used in the '
+        '"fixed-aperture" mode. The pixels within this aperture will be '
+        'used for spectra extraction. Units can be specified using the names '
+        'compatible with astropy.units (eg. 5mas, 1arcsec, etc.).'
         'The default value is %(metavar)s=%(default)s.'
     )
 
@@ -177,13 +178,15 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
-        '--cat-pixelscale', metavar='MAS_PIXEL', type=float, default=1,
+        '--cat-pixelscale', metavar='PIXEL_SCALE', type=str, default='1mas',
         help='Set the scale size in mas of the major and minor axes. Useful if'
-        'A and B are given in pixels instead of MAS (like in the case of '
-        'catalogs extracted by sextractor). NOTE that this is not the pixel '
-        'scale of the cube but it is the size of a pixel of the image used to '
-        'generate the input catalog. This parameter will be ignored if using '
-        'a region file as input.'
+        'A and B are given in pixels instead of physical units (like in the '
+        'case of catalogs extracted by sextractor). Units can be specified '
+        'using the astropy.units names (ie. 5mas, 1arcsec, etc.). If it is '
+        'adimensional, then the value is interpreted as mas per pixel. '
+        'NOTE that this is not the pixel scale of the cube but it is the size '
+        ' of a pixel of the image used to generate the input catalog. '
+        'This parameter will be ignored if using a region file as input.'
         'The default value is %(metavar)s=%(default)s.'
     )
 
@@ -676,7 +679,9 @@ def spex(options=None):
     if args.catalog is not None:
         sources = Table.read(args.catalog)
         basename_with_ext = os.path.basename(args.catalog)
-        pixelscale = args.cat_pixelscale
+        pixelscale = units.Quantity(args.cat_pixelscale)
+        if str(pixelscale.unit.physical_type) == 'dimensionless':
+            pixelscale = pixelscale * units.mas
     elif args.regionfile is not None:
         sources = parse_regionfile(
             args.regionfile,
@@ -689,7 +694,7 @@ def spex(options=None):
             key_kron=args.key_kron,
         )
         basename_with_ext = os.path.basename(args.regionfile)
-        pixelscale = 1.0
+        pixelscale = 1.0 * units.mas
     else:
         print(
             "You must provide at least an input catalog or a region file!",
@@ -739,15 +744,26 @@ def spex(options=None):
     spectral_wcs = cube_wcs.spectral
     wcs_frame = wcs.utils.wcs_to_celestial_frame(cube_wcs)
 
-    # Get the pixelscale in arcsec/pixel
-    cube_pixelscale = [
-        units.Quantity(sc_val, u).to_value('arcsec')
+    # TODO: we assume here that the distorsion across the sky plane is
+    #       negligible, but it is very bold to assume this is always the case.
+    #       A more general approach that takes into account also distortion
+    #       in function of the position on the sky is needed.
+    # Get the pixelscales in arcsec/pixel.
+    cube_pixelscale_x, cube_pixelscale_y = [
+        units.Quantity(sc_val, u)
         for sc_val, u in zip(
             wcs.utils.proj_plane_pixel_scales(celestial_wcs),
             celestial_wcs.wcs.cunit
         )
     ]
-    cube_pixelscale = np.nanmean(cube_pixelscale)
+
+    if args.debug:
+        print(
+            "Cube X and Y pixelscales are: "
+            f"{cube_pixelscale_x.to(units.arcsec)}, "
+            f"{cube_pixelscale_y.to(units.arcsec)}",
+            file=sys.stderr
+        )
 
     ra_unit = sources[args.key_ra].unit
     if ra_unit is None:
@@ -896,19 +912,17 @@ def spex(options=None):
 
             x_over_a = xx_tr*np.cos(ang) + yy_tr*np.sin(ang)
             x_over_a /= source[args.key_a]
-            x_over_a = x_over_a ** 2
 
             y_over_b = xx_tr*np.sin(ang) - yy_tr*np.cos(ang)
             y_over_b /= source[args.key_b]
-            y_over_b = y_over_b ** 2
 
             spex_apertures[obj_id] = (
                 source[args.key_a] * pixelscale,
                 source[args.key_b] * pixelscale,
-                source[args.key_theta]
+                source[args.key_theta] * units.rad
             )
 
-            mask = (x_over_a + y_over_b) < (1.0/source[args.key_kron])
+            mask = (x_over_a**2 + y_over_b**2) < (1.0/source[args.key_kron])
 
         elif mode == 'kron_circular':
             kron_circular = source[args.key_kron] * source[args.key_b]
@@ -917,18 +931,21 @@ def spex(options=None):
             spex_apertures[obj_id] = (
                 kron_circular * pixelscale,
                 kron_circular * pixelscale,
-                0
+                0 * units.rad
             )
 
             mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
 
         elif mode == 'circular_aperture':
-            # NOTE: in this mode, aperture is already in asrcseconds
+            aperture_size = units.Quantity(args.aperture_size)
+            if str(aperture_size.unit.physical_type) == 'dimensionless':
+                aperture_size = aperture_size * units.mas
+
             try:
                 spex_apertures[obj_id] = (
-                    args.aperture_size,
-                    args.aperture_size,
-                    0
+                    aperture_size,
+                    aperture_size,
+                    0 * units.rad
                 )
             except TypeError:
                 print(
@@ -937,9 +954,13 @@ def spex(options=None):
                 )
                 continue
 
-            rad_coords = xx_tr**2 + yy_tr**2
-            mask = rad_coords < args.aperture_size / (2 * cube_pixelscale)
+            xx_scaled = xx_tr * cube_pixelscale_x
+            yy_scaled = yy_tr * cube_pixelscale_y
 
+            mask = (xx_scaled**2 + yy_scaled**2) < (aperture_size / 2)**2
+
+            # TODO: fix here
+            """
             if anulus_r_in and anulus_r_out:
                 spex_anuli[obj_id] = (
                     anulus_r_in,
@@ -953,7 +974,8 @@ def spex(options=None):
             else:
                 spex_anuli[obj_id] = None
                 anulus_mask = None
-
+            """
+            anulus_mask = None
         if cube_footprint is not None:
             mask &= cube_footprint
 
@@ -1024,6 +1046,10 @@ def spex(options=None):
 
         outname = f"spec_{obj_id}.fits"
 
+        apertures_info = [
+            x.to_string() for x in spex_apertures[obj_id]
+        ]
+
         main_header = {
             'CUBE': (basename_with_ext, "Spectral cube used for extraction"),
             'RA': (obj_ra, "Ra of the center of the object"),
@@ -1035,7 +1061,7 @@ def spex(options=None):
             'SN_EMISS': (sn_em, "SNR due to emissino lines only"),
             'EXT_MODE': (mode, "Spex extraction mode"),
             'EXT_APER': (
-                json.dumps(spex_apertures[obj_id]),
+                json.dumps(apertures_info),
                 "Apertures used in spex"
             )
         }

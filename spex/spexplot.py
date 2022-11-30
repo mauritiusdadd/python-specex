@@ -22,7 +22,7 @@ from astropy.table import Table, MaskedColumn
 from astropy.coordinates import SkyCoord
 
 from .utils import plot_spectrum, get_pbar, get_hdu, load_rgb_fits
-from .utils import get_cutout
+from .utils import get_rgb_cutout
 
 
 def __argshandler(options=None):
@@ -107,7 +107,7 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
-        '--cutout-size', metavar='SIZE', type=str, default='10arcsec',
+        '--cutout-size', metavar='SIZE', type=str, default='2arcsec',
         help='Set the size of the cutout to %(metavar)s. This option '
         'supports units compatible with astropy (for example "1deg", '
         '"2arcmin", "5arcsec", etc.). If no unit is specified the size is '
@@ -224,7 +224,10 @@ def spexplot(options=None):
                 object_dec = main_header['DEC']
                 object_id = main_header['ID']
                 extraction_mode = main_header['EXT_MODE']
-                spex_apertures = json.loads(main_header['EXT_APER'])
+                spex_apertures = [
+                    apu.Quantity(x)
+                    for x in json.loads(main_header['EXT_APER'])
+                ]
             except KeyError:
                 print(
                     f"Skipping file with invalid header: {spectrum_fits_file}"
@@ -298,7 +301,7 @@ def spexplot(options=None):
             wavelenghts = spec_wcs.pixel_to_world(pixel).Angstrom
 
             if big_image is not None:
-                cutout, cutout_wcs = get_cutout(
+                cutout, cutout_wcs = get_rgb_cutout(
                     big_image['data'],
                     position=obj_center,
                     cutout_size=cutout_size,
@@ -319,13 +322,19 @@ def spexplot(options=None):
                 redshift=object_z,
                 restframe=restframe,
                 cutout=cutout,
+                cutout_wcs=cutout_wcs,
                 cutout_vmin=cutout_vmin,
                 cutout_vmax=cutout_vmax,
-                plot_title=f"object {object_id}",
                 flux_units=flux_units,
                 wavelengt_units=wavelenght_units,
                 smoothing=args.smoothing,
-                extra_info=info_dict
+                extra_info=info_dict,
+                extraction_info={
+                    'mode': extraction_mode,
+                    'apertures': spex_apertures,
+                    'aperture_ra': object_ra,
+                    'aperture_dec': object_dec,
+                }
             )
 
             if args.outdir is None:
