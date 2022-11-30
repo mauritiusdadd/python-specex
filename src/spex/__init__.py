@@ -31,6 +31,13 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
-from . import *
+import importlib.metadata
+from pkgutil import extend_path
 
-__version__ = '0.4.1'
+from . import spex
+from . import utils
+from . import rrspex
+from . import spexplot
+
+__version__ = importlib.metadata.version("spex")
+__path__ = extend_path(__path__, __name__)

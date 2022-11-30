@@ -422,21 +422,49 @@ def get_ellipse_skypoints(center: coordinates.SkyCoord,
 
     Example
     -------
-    >>> from astropy import units as u
+    >>> import numpy as np
+    >>> from matplotlib import pyplot as plt
+    >>> from astropy.io import fits
+    >>> from astropy.wcs import WCS
+    >>> from astropy.wcs.utils import wcs_to_celestial_frame
     >>> from astropy.coordinates import SkyCoord
+    >>> from astropy import units as apu
+    >>> from astropy.utils.data import get_pkg_data_filename
     >>> from spex.utils import get_ellipse_skypoints
-    >>> ellipse_center = SkyCoord(
-    ...     '11:51:00.2993', '-28:05:34.731',
-    ...     unit=['hourangle', 'deg']
-    ... )
-    >>> a = 2 * u.arcsec
-    >>> b = 1 * u.arcsec
-    >>> angle = 45 * u.deg
+    >>> fn = get_pkg_data_filename('galactic_center/gc_msx_e.fits')
+    >>> image = fits.getdata(fn, ext=0)
+    >>> w = WCS(fits.getheader(fn, ext=0))
+    >>> ellipse_center = w.pixel_to_world(50, 60)
+    >>> a = 10 * apu.arcmin
+    >>> b = 5 * apu.arcmin
+    >>> angle = 45 * apu.deg
     >>> world_points = get_ellipse_skypoints(
     ...     center=ellipse_center,
     ...     a=a, b=b,
     ...     angle=angle
     ... )
+    >>> pp_val = np.array([
+    ...     [x.l.value, x.b.value] for x in world_points
+    ... ])
+    >>> fig = plt.figure()
+    >>> ax = fig.add_subplot(projection=w)
+    >>> ax.imshow(
+    ...     image,
+    ...     vmin=-2.e-5,
+    ...     vmax=2.e-4,
+    ...     origin='lower',
+    ...     cmap='plasma'
+    ... )
+    >>> ax.plot(
+    ...     pp_val[..., 0], pp_val[..., 1],
+    ...     color='#31cc02',
+    ...     lw=2,
+    ...     ls='--',
+    ...     transform=ax.get_transform(wcs_to_celestial_frame(w))
+    ... )
+    >>> ax.set_aspect(1)
+    >>> plt.show()
+    >>> plt.close(fig)
     """
     ellipse_points = []
 
@@ -667,7 +695,11 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
                     ls='-',
                     lw=0.8,
                     alpha=0.7,
-                    transform=ax1.get_transform('fk5')
+                    transform=ax1.get_transform(
+                        ax1.get_transform(
+                            apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
+                        )
+                    )
                 )
                 ax1.plot(
                     e_world_points_values[..., 0],
@@ -676,7 +708,11 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
                     ls='--',
                     lw=0.8,
                     alpha=0.7,
-                    transform=ax1.get_transform('fk5')
+                    transform=ax1.get_transform(
+                        ax1.get_transform(
+                            apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
+                        )
+                    )
                 )
     else:
         ax1 = None

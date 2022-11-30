@@ -13,7 +13,7 @@
 import os
 import sys
 import spex
-sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../src'))
 
 # -- Project information -----------------------------------------------------
 
@@ -36,6 +36,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
+    'sphinx_copybutton',
 ]
 
 issuetracker = 'github'
