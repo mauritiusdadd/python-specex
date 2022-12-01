@@ -9,38 +9,33 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 from __future__ import absolute_import, division, print_function
 
-import os
 import unittest
-import pathlib
 
 from spex.spex import spex
 
+from test import make_synt_cube
 
-TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
 Z_FTOL = 0.01
 
 
 class TestSpex(unittest.TestCase):
 
-    test_cube_file = os.path.join(TEST_DATA_PATH, "test_cube.fits")
-    test_cat_file = os.path.join(TEST_DATA_PATH, "test_cube_cat.fits")
-    test_ref_file = os.path.join(TEST_DATA_PATH, "test_cube.reg")
+    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
 
     def test_spex_catalog_success(self):
         spex_options = [
-            '--catalog', self.test_cat_file,
+            '--catalog', self.cat_file,
             '--mode', 'circular_aperture',
-            '--aperture-size', '0.8',
-            '--no-nans', self.test_cube_file
+            '--aperture-size', '0.8arcsec',
+            '--no-nans', self.cube_file
         ]
         spex(options=spex_options)
 
     def test_spex_regionfile_success(self):
         spex_options = [
-            '--regionfile', self.test_ref_file,
-            '--mode', 'circular_aperture',
-            '--aperture-size', '0.8', '--zbest', 'zbest_cube.fits',
-            '--no-nans', self.test_cube_file
+            '--regionfile', self.reg_file,
+            '--mode', 'kron_ellipse',
+            '--no-nans', self.cube_file
         ]
         spex(options=spex_options)
 

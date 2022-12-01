@@ -553,7 +553,7 @@ def speclist2ez(spec_files, spec_hdu_name='SPECTRUM', var_hdu_name='VARIANCE'):
 
 
 def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
-                     key_a='A_IMAGE', key_b='B_IMAGE', key_theta='THETA_IMAGE',
+                     key_a='A_WORLD', key_b='B_WORLD', key_theta='THETA_IMAGE',
                      key_id='NUMBER', key_kron='KRON_RADIUS'):
     """
     Parse a regionfile and return an asrtopy Table with sources information.
@@ -578,10 +578,10 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
         The default value is 'DELTA_J2000'.
     key_a : str, optional
         Name of the column that will contain the semi major axis.
-        The default value is 'A_IMAGE'.
+        The default value is 'A_WORLD'.
     key_b : str, optional
         Name of the column that will contain the semi minor axis.
-        The default value is 'B_IMAGE'.
+        The default value is 'B_WORLD'.
     key_theta : str, optional
         Name of the column that will contain angle between the major axis and
         the principa axis of the image.
@@ -602,7 +602,7 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
         mins = float(degstr[deg_sep+1:min_sep]) if min_sep >= 0 else 0
         secs = float(degstr[min_sep+1:sec_sep]) if sec_sep >= 0 else 0
 
-        return secs + 60*mins + 3600*degs
+        return (secs + 60*mins + 3600*degs) * units.arcsec
 
     with open(regionfile, 'r') as f:
         regions = f.read().splitlines()
@@ -694,7 +694,7 @@ def spex(options=None):
             key_kron=args.key_kron,
         )
         basename_with_ext = os.path.basename(args.regionfile)
-        pixelscale = 1.0 * units.mas
+        pixelscale = 1.0 * units.arcsec
     else:
         print(
             "You must provide at least an input catalog or a region file!",
@@ -907,6 +907,7 @@ def spex(options=None):
         xx_tr = xx - source['CUBE_X_IMAGE']
         yy_tr = yy - source['CUBE_Y_IMAGE']
 
+        anulus_mask = None
         if mode == 'kron_ellipse':
             ang = np.deg2rad(source[args.key_theta])
 
@@ -975,7 +976,7 @@ def spex(options=None):
                 spex_anuli[obj_id] = None
                 anulus_mask = None
             """
-            anulus_mask = None
+
         if cube_footprint is not None:
             mask &= cube_footprint
 
@@ -1058,7 +1059,7 @@ def spex(options=None):
             'HISTORY': f'Extracted on {str(my_time)}',
             'ID': obj_id,
             'SN': (sn_spec, "SNR of the total spectrum"),
-            'SN_EMISS': (sn_em, "SNR due to emissino lines only"),
+            'SN_EMISS': (sn_em, "SNR due to emission lines only"),
             'EXT_MODE': (mode, "Spex extraction mode"),
             'EXT_APER': (
                 json.dumps(apertures_info),

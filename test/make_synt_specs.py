@@ -5,15 +5,23 @@ Generate synthetic spectra that can be used to test spex.rrspex module.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+import os
+import json
+import warnings
 import numpy as np
 from astropy.io import fits
+from astropy import units
 from scipy.signal import savgol_filter
-from make_synt_cube import gen_fake_spectrum
-
-from redrock.templates import find_templates, Template
+from astropy.utils.exceptions import AstropyWarning
 
 
-def fake_spectrum_fits(obj_id, wave_range, template, coeffs, z, wave_step=1):
+from . import TEST_DATA_PATH
+from . import make_synt_cube
+
+from spex.utils import get_sdss_spectral_templates, get_sdss_template_data
+
+
+def fake_spectrum_fits(obj_id, wave_range, template, z, wave_step=1):
     """
     Generate a fits HDUList containing a synthetic spectrum.
 
@@ -26,25 +34,10 @@ def fake_spectrum_fits(obj_id, wave_range, template, coeffs, z, wave_step=1):
     wave_range : tuple or numpy.ndarray
         The range of wavelenght, in Angstrom, the sythetic spectrum should
         cover. Only maximum and minimum values of this parameter are used.
-    template : rerdock.template.Template or custom class
-        The template used to compute the spectrum. If a custom class is used,
-        it should have a method named eval that accetps the following
-        parameters eval(coeff, wave, z), where:
-
-            - coeff : list or numpy.ndarray
-                Coefficients uesd for generating the spectrum
-            - wave : numpy.ndarray
-                Wavelenghts, in Angstrom, used to generate spectral data
-            - z : float
-                Redshift of the spectrum.
-
-        The eval method should return a 1D numpy.ndarray of the same lenght of
-        wave and containing the flux of the synthetic spectrum in arbitrary
-        units.
-    coeffs : list or numpy.ndarray
-        Coefficients uesd for generating the spectrum, passed to template.eval
-        method.
-    z : TYPE
+    template : dict
+        A spectral template dictionary as returned by
+        spex.utils.get_sdss_template_data()
+    z : float
         Redshift of the spectrum.
     wave_step : float, optional
         Resolution of the spectrum in Angstrom. The default is 1.
@@ -67,7 +60,10 @@ def fake_spectrum_fits(obj_id, wave_range, template, coeffs, z, wave_step=1):
                 The header of this extension contains WCS data that can be
                 used to compute the wavelength for each pixel of the spectrum.
     """
-    wave, flux = gen_fake_spectrum(wave_range, template, coeffs, z, wave_step)
+    wave, flux = make_synt_cube.gen_fake_spectrum(
+        wave_range, template, z, wave_step
+    )
+
     noise = np.random.standard_normal(len(flux)) * 0.1 * np.std(flux)
 
     spec_header = fits.header.Header()
@@ -84,7 +80,12 @@ def fake_spectrum_fits(obj_id, wave_range, template, coeffs, z, wave_step=1):
     spec_hdu = fits.ImageHDU(data=flux+noise, header=spec_header)
     spec_hdu.name = 'SPECTRUM'
 
-    var = np.ones_like(flux)
+    var = 2*np.ones_like(flux)
+    delta_flux = (flux[:-1] - flux[1:])**2
+    delta_flux -= np.nanmin(delta_flux)
+    delta_flux /= np.nanmax(delta_flux)
+    var[:-1] = 2 + 100 * delta_flux
+
     var_hdu = fits.ImageHDU(data=var, header=spec_header)
     var_hdu.name = 'VARIANCE'
 
@@ -100,12 +101,29 @@ def fake_spectrum_fits(obj_id, wave_range, template, coeffs, z, wave_step=1):
 
     # Get the mean Signal to Noise ratio
     sn_spec = obj_mean_spec / np.nanmean(noise_spec)
+    if np.isnan(sn_spec):
+        sn_spec = 99
+
+    apertures = [
+        10 * np.random.rand() * units.arcsec,
+        10 * np.random.rand() * units.arcsec,
+        360 * np.random.rand() * units.deg
+    ]
+
+    apertures_info = [
+        x.to_string() for x in apertures
+    ]
 
     prim_hdu = fits.PrimaryHDU()
     prim_hdu.header['OBJ_Z'] = z
     prim_hdu.header['NPIX'] = 10
     prim_hdu.header['SN'] = sn_spec
     prim_hdu.header['ID'] = obj_id
+    prim_hdu.header['RA'] = '50.0'
+    prim_hdu.header['DEC'] = '50.0'
+    prim_hdu.header['Z'] = z
+    prim_hdu.header['EXT_MODE'] = 'kron-ellipse'
+    prim_hdu.header['EXT_APER'] = json.dumps(apertures_info)
 
     hdul = fits.HDUList([prim_hdu, spec_hdu, var_hdu])
     return hdul, wave
@@ -120,43 +138,59 @@ def main():
     None.
 
     """
+    warnings.simplefilter('ignore', category=AstropyWarning)
+
+    if not os.path.exists(TEST_DATA_PATH):
+        os.makedirs(TEST_DATA_PATH)
+
     wave_range = [4500, 9000]
     obj_id = 0
-    for t_file in find_templates():
-        my_temp = Template(t_file)
-        f = fits.open(t_file)
-        try:
-            has_archetypes = f[1].name == 'ARCHETYPE_COEFF'
-        except IndexError:
-            has_archetypes = False
+    type_counters = {}
 
-        if has_archetypes:
-            archetype_coeffs = f[1].data
-            coeff_indexes = len(archetype_coeffs)
+    spec_files = []
+
+    for t_dict in get_sdss_spectral_templates(outdir=TEST_DATA_PATH):
+        # Get a random redshift from the template redshifts range
+        obj_type = t_dict['type'].lower()
+
+        if obj_type not in type_counters:
+            type_counters[obj_type] = 0
         else:
-            coeff_indexes = range(my_temp.nbasis)
+            type_counters[obj_type] = type_counters[obj_type] + 1
 
-        for i in range(5):
-            if has_archetypes:
-                coeffs = archetype_coeffs[np.random.choice(coeff_indexes)]
-            else:
-                coeffs = np.zeros_like(coeff_indexes)
-                coeffs[np.random.choice(coeff_indexes)] = 1
+        z = 0
 
-            # Get a random redshift from the template redshifts range
-            z = np.random.choice(my_temp.redshifts)
-            hdul, wave = fake_spectrum_fits(
-                f'RR{obj_id:04}', wave_range, my_temp, coeffs, z)
+        if obj_type == 'galaxy':
+            while z < 0.2:
+                z = np.random.rand() * 1
+        elif obj_type == 'qso':
+            while z < 1.0:
+                z = np.random.rand() * 2
 
-            outname = "rrspex_" + my_temp.template_type.lower()
-            if my_temp.sub_type:
-                outname += f'_{my_temp.sub_type.lower()}'
+        hdul, wave = fake_spectrum_fits(
+            f'RR{obj_id:04}',
+            wave_range,
+            get_sdss_template_data(t_dict['file']),
+            z
+        )
 
-            hdul.writeto(
-                f"{outname}_{i:02d}.fits",
-                overwrite=True
-            )
-            obj_id += 1
+        outname = f"spex_sdss_{obj_type}"
+        try:
+            obj_sub_type = t_dict['sub_type'].lower()
+        except KeyError:
+            pass
+        else:
+            outname += f'_{obj_sub_type}'
+
+        out_file_path = os.path.join(
+            TEST_DATA_PATH,
+            f"{outname}_{type_counters[obj_type]:02d}.fits"
+        )
+        hdul.writeto(out_file_path, overwrite=True)
+
+        spec_files.append(out_file_path)
+        obj_id += 1
+    return spec_files
 
 
 if __name__ == '__main__':

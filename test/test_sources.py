@@ -7,22 +7,19 @@ Extract spectra from spectral data cubes.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
-import os
-import pathlib
 import unittest
 
 from spex.sources import detect_from_cube
 
-
-TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
+from test import make_synt_cube
 
 
 class TestSourceDetection(unittest.TestCase):
 
-    test_cube_file = os.path.join(TEST_DATA_PATH, "test_cube.fits")
+    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
 
     def test_extract_sources(self):
-        detect_from_cube([self.test_cube_file])
+        detect_from_cube([self.cube_file])
 
 
 if __name__ == '__main__':

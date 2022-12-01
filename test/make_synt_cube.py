@@ -6,14 +6,21 @@ Generate a synthetic spectral datacube that can be used to test spex module.
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import os
-import pathlib
+import sys
+import warnings
 import numpy as np
+
 from astropy.io import fits
 from astropy.modeling import models
 from scipy.ndimage import gaussian_filter
-from redrock.templates import find_templates, Template
 from astropy.table import Table
 from astropy.wcs import WCS
+from astropy.wcs.utils import proj_plane_pixel_scales
+from astropy.utils.exceptions import AstropyWarning
+from astropy import units
+
+from . import TEST_DATA_PATH
+from spex.utils import get_sdss_spectral_templates, get_sdss_template_data
 
 
 class FakeObject():
@@ -27,22 +34,19 @@ class FakeObject():
 
     __template_dict = {}
 
-    def __init__(self, template_file, x_image, y_image, z=None, coeffs=None,
+    def __init__(self, template, x_image, y_image, z=None,
                  surface_bightness_profile=None):
         """
         Initialize the class.
 
         Parameters
         ----------
-        template : redrock.template.Template
-            The spectral template of the object.
+        template_file : str
+            Path of a SDSS template file.
         x_image : float
             The x position of the center of the object in the image.
         y_image : float
             The y position of the center of the object in the image.
-        coeffs : list or numpy.ndarray
-            Coefficients uesd for generating the spectrum, passed to the method
-            template.eval().
         z : float
             Redshift of the spectrum.
         surface_bightness_profile : astropy.modeling.Fittable2DModel, optional
@@ -58,28 +62,10 @@ class FakeObject():
         self.y_image = y_image
         self.z = z
 
-        if template_file not in self.__template_dict:
-            self.__template_dict[template_file] = Template(template_file)
-
-        self.template_file = template_file
-
-        f = fits.open(template_file)
-        try:
-            has_archetypes = f[1].name == 'ARCHETYPE_COEFF'
-        except IndexError:
-            has_archetypes = False
-
-        if has_archetypes:
-            archetype_coeffs = f[1].data
-            coeff_indexes = len(archetype_coeffs)
-            self.__coeffs = archetype_coeffs[np.random.choice(coeff_indexes)]
-        else:
-            coeff_indexes = range(self.template.nbasis)
-            self.__coeffs = np.zeros_like(coeff_indexes)
-            self.__coeffs[np.random.choice(coeff_indexes)] = 1
+        self.template_file = template
 
         if surface_bightness_profile is None:
-            obj_type = self.template.template_type
+            obj_type = self.template_file['type']
             obj_type = obj_type.lower()
             if obj_type == 'star':
                 n_val = 99
@@ -96,7 +82,7 @@ class FakeObject():
                 if self.z is None:
                     self.z = 0
                     while self.z < 0.2:
-                        self.z = np.random.choice(self.template.redshifts)
+                        self.z = np.random.rand() * 2
             else:
                 n_val = 99
                 amp_val = 5.0e-6
@@ -105,7 +91,7 @@ class FakeObject():
                 if self.z is None:
                     self.z = 0
                     while self.z < 1:
-                        self.z = np.random.choice(self.template.redshifts)
+                        self.z = np.random.rand() * 5
 
             self.surface_bightness_profile_function = models.Sersic2D(
                 amplitude=amp_val,
@@ -126,11 +112,12 @@ class FakeObject():
 
         Returns
         -------
-        template : redrock.template.Template
-            The spectral template of the object.
+        template : dict
+            The spectral template dictionary returned by
+            spex.utils.get_sdss_template_data().
 
         """
-        return self.__template_dict[self.template_file]
+        return get_sdss_template_data(self.template_file['file'])
 
     def get_image(self, width, height, seeing=1):
         """
@@ -178,7 +165,6 @@ class FakeObject():
         wave, flux = gen_fake_spectrum(
             wave_range,
             self.template,
-            coeffs=self.__coeffs,
             z=self.z,
             wave_step=wave_step
         )
@@ -238,7 +224,7 @@ def get_waves(wave_range, wave_step=1.0):
     return wave
 
 
-def gen_fake_spectrum(wave_range, template, coeffs, z, wave_step=1.0):
+def gen_fake_spectrum(wave_range, template, z, wave_step=1.0):
     """
     Generate a synthetic spectrum using a specific template.
 
@@ -247,24 +233,9 @@ def gen_fake_spectrum(wave_range, template, coeffs, z, wave_step=1.0):
     wave_range : tuple or numpy.ndarray
         The range of wavelenght, in Angstrom, the sythetic spectrum should
         cover. Only maximum and minimum values of this parameter are used.
-    template : rerdock.template.Template or custom class
-        The template used to compute the spectrum. If a custom class is used,
-        it should have a method named eval that accetps the following
-        parameters eval(coeff, wave, z), where:
-
-            - coeff : list or numpy.ndarray
-                Coefficients uesd for generating the spectrum
-            - wave : numpy.ndarray
-                Wavelenghts, in Angstrom, used to generate spectral data
-            - z : float
-                Redshift of the spectrum.
-
-        The eval method should return a 1D numpy.ndarray of the same lenght of
-        wave and containing the flux of the synthetic spectrum in arbitrary
-        units.
-    coeffs : list or numpy.ndarray
-        Coefficients uesd for generating the spectrum, passed to template.eval
-        method.
+    template : SDSS spectral template data
+        spectral data dictionary compatible with the format returned by
+        spex.get_sdss_template_data()
     z : float
         Redshift of the spectrum.
     wave_step : float, optional
@@ -278,12 +249,30 @@ def gen_fake_spectrum(wave_range, template, coeffs, z, wave_step=1.0):
         Fluxes, in arbitrary units, at the different wavelengths.
     """
     wave = get_waves(wave_range, wave_step)
-    flux = template.eval(coeffs, wave, z)
+    flux = np.interp(wave, template['wavelengths'] * (1 + z), template['flux'])
     return wave, flux - np.min(flux)
 
 
 def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
-                  seeing=1):
+                  seeing=1, overwrite=False):
+
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+
+    templates = get_sdss_spectral_templates(out_dir, use_cached=True)
+
+    reg_file = os.path.join(out_dir, 'test_cube.reg')
+    cat_file = os.path.join(out_dir, 'test_cube_cat.fits')
+    cube_file = os.path.join(out_dir, 'test_cube.fits')
+
+    out_files_list = [reg_file, cat_file, cube_file]
+
+    if all([os.path.isfile(x) for x in out_files_list]):
+        if not overwrite:
+            return out_files_list
+
+    print(f"Generating a synthetic cube to {cube_file}")
+
     waves = get_waves(wave_range, wave_step)
 
     header = fits.Header()
@@ -304,18 +293,13 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
 
     my_wcs = WCS(header)
 
-    available_templates = [
-        f for f in find_templates()
-        if'galaxy' in f
-    ]
-
     w_padding = width/50
     h_padding = width/50
 
     obj_attributes = zip(
         w_padding + np.random.random(n_objects) * (width - 2*w_padding),
         h_padding + np.random.random(n_objects) * (height - 2*h_padding),
-        np.random.choice(available_templates, n_objects)
+        np.random.choice(templates, n_objects)
     )
 
     objects = [
@@ -337,6 +321,11 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
         except ValueError:
             print(f"WARNING: Skipping object {j}")
             continue
+        else:
+            sys.stdout.write(f"\rprogress: {j/ len(objects):.2%}\r")
+            sys.stdout.flush()
+
+    print("DONE!")
 
     myt = Table(
         names=[
@@ -358,14 +347,26 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
             'U10', 'U10'
         ]
     )
+
+    celestial_wcs = my_wcs.celestial
+    pixelscale_x, pixelscale_y = [
+        units.Quantity(sc_val, u)
+        for sc_val, u in zip(
+            proj_plane_pixel_scales(celestial_wcs),
+            celestial_wcs.wcs.cunit
+        )
+    ]
+
     regfile_text = 'fk5\n'
     for i, obj in enumerate(objects):
         obj_x = int(obj.x_image)
         obj_y = int(obj.y_image)
         obj_kron = obj.surface_bightness_profile_function.r_eff.value
         e_val = obj.surface_bightness_profile_function.ellip.value
-        obj_a_image = obj_kron
-        obj_b_image = obj_a_image * (1 - e_val)
+        obj_a_image = 3 * obj_kron * pixelscale_x
+        obj_a_image = obj_a_image.to('arcsec').value
+        obj_b_image = 3 * obj_kron * (1 - e_val) * pixelscale_y
+        obj_b_image = obj_b_image.to('arcsec').value
         obj_theta_image = obj.surface_bightness_profile_function.theta.value
         obj_theta_image = np.rad2deg(obj_theta_image)
 
@@ -375,22 +376,22 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
         obj_dec = sky_coords.dec.deg
 
         regfile_text += f"ellipse({obj_ra:.6f}, {obj_dec:.6f}, "
-        regfile_text += f"{obj_a_image:.4f}, "
-        regfile_text += f"{obj_b_image:.4f}, {obj_theta_image:.4f}) "
+        regfile_text += f"{obj_a_image:.4f}\", "
+        regfile_text += f"{obj_b_image:.4f}\", {obj_theta_image:.4f}) "
         regfile_text += f"# text={{S{i:06d}}}\n"
 
         new_row = [
             i, obj_x, obj_y, obj_a_image, obj_b_image, obj_theta_image,
-            obj_kron, obj_ra, obj_dec, obj.z, obj.template.template_type,
-            obj.template.sub_type
+            obj_kron, obj_ra, obj_dec, obj.z, obj.template_file['type'],
+            obj.template_file['sub-type']
         ]
 
         myt.add_row(new_row)
 
-    with open(os.path.join(out_dir, 'test_cube.reg'), "w") as f:
+    with open(reg_file, "w") as f:
         f.write(regfile_text)
 
-    myt.write(os.path.join(out_dir, 'test_cube_cat.fits'), overwrite=True)
+    myt.write(cat_file, overwrite=True)
 
     header['CRVAL3'] = waves[0]
     header['CRPIX3'] = 1.0
@@ -411,10 +412,11 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
         header=header
     )
 
-    cube_hdu.writeto(os.path.join(out_dir, 'test_cube.fits'), overwrite=True)
+    cube_hdu.writeto(cube_file, overwrite=True)
+    return out_files_list
 
 
-def main():
+def main(overwrite=False):
     """
     Run the main program of this module.
 
@@ -423,9 +425,13 @@ def main():
     None.
 
     """
+    warnings.simplefilter('ignore', category=AstropyWarning)
+
     wave_range = (4500, 8000)
-    out_dir = pathlib.Path(__file__).parent.resolve()
-    gen_fake_cube(out_dir, 256, 256, wave_range, n_objects=30, wave_step=1)
+
+    return gen_fake_cube(
+        TEST_DATA_PATH, 256, 256, wave_range, n_objects=30, wave_step=1
+    )
 
 
 if __name__ == '__main__':

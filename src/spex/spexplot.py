@@ -282,10 +282,11 @@ def spexplot(options=None):
                 # If no zcat is provided, check if redshift information is
                 # stored in the spectrum itself
                 if 'Z' in info_dict:
-                    object_z = info_dict['Z']
+                    object_z = float(info_dict['Z'])
+                    restframe = args.restframe
                 else:
                     object_z = None
-                restframe = False
+                    restframe = False
 
             flux_data = spec_hdu.data
             spec_wcs = wcs.WCS(spec_hdu.header)
@@ -311,6 +312,7 @@ def spexplot(options=None):
                 cutout_vmax = np.nanmax(big_image['data'])
             else:
                 cutout = None
+                cutout_wcs = None
                 cutout_vmin = None
                 cutout_vmax = None
 

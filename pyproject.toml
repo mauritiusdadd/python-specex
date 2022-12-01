@@ -43,8 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-  "pytest < 5.0.0",
-  "pytest-cov[all]"
+  "pytest",
 ]
 
 [project.urls]

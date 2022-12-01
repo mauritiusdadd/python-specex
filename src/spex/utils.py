@@ -7,7 +7,12 @@ This module provides utility functions used by other spex modules.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+import os
 import sys
+import tarfile
+import tempfile
+from urllib import request
+
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -24,6 +29,9 @@ from astropy import units as apu
 from astropy import coordinates
 
 from .lines import get_lines
+
+
+_SDSS_SPECTRAL_TEMPLATES_PACKAGE = "http://classic.sdss.org/dr5/algorithms/spectemplates/spectemplatesDR2.tar.gz"
 
 
 def get_pbar(partial, total=None, wid=32, common_char='\u2588',
@@ -61,6 +69,144 @@ def get_pbar(partial, total=None, wid=32, common_char='\u2588',
     pbar_full += upper_char*(total_prog - common_prog)
     pbar_full += lower_char*(prog - common_prog)
     return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
+
+
+def get_sdss_spectral_templates(outdir: str, use_cached=True) -> list:
+    """
+    Download spectral templates from SDSS.
+
+    Parameters
+    ----------
+    outdir : str
+        Path where to save the templates.
+
+    use_cached : bool, optional
+        If true, do not redownload the package file if it is still present.
+        Default is True.
+
+    Returns
+    -------
+    templates : list
+        A a list of dictionaries that have the following structure:
+        'file' : str
+            The path of the actual template file
+        'type' : str
+            The type of template. Can be 'star', 'galaxy' or 'qso'
+        'sub-type' : str
+            The sub-type of the object
+    """
+    def report_pbar(blocks_count, block_size, total_size):
+        downloaded_size = blocks_count * block_size
+        progress = downloaded_size / total_size
+        pbar = get_pbar(progress)
+        report_str = f"\r{pbar} {progress: 6.2%}  "
+        report_str += f"{downloaded_size}/{total_size} Bytes\r"
+        sys.stderr.write(report_str)
+        sys.stderr.flush()
+
+    def same_dest_dir(outdir, member):
+        member_path = os.path.join(outdir, member.name)
+        abs_dest_dir = os.path.abspath(outdir)
+        abs_target_dir = os.path.abspath(member_path)
+        prefix = os.path.commonprefix([abs_dest_dir, abs_target_dir])
+        return prefix == abs_dest_dir
+
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
+
+    package_name = os.path.basename(_SDSS_SPECTRAL_TEMPLATES_PACKAGE)
+    package_out_file = os.path.join(outdir, package_name)
+
+    print(
+        f"\nDownloading SDSS spectral templates package {package_name}...",
+        file=sys.stderr
+    )
+
+    if not (use_cached and os.path.isfile(package_out_file)):
+        package_out_file, headers = request.urlretrieve(
+            _SDSS_SPECTRAL_TEMPLATES_PACKAGE,
+            package_out_file,
+            reporthook=report_pbar
+        )
+
+    print(
+        "\nExtracting template files\n",
+        file=sys.stderr
+    )
+
+    templates = []
+    with tarfile.open(package_out_file, 'r') as gzfile:
+        members_list = gzfile.getmembers()
+        for j, member in enumerate(members_list):
+            progress = j / len(members_list)
+            pbar_str = get_pbar(progress)
+            sys.stderr.write(f"\r{pbar_str} {progress: 6.2%}  {member.name}\r")
+            sys.stdout.flush()
+            if not same_dest_dir(outdir, member):
+                print(
+                    "Attempted Path Traversal in Tar File for member "
+                    f"{member.name}",
+                    file=sys.stdout
+                )
+                continue
+            gzfile.extract(member, path=outdir, numeric_owner=False)
+            t_path = os.path.abspath(os.path.join(outdir, member.name))
+            t_type_id = os.path.splitext(os.path.basename(member.name))[0]
+            t_type_id = int(t_type_id[-3:])
+
+            if t_type_id <= 23:
+                t_type = 'star'
+            elif t_type_id <= 29:
+                t_type = 'galaxy'
+            else:
+                t_type = 'qso'
+
+            templates.append({
+                'file': t_path,
+                'type': t_type,
+                'sub-type': ''
+            })
+
+    return templates
+
+
+def get_sdss_template_data(sdss_template_file: str) -> dict:
+    """
+    Get spectrum from a SDSS spectral template file.
+
+    Parameters
+    ----------
+    sdss_template_file : str
+        Path of a SDSS spectral template file.
+
+    Returns
+    -------
+    t_dict : dict
+        A dictionary contatining the following keys and values:
+            'flux' : numpy.ndarray 1D
+                The flux data in arbitrary units
+            'wavelengths' : numpy.ndarray 1D
+                The wavelengths
+    """
+    try:
+        t_spectrum = fits.getdata(sdss_template_file, ext=0)[0]
+        t_head = fits.getheader(sdss_template_file, ext=0)
+    except (FileNotFoundError, IndexError):
+        return {}
+    else:
+        t_wcs = apwcs.WCS(t_head)
+
+    pixel_coords_x = np.arange(0, len(t_spectrum), 1)
+    pixel_coords_y = np.zeros_like(pixel_coords_x)
+
+    t_wavelengths = t_wcs.pixel_to_world_values(pixel_coords_x, pixel_coords_y)
+    t_wavelengths = 10 ** t_wavelengths[0]
+
+    t_dict = {
+        'flux': t_spectrum,
+        'wavelengths': t_wavelengths
+    }
+    return t_dict
 
 
 def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
@@ -488,7 +634,7 @@ def get_ellipse_skypoints(center: coordinates.SkyCoord,
     return ellipse_points
 
 
-def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
+def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                   restframe=False, cutout=None, cutout_vmin=None,
                   cutout_vmax=None, cutout_wcs=None, redshift=None,
                   smoothing=None, wavelengt_units=None, flux_units=None,
@@ -498,16 +644,16 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
 
     Parameters
     ----------
-    wavelenghts : numpy.ndarray 1D
-        An array containing the wavelenghts.
+    wavelengths : numpy.ndarray 1D
+        An array containing the wavelengths.
     flux : numpy.ndarray 1D
-        An array containing the fluxes corresponding to the wavelenghts.
+        An array containing the fluxes corresponding to the wavelengths.
     variance : numpy.ndarray 1D, optional
-        An array containing the variances corresponding to the wavelenghts.
+        An array containing the variances corresponding to the wavelengths.
         If it is None, then the variance is not plotted. The default is None.
     nan_mask : numpy.ndarray 1D of ndtype=bool, optional
         An array of dtype=bool that contains eventual invalid fluxes that need
-        to be masked out (ie. nan_mask[j] = True means that wavelenghts[j],
+        to be masked out (ie. nan_mask[j] = True means that wavelengths[j],
         flux[j] and variance[j] are masked). If it is None, then no mask is
         applyed. The default is None.
     restframe : bool, optional
@@ -537,7 +683,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
         smooth the flux of the spectum. If this value is 0 or None then no
         smoothing is performed. The default is None.
     wavelengt_units : str, optional
-        The units of the wavelenghts. The default is None.
+        The units of the wavelengths. The default is None.
     flux_units : str, optional
         The units of the fluxes. The default is None.
     extra_info : dict of {str: str, ...}, optional
@@ -560,7 +706,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
     """
     if nan_mask is not None:
         lam_mask = np.array([
-            (wavelenghts[m_start], wavelenghts[m_end])
+            (wavelengths[m_start], wavelengths[m_end])
             for m_start, m_end in get_mask_intervals(nan_mask)
         ])
 
@@ -570,22 +716,25 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
             var_max = 1
     else:
         lam_mask = None
-        var_max = 1
+        if variance is not None:
+            var_max = np.nanmax(variance)
+        else:
+            var_max = 1
 
     w_min = 1.0e5
     w_max = 0.0
 
     if restframe and redshift is not None:
-        wavelenghts = wavelenghts / (1 + redshift)
+        wavelengths = wavelengths / (1 + redshift)
         if lam_mask is not None:
             lam_mask = lam_mask / (1 + redshift)
         lines_z = 0
     else:
-        wavelenghts = wavelenghts
+        wavelengths = wavelengths
         lines_z = redshift
 
-    w_min = np.nanmin(wavelenghts)
-    w_max = np.nanmax(wavelenghts)
+    w_min = np.nanmin(wavelengths)
+    w_max = np.nanmax(wavelengths)
 
     if wavelengt_units:
         x_label = f'Wavelenght [{wavelengt_units}]'
@@ -611,7 +760,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
         ax4 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
 
         ax4.plot(
-            wavelenghts, variance,
+            wavelengths, variance,
             ls='-',
             lw=0.5,
             alpha=0.75,
@@ -723,7 +872,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
     # Plot only original spectrum or also a smoothed version
     if not smoothing:
         ax0.plot(
-            wavelenghts, flux,
+            wavelengths, flux,
             ls='-',
             lw=0.5,
             alpha=1,
@@ -735,7 +884,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
         window_size = 4*smoothing + 1
         smoothed_flux = savgol_filter(flux, window_size, 3)
         ax0.plot(
-            wavelenghts, flux,
+            wavelengths, flux,
             ls='-',
             lw=1,
             alpha=0.35,
@@ -744,7 +893,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
             zorder=0
         )
         ax0.plot(
-            wavelenghts, smoothed_flux,
+            wavelengths, smoothed_flux,
             ls='-',
             lw=0.4,
             alpha=1.0,
@@ -756,7 +905,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
     if redshift is not None:
         # Plotting absorption lines
         absorption_lines = get_lines(
-            line_type='A', wrange=wavelenghts, z=lines_z
+            line_type='A', wrange=wavelengths, z=lines_z
         )
         for line_lam, line_name, line_type in absorption_lines:
             ax0.axvline(
@@ -771,7 +920,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
 
         # Plotting emission lines
         emission_lines = get_lines(
-            line_type='E', wrange=wavelenghts, z=lines_z
+            line_type='E', wrange=wavelengths, z=lines_z
         )
         for line_lam, line_name, line_type in emission_lines:
             ax0.axvline(
@@ -787,7 +936,7 @@ def plot_spectrum(wavelenghts, flux, variance=None, nan_mask=None,
 
         # Plotting emission/absorption lines
         emission_lines = get_lines(
-            line_type='AE', wrange=wavelenghts, z=lines_z
+            line_type='AE', wrange=wavelengths, z=lines_z
         )
         for line_lam, line_name, line_type in emission_lines:
             ax0.axvline(
@@ -1116,6 +1265,11 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     # Get the mean Signal to Noise ratio
     sn_spec = obj_mean_spec / nannmad(noise_spec)
 
+    if np.isinf(sn_spec):
+        sn_spec = 99
+    elif np.isnan(sn_spec):
+        sn_spec = 0
+
     return sn_spec
 
 
@@ -1171,4 +1325,11 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=150):
     s_em = sub_diff / 3.0*np.ma.median(sub_diff) - 1
     noise_em = nannmad(sub_diff)
 
-    return np.ma.max(s_em / noise_em)
+    sn_spec = np.ma.max(s_em / noise_em)
+
+    if np.isinf(sn_spec):
+        sn_spec = 99
+    elif np.isnan(sn_spec):
+        sn_spec = 0
+
+    return sn_spec
