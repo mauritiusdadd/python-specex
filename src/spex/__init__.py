@@ -36,8 +36,13 @@ from pkgutil import extend_path
 
 from . import spex
 from . import utils
-from . import rrspex
 from . import spexplot
+try:
+    from . import rrspex
+except ImportError:
+    HAS_RR = False
+else:
+    HAS_RR = True
 
 __version__ = importlib.metadata.version("spex")
 __path__ = extend_path(__path__, __name__)
