@@ -10,7 +10,6 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import os
 import sys
 import tarfile
-import tempfile
 from urllib import request
 
 import numpy as np

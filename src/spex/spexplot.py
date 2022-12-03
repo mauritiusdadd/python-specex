@@ -93,8 +93,8 @@ def __argshandler(options=None):
 
     parser.add_argument(
         '--smoothing', metavar='WINDOW_SIZE', type=int,  default=3,
-        help='If %(Metaver)s >= 0, then plot a smoothed version of the '
-        'spectrum alongside the original one.  %(Metaver)s = 0 means that '
+        help='If %(metavar)s >= 0, then plot a smoothed version of the '
+        'spectrum alongside the original one.  %(metavar)s = 0 means that '
         'only the original spectrum is plotted. If not specified, the default '
         '%(metavar)s = %(default)s is used.'
     )
