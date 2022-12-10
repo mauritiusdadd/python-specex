@@ -87,6 +87,7 @@ def get_sdss_spectral_templates(outdir: str, use_cached=True) -> list:
     -------
     templates : list
         A a list of dictionaries that have the following structure:
+
         'file' : str
             The path of the actual template file
         'type' : str

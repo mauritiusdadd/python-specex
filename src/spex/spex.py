@@ -28,11 +28,12 @@ from astropy import units
 import matplotlib.pyplot as plt
 
 from .utils import plot_zfit_check, get_log_img, get_hdu, get_pbar
-
 from .utils import stack, plot_scandata
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
-
 from .sources import get_spectrum
+from .cube import KNOWN_SPEC_EXT_NAMES
+from .cube import KNOWN_VARIANCE_EXT_NAMES
+from .cube import KNOWN_MASK_EXT_NAMES
 
 try:
     from .rrspex import rrspex, get_templates
@@ -711,7 +712,7 @@ def spex(options=None):
     spec_hdu = get_hdu(
         hdl,
         hdu_index=args.spec_hdu,
-        valid_names=['data', 'spec', 'spectrum', 'spectra'],
+        valid_names=KNOWN_SPEC_EXT_NAMES,
         msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
                          "data, try to specify it manually!",
         msg_index_error="ERROR: Cannot open HDU {} to read specra!"
@@ -720,7 +721,7 @@ def spex(options=None):
     var_hdu = get_hdu(
         hdl,
         hdu_index=args.var_hdu,
-        valid_names=['stat', 'var', 'variance', 'noise'],
+        valid_names=KNOWN_VARIANCE_EXT_NAMES,
         msg_err_notfound="WARNING: Cannot determine which HDU contains the "
                          "variance data, try to specify it manually!",
         msg_index_error="WARNING: Cannot open HDU {} to read the "
@@ -731,7 +732,7 @@ def spex(options=None):
     mask_hdu = get_hdu(
         hdl,
         hdu_index=args.mask_hdu,
-        valid_names=['mask', 'platemask', 'footprint', 'dq'],
+        valid_names=KNOWN_MASK_EXT_NAMES,
         msg_err_notfound="WARNING: Cannot determine which HDU contains the "
                          "mask data, try to specify it manually!",
         msg_index_error="WARNING: Cannot open HDU {} to read the mask!",

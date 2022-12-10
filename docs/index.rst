@@ -13,6 +13,7 @@ Welcome to python-spex's documentation!
    spex
    rrspex
    spexplot
+   cube
    lines
    stack
    utils
