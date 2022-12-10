@@ -941,8 +941,9 @@ def spex(options=None):
 
         elif mode == 'circular_aperture':
             aperture_size = units.Quantity(args.aperture_size)
+            aperture_radius = aperture_size / 2
             if str(aperture_size.unit.physical_type) == 'dimensionless':
-                aperture_radius = aperture_size * units.mas / 2
+                aperture_radius = aperture_radius * units.mas
 
             try:
                 spex_apertures[obj_id] = (
