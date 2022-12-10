@@ -22,8 +22,7 @@ from astropy.table import Table, MaskedColumn
 from astropy.coordinates import SkyCoord
 
 from .utils import plot_spectrum, get_pbar, load_rgb_fits
-from .utils import get_rgb_cutout
-from .cube import get_hdu
+from .cube import get_hdu, get_rgb_cutout, get_gray_cutout
 
 
 def __argshandler(options=None):
@@ -173,7 +172,8 @@ def spexplot(options=None):
         except IndexError:
             big_image = {
                 'data': fits.getdata(args.cutout),
-                'wcs': wcs.WCS(fits.getheader(args.cutout))
+                'wcs': wcs.WCS(fits.getheader(args.cutout)),
+                'type': 'gray'
             }
 
         cutout_size = apu.Quantity(args.cutout_size)
@@ -303,12 +303,24 @@ def spexplot(options=None):
             wavelenghts = spec_wcs.pixel_to_world(pixel).Angstrom
 
             if big_image is not None:
-                cutout, cutout_wcs = get_rgb_cutout(
-                    big_image['data'],
-                    position=obj_center,
-                    cutout_size=cutout_size,
-                    wcs=big_image['wcs']
-                )
+                if big_image['type'] == 'rgb':
+                    cutout_dict = get_rgb_cutout(
+                        big_image['data'],
+                        position=obj_center,
+                        size=cutout_size,
+                        data_wcs=big_image['wcs']
+                    )
+                    cutout = np.array(cutout_dict['data'])
+                    cutout_wcs = cutout_dict['wcs'][0]
+                else:
+                    cutout_dict = get_gray_cutout(
+                        big_image['data'],
+                        position=obj_center,
+                        size=cutout_size,
+                        data_wcs=big_image['wcs']
+                    )
+                    cutout = cutout_dict['data'].transpose(1, 2, 0)
+                    cutout_wcs = cutout_dict['wcs']
                 cutout_vmin = np.nanmin(big_image['data'])
                 cutout_vmax = np.nanmax(big_image['data'])
             else:

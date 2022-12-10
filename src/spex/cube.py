@@ -418,8 +418,8 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
             ),
             'wcs': (
                 cutout_data_r['wcs'],
-                cutout_data_r['wcs'],
-                cutout_data_r['wcs'],
+                cutout_data_g['wcs'],
+                cutout_data_b['wcs'],
             )
         }
 
