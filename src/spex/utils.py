@@ -209,60 +209,6 @@ def get_sdss_template_data(sdss_template_file: str) -> dict:
     return t_dict
 
 
-def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
-            msg_index_error=None, exit_on_errors=True):
-    """
-    Find a valid HDU in a HDUList.
-
-    Parameters
-    ----------
-    hdl : list of astropy.io.fits HDUs
-        A list of HDUs.
-    valid_names : list or tuple of str
-        A list of possible names for the valid HDU.
-    hdu_index : int, optional
-        Manually specify which HDU to use. The default is -1.
-    msg_err_notfound : str or None, optional
-        Error message to be displayed if no valid HDU is found.
-        The default is None.
-    msg_index_error : str or None, optional
-        Error message to be displayed if the specified index is outside the
-        HDU list boundaries.
-        The default is None.
-    exit_on_errors : bool, optional
-        If it is set to True, then exit the main program with an error if a
-        valid HDU is not found, otherwise just return None.
-        The default value is True.
-
-    Returns
-    -------
-    valid_hdu : astropy.io.fits HDU or None
-        The requested HDU.
-
-    """
-    valid_hdu = None
-    if hdu_index < 0:
-        # Try to detect HDU containing spectral data
-        for hdu in hdl:
-            if hdu.name.lower() in valid_names:
-                valid_hdu = hdu
-                break
-        else:
-            if msg_err_notfound:
-                print(msg_err_notfound, file=sys.stderr)
-            if exit_on_errors:
-                sys.exit(1)
-    else:
-        try:
-            valid_hdu = hdl[hdu_index]
-        except IndexError:
-            if msg_index_error:
-                print(msg_index_error.format(hdu_index), file=sys.stderr)
-            if exit_on_errors:
-                sys.exit(1)
-    return valid_hdu
-
-
 def get_aspect(ax):
     """
     Get ratio between y-axis and x-axis of a matplotlib figure.

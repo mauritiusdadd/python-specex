@@ -21,8 +21,9 @@ from astropy import wcs
 from astropy.table import Table, MaskedColumn
 from astropy.coordinates import SkyCoord
 
-from .utils import plot_spectrum, get_pbar, get_hdu, load_rgb_fits
+from .utils import plot_spectrum, get_pbar, load_rgb_fits
 from .utils import get_rgb_cutout
+from .cube import get_hdu
 
 
 def __argshandler(options=None):

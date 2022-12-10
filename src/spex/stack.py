@@ -15,7 +15,8 @@ from astropy.wcs import WCS
 from astropy.io import fits
 import matplotlib.pyplot as plt
 
-from .utils import stack, get_hdu
+from .utils import stack
+from .cube import get_hdu
 
 
 def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,

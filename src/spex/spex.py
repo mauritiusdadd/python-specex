@@ -27,13 +27,14 @@ from astropy import units
 
 import matplotlib.pyplot as plt
 
-from .utils import plot_zfit_check, get_log_img, get_hdu, get_pbar
+from .utils import plot_zfit_check, get_log_img, get_pbar
 from .utils import stack, plot_scandata
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
 from .sources import get_spectrum
 from .cube import KNOWN_SPEC_EXT_NAMES
 from .cube import KNOWN_VARIANCE_EXT_NAMES
 from .cube import KNOWN_MASK_EXT_NAMES
+from .cube import get_hdu
 
 try:
     from .rrspex import rrspex, get_templates
