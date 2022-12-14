@@ -172,7 +172,7 @@ def cube_stack(options=None):
     """
     args = __argshandler(options)
 
-    input_file = sys.argv[1]
+    input_file = args.input_cube[0]
 
     basename = os.path.basename(args.input_cube[0])
     basename = os.path.splitext(basename)[0]
@@ -180,63 +180,63 @@ def cube_stack(options=None):
     if args.outdir is not None:
         basename = os.path.join(args.outdir, basename)
 
-    hdl = fits.open(input_file)
+    with fits.open(input_file) as hdul:
 
-    spec_hdu = get_hdu(
-        hdl,
-        hdu_index=args.spec_hdu,
-        valid_names=['data', 'spec', 'spectrum', 'spectra'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
-                         "data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read specra!"
-    )
+        spec_hdu = get_hdu(
+            hdul,
+            hdu_index=args.spec_hdu,
+            valid_names=['data', 'spec', 'spectrum', 'spectra'],
+            msg_err_notfound="ERROR: Cannot determine which HDU contains "
+                             "spectral data, try to specify it manually!",
+            msg_index_error="ERROR: Cannot open HDU {} to read specra!"
+        )
 
-    var_hdu = get_hdu(
-        hdl,
-        hdu_index=args.var_hdu,
-        valid_names=['stat', 'var', 'variance', 'noise'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains the "
-                         "variance data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read the "
-                        "variance!",
-        exit_on_errors=False
-    )
+        var_hdu = get_hdu(
+            hdul,
+            hdu_index=args.var_hdu,
+            valid_names=['stat', 'var', 'variance', 'noise'],
+            msg_err_notfound="WARNING: Cannot determine which HDU contains "
+                             "the variance data, try to specify it manually!",
+            msg_index_error="ERROR: Cannot open HDU {} to read the "
+                            "variance!",
+            exit_on_errors=False
+        )
 
-    mask_hdu = get_hdu(
-        hdl,
-        hdu_index=args.mask_hdu,
-        valid_names=['mask', 'platemask', 'footprint', 'dq'],
-        msg_err_notfound="ERROR: Cannot determine which HDU contains the "
-                         "mask data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read the mask!",
-        exit_on_errors=False
-    )
+        mask_hdu = get_hdu(
+            hdul,
+            hdu_index=args.mask_hdu,
+            valid_names=['mask', 'platemask', 'footprint', 'dq'],
+            msg_err_notfound="WARNING: Cannot determine which HDU contains "
+                             "the mask data, try to specify it manually!",
+            msg_index_error="ERROR: Cannot open HDU {} to read the mask!",
+            exit_on_errors=False
+        )
 
-    dat, dat_wcs = stack_and_plot(
-        spec_hdu,
-        basename,
-        'data',
-        dpi=args.dpi
-    )
-
-    if args.var_hdu >= 0:
-        var, var_wcs = stack_and_plot(
-            var_hdu,
+        dat, dat_wcs = stack_and_plot(
+            spec_hdu,
             basename,
-            'variance',
-            override_wcs=dat_wcs,
+            'data',
             dpi=args.dpi
         )
 
-    if args.mask_hdu >= 0:
-        mask, mask_wcs = stack_and_plot(
-            mask_hdu,
-            basename,
-            'mask',
-            is_mask=True,
-            override_wcs=dat_wcs,
-            dpi=args.dpi
-        )
+        if args.var_hdu >= 0:
+            var, var_wcs = stack_and_plot(
+                var_hdu,
+                basename,
+                'variance',
+                override_wcs=dat_wcs,
+                dpi=args.dpi
+            )
+
+        if args.mask_hdu >= 0:
+            mask, mask_wcs = stack_and_plot(
+                mask_hdu,
+                basename,
+                'mask',
+                is_mask=True,
+                override_wcs=dat_wcs,
+                dpi=args.dpi
+            )
 
 
 if __name__ == '__main__':

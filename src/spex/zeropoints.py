@@ -123,7 +123,7 @@ def print_zeropoint_info(filename, ext=0):
     print(s.format(**zpt_dict))
 
 
-def main():
+def main(options=None):
     """
     Run the main program of this module.
 
@@ -145,7 +145,12 @@ def main():
         help='The extension containing the image data.'
      )
 
-    args = parser.parse_args()
+    if options is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(options)
+
+    print(args.inp_files)
 
     for fname in args.inp_files:
         try:

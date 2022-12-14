@@ -62,10 +62,10 @@ jobs:
         python -m unittest test/test_sources.py
     - name: Test cubestack
       run: |
-        cubestack --help
+        python -m unittest test/test_cubestack.py
     - name: Test zeropointinfo
       run: |
-        zeropointinfo --help
+        python -m unittest test/test_zeropointinfo.py
     - name: Test rrspex
       run: |
         echo "Install redrock"
