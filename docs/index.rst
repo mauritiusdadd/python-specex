@@ -1,18 +1,18 @@
-.. python-spex documentation master file, created by
+.. python-specex documentation master file, created by
    sphinx-quickstart on Tue Apr  5 09:29:04 2022.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to python-spex's documentation!
+Welcome to python-specex's documentation!
 =======================================
 
-.. automodule:: spex
+.. automodule:: specex
    :members:
 
 .. toctree::
-   spex
-   rrspex
-   spexplot
+   specex
+   rrspecex
+   plot
    cube
    lines
    stack

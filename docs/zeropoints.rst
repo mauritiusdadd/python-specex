@@ -1,5 +1,5 @@
-spex.zeropoints module
+specex.zeropoints module
 =======================================
 
-.. automodule:: spex.zeropoints
+.. automodule:: specex.zeropoints
    :members:

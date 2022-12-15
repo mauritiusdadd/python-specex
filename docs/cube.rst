@@ -1,5 +1,5 @@
-spex.cube module
+specex.cube module
 =======================================
 
-.. automodule:: spex.cube
+.. automodule:: specex.cube
    :members:

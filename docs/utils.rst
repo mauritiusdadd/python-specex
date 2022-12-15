@@ -1,5 +1,5 @@
-spex.utils module
+specex.utils module
 =======================================
 
-.. automodule:: spex.utils
+.. automodule:: specex.utils
    :members:

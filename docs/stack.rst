@@ -1,5 +1,5 @@
-spex.stack module
+specex.stack module
 =======================================
 
-.. automodule:: spex.stack
+.. automodule:: specex.stack
    :members:

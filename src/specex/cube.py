@@ -489,6 +489,7 @@ def get_cube_cutout(data: np.ndarray,
         slice of the cube is computed. Must accept in input two arguments:
             - the number of slice processed so far
             - the total number of slices.
+
     Returns
     -------
     cutout_dict: dict
@@ -795,8 +796,6 @@ def cutout_main(options=None):
             pass
         else:
             c_factor = cutout_unit3.to(orig_header['CUNIT3']).value
-            print(crval3)
-            print(crval3.to(orig_header['CUNIT3']).value)
             new_header['PC3_3'] = cutout_header['PC3_3'] * c_factor
             new_header['PC1_3'] = 0
             new_header['PC2_3'] = 0

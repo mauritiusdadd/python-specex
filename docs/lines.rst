@@ -1,5 +1,5 @@
-spex.lines module
+specex.lines module
 =======================================
 
-.. automodule:: spex.lines
+.. automodule:: specex.lines
    :members:

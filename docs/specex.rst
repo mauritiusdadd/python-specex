@@ -1,5 +1,5 @@
-spex.spex module
+specex.specex module
 =======================================
 
-.. automodule:: spex.spex
+.. automodule:: specex.specex
    :members:

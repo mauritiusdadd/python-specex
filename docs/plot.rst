@@ -1,5 +1,5 @@
-spex.spexplot module
+specex.plot module
 =======================================
 
-.. automodule:: spex.spexplot
+.. automodule:: specex.plot
    :members:
