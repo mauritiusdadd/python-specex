@@ -1,4 +1,4 @@
-spex.stack module
+spex.cube module
 =======================================
 
 .. automodule:: spex.cube
