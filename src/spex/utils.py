@@ -10,6 +10,7 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import os
 import sys
 import tarfile
+from typing import Optional
 from urllib import request
 
 import numpy as np
@@ -19,9 +20,9 @@ from matplotlib.gridspec import GridSpec
 from matplotlib import patches
 
 from scipy.signal import savgol_filter
+from scipy.ndimage import rotate
 
 from astropy.io import fits
-from astropy.nddata import Cutout2D
 from astropy.visualization import ZScaleInterval
 from astropy import wcs as apwcs
 from astropy import units as apu
@@ -70,7 +71,7 @@ def get_pbar(partial, total=None, wid=32, common_char='\u2588',
     return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
 
 
-def get_sdss_spectral_templates(outdir: str, use_cached=True) -> list:
+def get_sdss_spectral_templates(outdir: str, use_cached: bool = True) -> list:
     """
     Download spectral templates from SDSS.
 
@@ -1170,3 +1171,76 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=150):
         sn_spec = 0
 
     return sn_spec
+
+
+def get_pc_transform_params(wcs_object, inverse=False, ftol=1e-6):
+    cel_w = wcs_object.celestial
+    pcm = cel_w.wcs.get_pc()
+    if inverse:
+        pcm = np.linalg.inv(pcm)
+    cdelt = cel_w.wcs.get_cdelt()
+
+    sx = cdelt[0] * np.sign(pcm[0, 0]) * np.sqrt(pcm[0, 0]**2 + pcm[0, 1]**2)
+    sy = cdelt[1] * np.sign(pcm[1, 0]) * np.sqrt(pcm[1, 0]**2 + pcm[1, 1]**2)
+    rot = np.arctan2(-pcm[0, 1], pcm[0, 0])
+    shr_y = np.arctan2(pcm[1, 1], pcm[1, 0]) - np.pi + rot
+    rot = apu.Quantity(rot, apu.rad).to(apu.deg)
+    shr_y = apu.Quantity(shr_y, apu.rad).to(apu.deg)
+
+    return (sx, sy, rot, shr_y)
+
+
+def rotate_data(data: np.ndarray, angle: apu.Quantity,
+                data_wcs: Optional[apwcs.WCS] = None):
+    """
+    Rotate data by angle and update the optionally given WCS data.
+
+    Parameters
+    ----------
+    data : numpy.ndarray
+        The data to be rotated.
+    angle : apu.Quantity
+        The rotation angle.
+    data_wcs : astropy.wcs.WCS or None, optional
+        A WCS for the data. The default is None.
+
+    Returns
+    -------
+    dict
+        A dictionary with the the following keys and values.
+        'data' : numpy.ndarray
+            the rotated data
+        'wcs' : astropy.wcs.WCS or None
+            the updated WCS for the rotated data
+    """
+    if data_wcs is not None:
+        # ndimage shape is [height, width] and element [0, 0] has
+        # pixel coordinates [1, 1]
+        rot_center = (np.array((data.shape[1], data.shape[0])) / 2) + 1
+        rr = -angle.to(apu.rad).value
+        pcm = data_wcs.celestial.wcs.get_pc()
+        crpix = np.array(data_wcs.wcs.crpix)
+
+        rot_matrix = np.array(
+            [
+                [1 * np.cos(rr), -1 * np.sin(rr)],
+                [1 * np.sin(rr), 1 * np.cos(rr)]
+            ]
+        )
+
+        new_pcm = rot_matrix.dot(pcm)
+        new_crpix = rot_matrix.dot(crpix - rot_center) + rot_center
+
+        new_wcs = apwcs.WCS(data_wcs.to_header())
+        new_wcs.wcs.pc = new_pcm
+        new_wcs.wcs.crpix = new_crpix
+    else:
+        new_wcs = None
+
+    rotated_data = rotate(
+        data,
+        angle.to(apu.deg).value,
+        reshape=False
+    )
+
+    return {'data': rotated_data, 'wcs': new_wcs}

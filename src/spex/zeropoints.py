@@ -150,8 +150,6 @@ def main(options=None):
     else:
         args = parser.parse_args(options)
 
-    print(args.inp_files)
-
     for fname in args.inp_files:
         try:
             print_zeropoint_info(fname)

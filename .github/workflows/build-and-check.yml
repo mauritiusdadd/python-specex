@@ -66,6 +66,9 @@ jobs:
     - name: Test zeropointinfo
       run: |
         python -m unittest test/test_zeropointinfo.py
+    - name: Test cutouts
+      run: |
+        python -m unittest test/test_cutout.py
     - name: Test rrspex
       run: |
         echo "Install redrock"

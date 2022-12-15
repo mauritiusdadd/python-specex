@@ -278,18 +278,18 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
     header = fits.Header()
 
     header['BUNIT'] = '10**(-20)*erg/s/cm**2/Angstrom'
-    header['CRPIX1'] = 1.0
-    header['CRPIX2'] = 1.0
-    header['CD1_1'] = 5.0e-5
-    header['CD1_2'] = 0.0
-    header['CD2_1'] = 0.0
-    header['CD2_2'] = 5.0e-5
+    header['CRPIX1'] = 135.5
+    header['CRPIX2'] = 132.0
+    header['CD1_1'] = 2.86146E-06
+    header['CD1_2'] = -2.07292E-05
+    header['CD2_1'] = -2.09168E-05
+    header['CD2_2'] = -2.83578E-06
     header['CUNIT1'] = 'deg     '
     header['CUNIT2'] = 'deg     '
     header['CTYPE1'] = 'RA---TAN'
     header['CTYPE2'] = 'DEC--TAN'
-    header['CRVAL1'] = 90.0
-    header['CRVAL2'] = 0.0
+    header['CRVAL1'] = 182.6361425552
+    header['CRVAL2'] = 39.40589479746
 
     my_wcs = WCS(header)
 
@@ -400,7 +400,7 @@ def gen_fake_cube(out_dir, width, height, wave_range, n_objects, wave_step=1.0,
     header['CD1_3'] = 0.0
     header['CD2_3'] = 0.0
     header['CD3_1'] = 0.0
-    header['CD2_1'] = 0.0
+    header['CD3_2'] = 0.0
     header['CUNIT3'] = 'Angstrom'
     header['OBJECT'] = 'SYNTHETIC'
     header['PCOUNT'] = 0

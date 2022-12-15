@@ -2,10 +2,11 @@
 """Make cutouts of spectral cubes."""
 
 import os
+import re
 import sys
 import argparse
 import warnings
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 
 import numpy as np
 
@@ -15,17 +16,17 @@ from astropy.wcs import WCS
 from astropy.wcs.utils import wcs_to_celestial_frame
 from astropy.table import Table
 from astropy.coordinates import SkyCoord
-from astropy import units
 from astropy.nddata.utils import Cutout2D
 
+from .utils import get_pc_transform_params, rotate_data, get_pbar
 
-KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data']
-KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise']
+KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
+KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
 KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
 
 
-def __argshandler(options=None):
+def __cutout_argshandler(options=None):
     """
     Parse the arguments given by the user.
 
@@ -95,6 +96,10 @@ def __argshandler(options=None):
         'rgb image more than one HDU can be specified, for example '
         '--data-hdu 1,2,3. If this option is not specified then the program '
         'will try to identify the data type and structure automatically.'
+    )
+    parser.add_argument(
+        '--verbose', action='store_true', default=False,
+        help="Print verbose outout."
     )
     args = None
     if options is None:
@@ -227,10 +232,14 @@ def parse_regionfile(regionfile: str, key_ra: str = 'RA', key_dec: str = 'DEC',
             obj_a = degstr2mas(regparams[2])
             obj_b = obj_a
             obj_theta = units.Quantity(0, units.deg)
-        elif regtype == "ellipse" or regtype == "box":
+        elif regtype == "ellipse":
             obj_a = degstr2mas(regparams[2])
             obj_b = degstr2mas(regparams[3])
-            obj_theta =  units.Quantity(regparams[4], units.deg)
+            obj_theta = units.Quantity(regparams[4], units.deg)
+        elif regtype == "box":
+            obj_a = degstr2mas(regparams[2]) / 2
+            obj_b = degstr2mas(regparams[3]) / 2
+            obj_theta = units.Quantity(regparams[4], units.deg)
         else:
             print(
                 f"WARNING: '{regtype}' region type not supported yet!",
@@ -252,6 +261,7 @@ def parse_regionfile(regionfile: str, key_ra: str = 'RA', key_dec: str = 'DEC',
 def get_gray_cutout(data: np.ndarray,
                     center: Union[SkyCoord, tuple, list],
                     size: Union[tuple, list],
+                    angle: Optional[Union[float, units.Quantity]] = 0,
                     data_wcs: Optional[WCS] = None) -> dict:
     """
     Get the cutout for a grayscale image.
@@ -270,11 +280,14 @@ def get_gray_cutout(data: np.ndarray,
         interpreted as the X and Y coordinate of the cutout center: in this
         case, if no WCS is specified, the values are assumed to be in pixels,
         else if a WCS is provided then the values are assumed to be in degrees.
-    size : tuple
+    size : tuple or list
         The first two values in the tuple are interpreted as the width and
         height of the cutout. if no WCS is specified, the values are assumed to
         be in pixels, else if a WCS is provided then the values are assumed to
         be in degrees. Astropy.units.Quantity values are also supported.
+    angle : float or astropy.units.Quantity, optional
+        The rotation angle of the cutout. If it is a float, then it is
+        interpreted in degrees. The default is 0.
     data_wcs : astropy.wcs.WCS or None, optional
         A WCS associated with the image data. The default is None.
 
@@ -287,14 +300,24 @@ def get_gray_cutout(data: np.ndarray,
             'wcs': astropy.wcs.WCS or None
                 The wcs for the cutout data.
     """
+    angle = units.Quantity(angle, units.deg)
     if data_wcs is not None:
         data_wcs = data_wcs.celestial
+        sx, sy, rot, shr_y = get_pc_transform_params(data_wcs)
+        angle = angle - rot
+
+    rotated_data = rotate_data(
+        data=data,
+        angle=angle,
+        data_wcs=data_wcs
+    )
 
     cutout = Cutout2D(
-        data.astype('float32'), center, size,
+        rotated_data['data'],
+        center, size,
         mode='partial',
         fill_value=np.nan,
-        wcs=data_wcs,
+        wcs=rotated_data['wcs'],
         copy=True
     )
 
@@ -304,7 +327,6 @@ def get_gray_cutout(data: np.ndarray,
     }
 
     return cutout_dict
-
 
 
 def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
@@ -429,8 +451,10 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
 def get_cube_cutout(data: np.ndarray,
                     center: Union[SkyCoord, tuple, list],
                     size: Union[tuple, list],
+                    angle: Optional[Union[float, units.Quantity]] = 0,
                     wave_range: Optional[Union[tuple, list]] = None,
-                    data_wcs: Optional[WCS] = None):
+                    data_wcs: Optional[WCS] = None,
+                    report_callback: Optional[Callable] = None):
     """
     Get a cutout of a spectral datacube.
 
@@ -451,13 +475,20 @@ def get_cube_cutout(data: np.ndarray,
         are accepted. Adimensional values are interpreted as pixels.
         Angular values are converted to pixel values ignoring any non linear
         distorsion.
+    angle : float or astropy.units.Quantity, optional
+        The rotation angle of the cutout. If it is a float, then it is
+        interpreted in degrees. The default is 0.
     wave_range : tuple or list, optional
         If not None, he first two values in the tuple are interpreted as the
         minimum and maximum value of the wavelength range for the cutout.
         If it is None, the whole wavelength range is used. The default is None.
     data_wcs : astropy.wcs.WCS or None, optional
         A WCS associated with the image data. The default is None..
-
+    report_callback : Callable or None, optional
+        A callable that will be execute every time the cutout of a single
+        slice of the cube is computed. Must accept in input two arguments:
+            - the number of slice processed so far
+            - the total number of slices.
     Returns
     -------
     cutout_dict: dict
@@ -489,7 +520,7 @@ def get_cube_cutout(data: np.ndarray,
     if not isinstance(center, Union[SkyCoord, tuple, list]):
         raise ValueError("'center' must be SkyCoord or tuple or list.")
 
-    cutout_wcs = None
+    angle = units.Quantity(angle, units.deg)
 
     if data_wcs is not None:
         if not isinstance(data_wcs, WCS):
@@ -504,29 +535,41 @@ def get_cube_cutout(data: np.ndarray,
 
         celestial_wcs = data_wcs.celestial
         spex_wcs = data_wcs.spectral
+    else:
+        celestial_wcs = None
+        spex_wcs = None
 
     cutout_data = []
-
-    for k in range(data.shape[2]):
-        cutout = Cutout2D(
-            data[k], center, size,
-            mode='partial',
-            fill_value=np.nan,
-            wcs=celestial_wcs,
-            copy=True
+    for k in range(data.shape[0]):
+        cutout = get_gray_cutout(
+            data=data[k],
+            center=center,
+            size=size,
+            angle=angle,
+            data_wcs=celestial_wcs
         )
-        cutout_data.append(cutout.data)
+
+        cutout_data.append(cutout['data'])
+        if report_callback is not None:
+            report_callback(k, data.shape[0])
 
     cutout_data = np.array(cutout_data)
 
-    spec_header = spex_wcs.to_header()
-    wcs_header = cutout.wcs.to_header()
-    wcs_header['CRPIX3'] = spec_header['CRPIX1']
-    wcs_header['PC3_3'] = spec_header['PC1_1']
-    wcs_header['CDELT3'] = spec_header['CDELT1']
-    wcs_header['CUNIT3'] = spec_header['CUNIT1']
-    wcs_header['CTYPE3'] = spec_header['CTYPE1']
-    wcs_header['CRVAL3'] = spec_header['CRVAL1']
+    if celestial_wcs is not None:
+        wcs_header = cutout['wcs'].to_header()
+        wcs_header['CRPIX3'] = spex_wcs.wcs.crpix[0]
+        wcs_header['PC3_3'] = spex_wcs.wcs.get_pc()[0, 0]
+        wcs_header['PC1_3'] = 0
+        wcs_header['PC2_3'] = 0
+        wcs_header['PC3_2'] = 0
+        wcs_header['PC3_1'] = 0
+        wcs_header['CDELT3'] = spex_wcs.wcs.cdelt[0]
+        wcs_header['CUNIT3'] = str(spex_wcs.wcs.cunit[0])
+        wcs_header['CTYPE3'] = spex_wcs.wcs.ctype[0]
+        wcs_header['CRVAL3'] = spex_wcs.wcs.crval[0]
+
+    else:
+        wcs_header = None
 
     return {
         'data': cutout_data,
@@ -537,9 +580,9 @@ def get_cube_cutout(data: np.ndarray,
 def _get_fits_data_structure(fits_file):
     data_structure = {
         'type': None,
-        'data-ext': None,
-        'variance-ext': None,
-        'mask-ext': None
+        'data-ext': [],
+        'variance-ext': [],
+        'mask-ext': []
     }
     with fits.open(fits_file) as f:
         # If there is only one extension, than it should contain the image data
@@ -547,7 +590,7 @@ def _get_fits_data_structure(fits_file):
             data_ext = f[0]
             data_structure['data-ext'] = [0, ]
         else:
-            # Otherwise, try to identify the extention form its name
+            # Otherwise, try to identify the extension form its name
             for k, ext in enumerate(f):
                 if ext.name.lower() in KNOWN_SPEC_EXT_NAMES:
                     data_ext = ext
@@ -556,10 +599,7 @@ def _get_fits_data_structure(fits_file):
 
                 if ext.name.lower() in KNOWN_RGB_EXT_NAMES:
                     data_ext = ext
-                    if data_structure['data-ext'] is None:
-                        data_structure['data-ext'] = [k, ]
-                    else:
-                        data_structure['data-ext'].append(k)
+                    data_structure['data-ext'].append(k)
 
             # If cannot determine which extensions cointain data,
             # then just use the second extension
@@ -575,8 +615,23 @@ def _get_fits_data_structure(fits_file):
                 if k in data_structure['data-ext']:
                     continue
 
+                lower_ext_name = ext.name.strip().lower()
+
                 if ext.data is not None and ext.data.shape == data_shape:
-                    data_structure['data-ext'].append(k)
+                    if lower_ext_name:
+                        if (
+                                lower_ext_name in KNOWN_SPEC_EXT_NAMES or
+                                lower_ext_name in KNOWN_RGB_EXT_NAMES
+                        ):
+                            data_structure['data-ext'].append(k)
+                        elif lower_ext_name in KNOWN_VARIANCE_EXT_NAMES:
+                            data_structure['variance-ext'].append(k)
+                        elif lower_ext_name in KNOWN_MASK_EXT_NAMES:
+                            data_structure['mask-ext'].append(k)
+                        else:
+                            continue
+                    else:
+                        data_structure['data-ext'].append(k)
 
             if len(data_structure['data-ext']) == 1:
                 data_structure['type'] = 'image-gray'
@@ -601,15 +656,9 @@ def _get_fits_data_structure(fits_file):
                     if k in data_structure['data-ext']:
                         continue
                     elif ext_name in KNOWN_VARIANCE_EXT_NAMES:
-                        if data_structure['variance-ext'] is None:
-                            data_structure['variance-ext'] = [k, ]
-                        else:
-                            data_structure['variance-ext'].append(k)
+                        data_structure['variance-ext'].append(k)
                     elif ext_name in KNOWN_MASK_EXT_NAMES:
-                        if data_structure['mask-ext'] is None:
-                            data_structure['mask-ext'] = [k, ]
-                        else:
-                            data_structure['mask-ext'].append(k)
+                        data_structure['mask-ext'].append(k)
 
         else:
             # We dont know how to handle weird multidimensional data.
@@ -618,8 +667,15 @@ def _get_fits_data_structure(fits_file):
                 f"{data_shape}"
             )
             data_structure['type'] = 'unkown'
-    return data_structure
 
+    if not data_structure['data-ext']:
+        data_structure['data-ext'] = None
+    if not data_structure['variance-ext']:
+        data_structure['variance-ext'] = None
+    if not data_structure['mask-ext']:
+        data_structure['mask-ext'] = None
+
+    return data_structure
 
 
 def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
@@ -676,7 +732,7 @@ def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     return valid_hdu
 
 
-def main(options=None):
+def cutout_main(options=None):
     """
     Run the main program.
 
@@ -690,10 +746,75 @@ def main(options=None):
     None.
 
     """
-    args = __argshandler(options)
+    def simple_report_callback(k, total):
+        pbar = get_pbar(k / total)
+        sys.stderr.write(f"\r{pbar} {k} / {total} \r")
+        sys.stderr.flush()
+
+    def updated_wcs_cutout_header(orig_header, cutout_header):
+        new_header = orig_header.copy()
+
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        # Delete any existing CD card
+        cd_elem_re = re.compile(r'CD[1-9]_[1-9]')
+        for k in list(new_header.keys()):
+            if cd_elem_re.fullmatch(str(k).strip()):
+                new_header.remove(k, ignore_missing=True, remove_all=True)
+
+        # Delete any existing PC card
+        pc_elem_re = re.compile(r'PC[1-9]_[1-9]')
+        for k in list(new_header.keys()):
+            if pc_elem_re.fullmatch(str(k).strip()):
+                new_header.remove(k, ignore_missing=True, remove_all=True)
+
+        # Copy new PC cards into the new header
+        for k in list(cutout_header.keys()):
+            if pc_elem_re.fullmatch(str(k).strip()):
+                new_header[k] = cutout_header[k]
+
+        new_header['PC1_1'] = cutout_header['PC1_1']
+        new_header['PC2_2'] = cutout_header['PC2_2']
+        new_header['CDELT1'] = cutout_header['CDELT1']
+        new_header['CDELT2'] = cutout_header['CDELT2']
+        new_header['CRVAL1'] = cutout_header['CRVAL1']
+        new_header['CRVAL2'] = cutout_header['CRVAL2']
+        new_header['CRPIX1'] = cutout_header['CRPIX1']
+        new_header['CRPIX2'] = cutout_header['CRPIX2']
+        new_header['CUNIT1'] = cutout_header['CUNIT1']
+        new_header['CUNIT2'] = cutout_header['CUNIT2']
+
+        try:
+            crval3 = units.Quantity(
+                cutout_header['CRVAL3'],
+                cutout_header['CUNIT3']
+            )
+            cutout_unit3 = units.Quantity(1, cutout_header['CUNIT3'])
+        except KeyError:
+            pass
+        else:
+            c_factor = cutout_unit3.to(orig_header['CUNIT3']).value
+            print(crval3)
+            print(crval3.to(orig_header['CUNIT3']).value)
+            new_header['PC3_3'] = cutout_header['PC3_3'] * c_factor
+            new_header['PC1_3'] = 0
+            new_header['PC2_3'] = 0
+            new_header['PC3_1'] = 0
+            new_header['PC3_2'] = 0
+            new_header['CDELT3'] = cutout_header['CDELT3']
+            new_header['CRVAL3'] = crval3.to(orig_header['CUNIT3']).value
+            new_header['CUNIT3'] = orig_header['CUNIT3']
+
+        return new_header
+
+    args = __cutout_argshandler(options)
 
     if args.regionfile is not None:
         myt = parse_regionfile(args.regionfile)
+
+    if args.verbose:
+        print(myt)
 
     target_data_file = args.input_fits[0]
 
@@ -702,6 +823,20 @@ def main(options=None):
 
     data_structure = _get_fits_data_structure(target_data_file)
 
+    if args.verbose:
+        print(
+            "\n=== IMAGE INFO ===\n"
+            f" Name: {fits_base_name}\n"
+            f" Type: {data_structure['type']}\n"
+            f" Data EXT: {data_structure['data-ext']}\n"
+            f" Var EXT: {data_structure['variance-ext']}\n"
+            f" DQ EXT: {data_structure['mask-ext']}\n",
+            file=sys.stderr
+        )
+        report_callback = simple_report_callback
+    else:
+        report_callback = None
+
     with fits.open(target_data_file) as hdul:
         for j, cutout_info in enumerate(myt):
             cutout_name = f"cutout_{fits_base_name}_{j:04}.fits"
@@ -709,14 +844,14 @@ def main(options=None):
             cc_dec = cutout_info['DEC'] * units.deg
 
             cutout_sizes = (
-                2 * cutout_info['A_WORLD'] * units.arcsec,
                 2 * cutout_info['B_WORLD'] * units.arcsec,
+                2 * cutout_info['A_WORLD'] * units.arcsec,
             )
 
-            # TODO: for now angle and shapes are ignored
-            angle = cutout_info['THETA_WORLD'] * units.deg
+            angle_world = cutout_info['THETA_WORLD'] * units.deg
 
             if data_structure['type'] == 'cube':
+
                 flux_hdu = hdul[data_structure['data-ext'][0]]
                 flux_data = flux_hdu.data
                 flux_wcs = WCS(flux_hdu.header)
@@ -741,21 +876,25 @@ def main(options=None):
                     exit_on_errors=False
                 )
 
+                if args.verbose:
+                    print(
+                        "\nComputing flux cutouts...",
+                        file=sys.stderr
+                    )
                 flux_cutout = get_cube_cutout(
                     flux_data,
                     center=center_sky_coord,
-                    size=cutout_sizes,  # cutout_sizes,
-                    data_wcs=flux_wcs
+                    size=cutout_sizes,
+                    angle=angle_world,
+                    data_wcs=flux_wcs,
+                    report_callback=report_callback
                 )
 
                 # Convert specral axis to angtrom units
-                flux_header = flux_cutout['wcs'].to_header()
-                crval3 = units.Quantity(
-                    flux_header['CRVAL3'],
-                    flux_header['CUNIT3']
+                flux_header = updated_wcs_cutout_header(
+                    flux_hdu.header,
+                    flux_cutout['wcs'].to_header()
                 )
-                flux_header['CRVAL3'] = crval3.to(units.angstrom).value
-                flux_header['CUNIT3'] = 'Angstrom'
 
                 cutout_hdul = [
                     fits.PrimaryHDU(),
@@ -767,20 +906,26 @@ def main(options=None):
                 ]
 
                 if var_hdu is not None:
+                    if args.verbose:
+                        print(
+                            "\nComputing variance cutouts...",
+                            file=sys.stderr
+                        )
                     var_wcs = WCS(var_hdu.header)
                     var_cutout = get_cube_cutout(
                         var_hdu.data,
                         center=center_sky_coord,
-                        size=cutout_sizes,  # cutout_sizes,
-                        data_wcs=var_wcs
+                        size=cutout_sizes,
+                        angle=angle_world,
+                        data_wcs=var_wcs,
+                        report_callback=report_callback
                     )
-                    var_header = var_cutout['wcs'].to_header()
-                    crval3 = units.Quantity(
-                        var_header['CRVAL3'],
-                        var_header['CUNIT3']
+
+                    var_header = updated_wcs_cutout_header(
+                        var_hdu.header,
+                        var_cutout['wcs'].to_header()
                     )
-                    var_header['CRVAL3'] = crval3.to(units.angstrom).value
-                    var_header['CUNIT3'] = 'Angstrom'
+
                     cutout_hdul.append(
                         fits.ImageHDU(
                             data=var_cutout['data'],
@@ -790,20 +935,26 @@ def main(options=None):
                     )
 
                 if mask_hdu is not None:
+                    if args.verbose:
+                        print(
+                            "\nComputing data mask cutouts...",
+                            file=sys.stderr
+                        )
                     mask_wcs = WCS(mask_hdu.header)
                     mask_cutout = get_cube_cutout(
                         mask_hdu.data,
                         center=center_sky_coord,
-                        size=cutout_sizes,  # cutout_sizes,
-                        data_wcs=mask_wcs
+                        size=cutout_sizes,
+                        angle=angle_world,
+                        data_wcs=mask_wcs,
+                        report_callback=report_callback
                     )
-                    mask_header = mask_cutout['wcs'].to_header()
-                    crval3 = units.Quantity(
-                        mask_header['CRVAL3'],
-                        mask_header['CUNIT3']
+
+                    mask_header = updated_wcs_cutout_header(
+                        mask_hdu.header,
+                        mask_cutout['wcs'].to_header()
                     )
-                    mask_header['CRVAL3'] = crval3.to(units.angstrom).value
-                    mask_header['CUNIT3'] = 'Angstrom'
+
                     cutout_hdul.append(
                         fits.ImageHDU(
                             data=mask_cutout['data'],
@@ -821,22 +972,30 @@ def main(options=None):
                     gray_data = hdul[data_structure['data-ext'][0]].data
                     gray_data = gray_data[..., 0]
 
-                grey_wcs = WCS(hdul[data_structure['data-ext'][0]].header)
+                gray_hdu = hdul[data_structure['data-ext'][0]]
+                grey_wcs = WCS(gray_hdu.header)
                 center_sky_coord = SkyCoord(
                     cc_ra, cc_dec,
                     frame=wcs_to_celestial_frame(grey_wcs)
                 )
+
                 cutout = get_gray_cutout(
                     gray_data,
                     center=center_sky_coord,
                     size=cutout_sizes,
+                    angle=angle_world,
                     data_wcs=grey_wcs
+                )
+
+                gray_header = updated_wcs_cutout_header(
+                    gray_hdu.header,
+                    cutout['wcs'].to_header()
                 )
 
                 cutout_hdul = fits.HDUList([
                     fits.PrimaryHDU(
                         data=cutout['data'],
-                        header=cutout['wcs'].to_header(),
+                        header=gray_header,
                     ),
                 ])
                 cutout_hdul.writeto(cutout_name, overwrite=True)
@@ -887,9 +1046,4 @@ def main(options=None):
 
 
 if __name__ == '__main__':
-    options = [
-        '--regionfile', '/home/daddona/dottorato/cutout_test.reg',
-        '/home/daddona/dottorato/Y1/muse_cubes/PLCKG287/PLCKG287_autocalib_vacuum_v2_ZAP.fits'
-        #'/home/daddona/dottorato/Y1/muse_cubes/PLCKG287/rgb_low_res_hlsp_relics_hst_acs-wfc3ir_plckg287+32_multi_v1_color.fits'
-    ]
-    main(options)
+    cutout_main()
