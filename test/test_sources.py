@@ -9,7 +9,7 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import unittest
 
-from spex.sources import detect_from_cube
+from specex.sources import detect_from_cube
 
 from test import make_synt_cube
 

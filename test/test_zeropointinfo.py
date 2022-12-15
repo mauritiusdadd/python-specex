@@ -10,7 +10,7 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import sys
 import unittest
 
-from spex.zeropoints import main as zpinfo
+from specex.zeropoints import main as zpinfo
 
 from test import get_hst_test_images
 

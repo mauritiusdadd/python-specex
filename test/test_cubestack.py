@@ -8,7 +8,7 @@ Extract spectra from spectral data cubes.
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import unittest
-from spex.stack import cube_stack
+from specex.stack import cube_stack
 
 from test import make_synt_cube
 

@@ -12,19 +12,19 @@
 #
 import os
 import sys
-import spex
+import specex
 sys.path.insert(0, os.path.abspath('../src'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'python-spex'
+project = 'python-specex'
 copyright = "2022, Maurizio D'Addona"
 author = "Maurizio D'Addona"
 
 # The full version, including alpha/beta/rc tags
-release = spex.__version__
+release = specex.__version__
 
-github_url = "https://github.com/mauritiusdadd/python-spex"
+github_url = "https://github.com/mauritiusdadd/python-specex"
 
 # -- General configuration ---------------------------------------------------
 
@@ -40,7 +40,7 @@ extensions = [
 ]
 
 issuetracker = 'github'
-issuetracker_project = 'mauritiusdadd/python-spex'
+issuetracker_project = 'mauritiusdadd/python-specex'
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

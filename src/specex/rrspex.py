@@ -3,7 +3,7 @@
 """
 SPEX - SPectra EXtractor.
 
-redrock wrapper tools for python-spex spectra.
+redrock wrapper tools for python-specex spectra.
 This program is based on the structure of redrock.external.boss function.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
@@ -330,7 +330,7 @@ def __argshandler(options=None):
     """
     parser = argparse.ArgumentParser(
         description="Estimate redshifts for spectra extracted with"
-        "python-spex using redrock interface."
+        "python-specex using redrock interface."
     )
 
     parser.add_argument(
@@ -412,9 +412,9 @@ def __argshandler(options=None):
     return args
 
 
-def rrspex(options=None, comm=None):
+def rrspecex(options=None, comm=None):
     """
-    Estimate redshifts for spectra extracted with python-spex using redrock.
+    Estimate redshifts for spectra extracted with python-specex using redrock.
 
     This loads targets serially and copies them into a DistTargets class.
     It then runs redshift fitting and writes the output to a catalog.
@@ -564,14 +564,14 @@ def rrspex(options=None, comm=None):
                         zfit,
                         plot_template=available_templates
                     )
-                    figname = f'rrspex_{target.id}.png'
+                    figname = f'rrspecex_{target.id}.png'
                     if args.checkimg_outdir is not None:
                         figname = os.path.join(args.checkimg_outdir, figname)
                     fig.savefig(figname, dpi=150)
                     plt.close(fig)
 
                     if args.debug:
-                        figname = f'rrspex_scandata_{target.id}.png'
+                        figname = f'rrspecex_scandata_{target.id}.png'
                         figname = os.path.join(args.checkimg_outdir, figname)
                         fig, axs = plot_scandata(target, scandata)
                         fig.savefig(figname, dpi=150)
@@ -645,4 +645,4 @@ def rrspex(options=None, comm=None):
 
 
 if __name__ == '__main__':
-    _ = rrspex()
+    _ = rrspecex()

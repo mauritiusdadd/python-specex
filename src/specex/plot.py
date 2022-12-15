@@ -36,7 +36,7 @@ def __argshandler(options=None):
         the python documentation of the argparse module.
     """
     parser = argparse.ArgumentParser(
-        description='Plot spectra extracted with spex.'
+        description='Plot spectra extracted with specex.'
     )
 
     parser.add_argument(
@@ -116,7 +116,7 @@ def __argshandler(options=None):
 
     parser.add_argument(
         'spectra', metavar='SPECTRUM', type=str, nargs='+',
-        help='Input spectra extracted with spex.'
+        help='Input spectra extracted with specex.'
     )
 
     args = None
@@ -128,9 +128,9 @@ def __argshandler(options=None):
     return args
 
 
-def spexplot(options=None):
+def plot(options=None):
     """
-    Run the spexplot program.
+    Run the plot program.
 
     Returns
     -------
@@ -225,7 +225,7 @@ def spexplot(options=None):
                 object_dec = main_header['DEC']
                 object_id = main_header['ID']
                 extraction_mode = main_header['EXT_MODE']
-                spex_apertures = [
+                specex_apertures = [
                     apu.Quantity(x)
                     for x in json.loads(main_header['EXT_APER'])
                 ]
@@ -346,7 +346,7 @@ def spexplot(options=None):
                 extra_info=info_dict,
                 extraction_info={
                     'mode': extraction_mode,
-                    'apertures': spex_apertures,
+                    'apertures': specex_apertures,
                     'aperture_ra': object_ra,
                     'aperture_dec': object_dec,
                 }
@@ -369,4 +369,4 @@ def spexplot(options=None):
 
 
 if __name__ == '__main__':
-    spexplot()
+    plot()

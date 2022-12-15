@@ -36,7 +36,7 @@ import sys
 from urllib import request
 import pathlib
 
-from spex.utils import get_pbar
+from specex.utils import get_pbar
 
 from pkgutil import extend_path
 

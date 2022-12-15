@@ -37,7 +37,7 @@ from .cube import KNOWN_MASK_EXT_NAMES
 from .cube import get_hdu
 
 try:
-    from .rrspex import rrspex, get_templates
+    from .rrspecex import rrspecex, get_templates
 except ImportError:
     HAS_RR = False
 else:
@@ -56,7 +56,7 @@ def __argshandler(options=None):
     """
     parser = argparse.ArgumentParser(
         description='Extract spectra from a datacube and optionally compute '
-        'the redshift using rrspex backend.'
+        'the redshift using rrspecex backend.'
     )
     parser.add_argument(
         'input_cube', metavar='SPEC_CUBE', type=str, nargs=1,
@@ -667,7 +667,7 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     return myt
 
 
-def spex(options=None):
+def specex(options=None):
     """
     Run the main program.
 
@@ -866,8 +866,8 @@ def spex(options=None):
         key_id = args.key_id
 
     out_specfiles = []
-    spex_apertures = {}  # these values are in physical units (arcsecs)
-    spex_anuli = {}  # these values are in physical units (arcsecs)
+    specex_apertures = {}  # these values are in physical units (arcsecs)
+    specex_anuli = {}  # these values are in physical units (arcsecs)
     source_ids = []
 
     valid_sources_mask = np.zeros(len(sources), dtype=bool)
@@ -919,7 +919,7 @@ def spex(options=None):
             y_over_b = xx_tr*np.sin(ang) - yy_tr*np.cos(ang)
             y_over_b /= source[args.key_b]
 
-            spex_apertures[obj_id] = (
+            specex_apertures[obj_id] = (
                 source[args.key_a] * pixelscale,
                 source[args.key_b] * pixelscale,
                 source[args.key_theta] * units.rad
@@ -931,7 +931,7 @@ def spex(options=None):
             kron_circular = source[args.key_kron] * source[args.key_b]
             kron_circular /= source[args.key_a]
 
-            spex_apertures[obj_id] = (
+            specex_apertures[obj_id] = (
                 kron_circular * pixelscale,
                 kron_circular * pixelscale,
                 0 * units.rad
@@ -946,7 +946,7 @@ def spex(options=None):
                 aperture_radius = aperture_radius * units.mas
 
             try:
-                spex_apertures[obj_id] = (
+                specex_apertures[obj_id] = (
                     aperture_radius,
                     aperture_radius,
                     0 * units.rad
@@ -966,7 +966,7 @@ def spex(options=None):
             # TODO: fix here
             """
             if anulus_r_in and anulus_r_out:
-                spex_anuli[obj_id] = (
+                specex_anuli[obj_id] = (
                     anulus_r_in,
                     anulus_r_out
                 )
@@ -976,7 +976,7 @@ def spex(options=None):
 
                 anulus_mask = anulus_mask_in & anulus_mask_out
             else:
-                spex_anuli[obj_id] = None
+                specex_anuli[obj_id] = None
                 anulus_mask = None
             """
 
@@ -1051,7 +1051,7 @@ def spex(options=None):
         outname = f"spec_{obj_id}.fits"
 
         apertures_info = [
-            x.to_string() for x in spex_apertures[obj_id]
+            x.to_string() for x in specex_apertures[obj_id]
         ]
 
         main_header = {
@@ -1066,7 +1066,7 @@ def spex(options=None):
             'EXT_MODE': (mode, "Spex extraction mode"),
             'EXT_APER': (
                 json.dumps(apertures_info),
-                "Apertures used in spex"
+                "Apertures used in specex"
             )
         }
 
@@ -1122,25 +1122,25 @@ def spex(options=None):
     #       created using matplotlib. Do all the plottings only after
     #       redrock has finished!
     if args.zbest:
-        rrspex_options = [
+        rrspecex_options = [
             '--zbest', args.zbest,
             '--checkimg-outdir', check_images_outdir
         ]
 
         if args.priors is not None:
-            rrspex_options += ['--priors', args.priors]
+            rrspecex_options += ['--priors', args.priors]
 
         if args.nminima is not None:
-            rrspex_options += ['--nminima', f'{args.nminima:d}']
+            rrspecex_options += ['--nminima', f'{args.nminima:d}']
 
         if args.mp is not None:
-            rrspex_options += ['--mp', f'{args.mp:d}']
+            rrspecex_options += ['--mp', f'{args.mp:d}']
 
         if args.templates is not None:
-            rrspex_options += ['--templates', f'{args.templates}']
+            rrspecex_options += ['--templates', f'{args.templates}']
 
-        rrspex_options += out_specfiles
-        targets, zfit, scandata = rrspex(options=rrspex_options)
+        rrspecex_options += out_specfiles
+        targets, zfit, scandata = rrspecex(options=rrspecex_options)
 
         if args.debug or not args.cutouts_image:
             stacked_cube = stack(spec_hdu.data)
@@ -1227,4 +1227,4 @@ def spex(options=None):
 
 
 if __name__ == '__main__':
-    spex()
+    specex()

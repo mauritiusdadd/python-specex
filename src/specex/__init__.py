@@ -34,15 +34,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import importlib.metadata
 from pkgutil import extend_path
 
-from . import spex
+from . import specex
 from . import utils
-from . import spexplot
+from . import plot
 try:
-    from . import rrspex
+    from . import rrspecex
 except ImportError:
     HAS_RR = False
 else:
     HAS_RR = True
 
-__version__ = importlib.metadata.version("spex")
+__version__ = importlib.metadata.version("specex")
 __path__ = extend_path(__path__, __name__)

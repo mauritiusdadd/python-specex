@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.table import Table, join
 
 try:
-    from spex.rrspex import rrspex
+    from specex.rrspecex import rrspecex
 except ImportError:
     HAS_RR = False
 else:
@@ -29,7 +29,7 @@ Z_FTOL = 0.01
 class TestRRSpex(unittest.TestCase):
 
     @unittest.skipIf(not HAS_RR, "redrock not installed")
-    def test_rrspex_success(self):
+    def test_rrspecex_success(self):
         test_files = make_synt_specs.main()
 
         true_z_table = Table(
@@ -42,7 +42,7 @@ class TestRRSpex(unittest.TestCase):
             true_z_table.add_row([header['ID'], header['OBJ_Z']])
 
         options = ['--quite', ] + test_files
-        targets, zbest, scandata = rrspex(options=options)
+        targets, zbest, scandata = rrspecex(options=options)
 
         zbest = join(true_z_table, zbest, keys=['SPECID'])
         print(zbest)
@@ -58,4 +58,4 @@ class TestRRSpex(unittest.TestCase):
 if __name__ == '__main__':
     if HAS_RR:
         mytest = TestRRSpex()
-        mytest.test_rrspex_success()
+        mytest.test_rrspecex_success()

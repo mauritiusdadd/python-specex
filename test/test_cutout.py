@@ -11,7 +11,7 @@ import os
 import sys
 import unittest
 
-from spex.cube import cutout_main
+from specex.cube import cutout_main
 
 from test import make_synt_cube, get_hst_test_images, TEST_DATA_PATH
 

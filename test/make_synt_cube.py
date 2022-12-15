@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generate a synthetic spectral datacube that can be used to test spex module.
+Generate a synthetic spectral datacube that can be used to test specex module.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
@@ -20,7 +20,7 @@ from astropy.utils.exceptions import AstropyWarning
 from astropy import units
 
 from . import TEST_DATA_PATH
-from spex.utils import get_sdss_spectral_templates, get_sdss_template_data
+from specex.utils import get_sdss_spectral_templates, get_sdss_template_data
 
 
 class FakeObject():
@@ -114,7 +114,7 @@ class FakeObject():
         -------
         template : dict
             The spectral template dictionary returned by
-            spex.utils.get_sdss_template_data().
+            specex.utils.get_sdss_template_data().
 
         """
         return get_sdss_template_data(self.template_file['file'])
@@ -235,7 +235,7 @@ def gen_fake_spectrum(wave_range, template, z, wave_step=1.0):
         cover. Only maximum and minimum values of this parameter are used.
     template : SDSS spectral template data
         spectral data dictionary compatible with the format returned by
-        spex.get_sdss_template_data()
+        specex.get_sdss_template_data()
     z : float
         Redshift of the spectrum.
     wave_step : float, optional

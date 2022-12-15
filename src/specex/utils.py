@@ -3,7 +3,7 @@
 """
 SPEX - SPectra EXtractor.
 
-This module provides utility functions used by other spex modules.
+This module provides utility functions used by other specex modules.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
@@ -414,7 +414,7 @@ def get_ellipse_skypoints(center: coordinates.SkyCoord,
     >>> from astropy.coordinates import SkyCoord
     >>> from astropy import units as apu
     >>> from astropy.utils.data import get_pkg_data_filename
-    >>> from spex.utils import get_ellipse_skypoints
+    >>> from specex.utils import get_ellipse_skypoints
     >>> fn = get_pkg_data_filename('galactic_center/gc_msx_e.fits')
     >>> image = fits.getdata(fn, ext=0)
     >>> w = WCS(fits.getheader(fn, ext=0))
@@ -530,9 +530,9 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         rendered as a table of two columns filled with the keys and the values.
         The default is {}.
     extraction_info: dict, optionale
-        This dictionary must contain extraction information from spex. If not
+        This dictionary must contain extraction information from specex. If not
         empty or None, extraction information are used to plot the apertures
-        used by spex over the cutout (if provided).
+        used by specex over the cutout (if provided).
         The default is {}.
 
     Returns
@@ -641,7 +641,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         )
         ax1.set_aspect(1)
 
-        # Check if there are info about the spex extraction
+        # Check if there are info about the specex extraction
         try:
             ext_mode = extraction_info['mode']
             ext_apertures = extraction_info['apertures']

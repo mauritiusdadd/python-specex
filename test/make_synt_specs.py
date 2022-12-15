@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generate synthetic spectra that can be used to test spex.rrspex module.
+Generate synthetic spectra that can be used to test specex.rrspecex module.
 
 Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
@@ -18,7 +18,7 @@ from astropy.utils.exceptions import AstropyWarning
 from . import TEST_DATA_PATH
 from . import make_synt_cube
 
-from spex.utils import get_sdss_spectral_templates, get_sdss_template_data
+from specex.utils import get_sdss_spectral_templates, get_sdss_template_data
 
 
 def fake_spectrum_fits(obj_id, wave_range, template, z, wave_step=1):
@@ -30,13 +30,13 @@ def fake_spectrum_fits(obj_id, wave_range, template, z, wave_step=1):
     obj_id : integer
         A unique id for this synthetic object. It's reccomended to use positive
         increasing integers when creating multiple spectra that will be used
-        at the same time withrrspex.
+        at the same time withrrspecex.
     wave_range : tuple or numpy.ndarray
         The range of wavelenght, in Angstrom, the sythetic spectrum should
         cover. Only maximum and minimum values of this parameter are used.
     template : dict
         A spectral template dictionary as returned by
-        spex.utils.get_sdss_template_data()
+        specex.utils.get_sdss_template_data()
     z : float
         Redshift of the spectrum.
     wave_step : float, optional
@@ -174,7 +174,7 @@ def main():
             z
         )
 
-        outname = f"spex_sdss_{obj_type}"
+        outname = f"specex_sdss_{obj_type}"
         try:
             obj_sub_type = t_dict['sub_type'].lower()
         except KeyError:

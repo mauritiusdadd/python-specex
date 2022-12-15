@@ -534,10 +534,10 @@ def get_cube_cutout(data: np.ndarray,
             )
 
         celestial_wcs = data_wcs.celestial
-        spex_wcs = data_wcs.spectral
+        specex_wcs = data_wcs.spectral
     else:
         celestial_wcs = None
-        spex_wcs = None
+        specex_wcs = None
 
     cutout_data = []
     for k in range(data.shape[0]):
@@ -557,16 +557,16 @@ def get_cube_cutout(data: np.ndarray,
 
     if celestial_wcs is not None:
         wcs_header = cutout['wcs'].to_header()
-        wcs_header['CRPIX3'] = spex_wcs.wcs.crpix[0]
-        wcs_header['PC3_3'] = spex_wcs.wcs.get_pc()[0, 0]
+        wcs_header['CRPIX3'] = specex_wcs.wcs.crpix[0]
+        wcs_header['PC3_3'] = specex_wcs.wcs.get_pc()[0, 0]
         wcs_header['PC1_3'] = 0
         wcs_header['PC2_3'] = 0
         wcs_header['PC3_2'] = 0
         wcs_header['PC3_1'] = 0
-        wcs_header['CDELT3'] = spex_wcs.wcs.cdelt[0]
-        wcs_header['CUNIT3'] = str(spex_wcs.wcs.cunit[0])
-        wcs_header['CTYPE3'] = spex_wcs.wcs.ctype[0]
-        wcs_header['CRVAL3'] = spex_wcs.wcs.crval[0]
+        wcs_header['CDELT3'] = specex_wcs.wcs.cdelt[0]
+        wcs_header['CUNIT3'] = str(specex_wcs.wcs.cunit[0])
+        wcs_header['CTYPE3'] = specex_wcs.wcs.ctype[0]
+        wcs_header['CRVAL3'] = specex_wcs.wcs.crval[0]
 
     else:
         wcs_header = None

@@ -11,7 +11,7 @@ from __future__ import absolute_import, division, print_function
 
 import unittest
 
-from spex.spex import spex
+from specex.specex import specex
 
 from test import make_synt_cube
 
@@ -22,25 +22,25 @@ class TestSpex(unittest.TestCase):
 
     reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
 
-    def test_spex_catalog_success(self):
-        spex_options = [
+    def test_specex_catalog_success(self):
+        specex_options = [
             '--catalog', self.cat_file,
             '--mode', 'circular_aperture',
             '--aperture-size', '0.8arcsec',
             '--no-nans', self.cube_file
         ]
-        spex(options=spex_options)
+        specex(options=specex_options)
 
-    def test_spex_regionfile_success(self):
-        spex_options = [
+    def test_specex_regionfile_success(self):
+        specex_options = [
             '--regionfile', self.reg_file,
             '--mode', 'kron_ellipse',
             '--no-nans', self.cube_file
         ]
-        spex(options=spex_options)
+        specex(options=specex_options)
 
 
 if __name__ == '__main__':
     mytest = TestSpex()
-    mytest.test_spex_catalog_success()
-    mytest.test_spex_regionfile_success()
+    mytest.test_specex_catalog_success()
+    mytest.test_specex_regionfile_success()
