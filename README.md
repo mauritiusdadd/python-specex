@@ -4,9 +4,12 @@ Extract spectra from fits cubes
 
 # SETUP
 
-To install specex use the following command:
+To install the latest stable version of specex, just use pip:
 
-    $ pip install -r requirements.txt
+    $ pip install specex
+
+To install the bleeding edge version, clone the github repository use the command:
+
     $ pip install .
 
 If you want to use the rrspecex script and the correspondig module, make sure to install also redrock. If you don't already have a system wide installation of redrock, a simple script is provided that creates a python venv and downloads and installs the required packages, in this case the commands to install specex are the following:
@@ -17,12 +20,11 @@ If you want to use the rrspecex script and the correspondig module, make sure to
     $ pip install -r rrspecex-requirements.txt
     $ pip install .
 
+# DOCUMENTATION
 
-To build the documentation install the reuirements and run sphinx:
+To build the documentation, install the requirements and run sphinx:
 
     $ pip install -r docs/requirements.txt
     $ sphinx-build -b html docs/ docs/_build/html
 
-# DOCUMENTATION
-
-The full documentation is available here: [https://python-specex.readthedocs.io/en/latest/index.html]
+The full documentation is also available here: [https://python-specex.readthedocs.io/en/latest/index.html]
