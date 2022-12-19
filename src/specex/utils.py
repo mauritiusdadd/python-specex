@@ -1237,10 +1237,27 @@ def rotate_data(data: np.ndarray, angle: apu.Quantity,
     else:
         new_wcs = None
 
+    rotated_data = data.copy().astype('float32')
+    nan_mask = np.isnan(rotated_data)
+
     rotated_data = rotate(
-        data,
+        rotated_data,
         angle.to(apu.deg).value,
-        reshape=False
+        reshape=False,
+        prefilter=False,
+        order=0,
+        cval=np.nan
     )
+
+    rotated_mask = rotate(
+        nan_mask,
+        angle.to(apu.deg).value,
+        reshape=False,
+        prefilter=False,
+        order=0,
+        cval=1
+    )
+
+    rotated_data[rotated_mask] = np.nan
 
     return {'data': rotated_data, 'wcs': new_wcs}
