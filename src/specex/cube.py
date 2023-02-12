@@ -340,8 +340,7 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
     Parameters
     ----------
     data : np.ndarray or tuple or list
-        The actual image data. Should have only two dimensions (a grayscale
-        image has only X and Y corrdinates).
+        The actual image data.
     center : astropy.coordinate.SkyCoord or tuple.
         The center of the cutout. If a SkyCoord is provided then a WCS for the
         image data musto also be specified with the parameter data_wcs.
@@ -604,11 +603,11 @@ def _get_fits_data_structure(fits_file):
 
             # If cannot determine which extensions cointain data,
             # then just use the second extension
-            if data_structure['data-ext'] is None:
+            if not data_structure['data-ext']:
                 data_ext = f[1]
                 data_structure['data-ext'] = [1, ]
 
-        data_shape = data_ext.shape
+        data_shape = data_ext.data.shape
         if len(data_shape) == 2:
             # A 2D image, we should check other extensions to
             # determine if its an RGB multi-extension file

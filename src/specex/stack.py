@@ -63,10 +63,10 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
 
     wave_mask = None
     if wave_range is not None and img_wcs.has_spectral:
-        wave_index = np.aragne(ext.data.shape[0])
+        wave_index = np.arange(ext.data.shape[0])
         wave_angstrom = img_wcs.spectral.pixel_to_world(wave_index).Angstrom
-        wave_mask = wave_angstrom >= np.nanmax(wave_range)
-        wave_mask &= wave_angstrom <= np.nanmin(wave_range)
+        wave_mask = wave_angstrom >= np.nanmin(wave_range)
+        wave_mask &= wave_angstrom <= np.nanmax(wave_range)
 
     img_height, img_width = ext.data.shape[1], ext.data.shape[2]
     img_figsize = (

@@ -595,9 +595,9 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
     # spectrum.
     if variance is not None:
         ax0 = fig.add_subplot(gs[:4, :-1])
-        ax4 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
+        ax3 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
 
-        ax4.plot(
+        ax3.plot(
             wavelengths, variance,
             ls='-',
             lw=0.5,
@@ -606,16 +606,17 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
             label='variance',
             zorder=0
         )
-        ax4.set_xlabel(x_label)
-        ax4.set_ylabel('Variance')
+        ax3.set_xlabel(x_label)
+        ax3.set_ylabel('Variance')
 
-        ax4.set_xlim(w_min, w_max)
-        ax4.set_ylim(1, var_max)
-        ax4.set_yscale('log')
+        ax3.set_xlim(w_min, w_max)
+        ax3.set_ylim(1, var_max)
+        ax3.set_yscale('log')
         ax0.label_outer()
     else:
         ax0 = fig.add_subplot(gs[:, :-1])
         ax0.set_xlabel(x_label)
+        ax3 = None
 
     ax0.set_ylabel(y_label)
     ax0.set_xlim(w_min, w_max)
@@ -850,14 +851,15 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
     ]
 
     ax2.axis("off")
-    tbl = ax2.table(
-        cellText=cell_text,
-        colWidths=[0.4, 0.6],
-        loc='upper center'
-    )
-    tbl.scale(1, 1.5)
+    if cell_text:
+        tbl = ax2.table(
+            cellText=cell_text,
+            colWidths=[0.4, 0.6],
+            loc='upper center'
+        )
+        tbl.scale(1, 1.5)
 
-    return fig, [ax0, ax1, ax2]
+    return fig, [ax0, ax1, ax2, ax3]
 
 
 def plot_zfit_check(target, zbest, plot_template=None, restframe=True,
