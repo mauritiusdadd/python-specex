@@ -9,6 +9,7 @@ import warnings
 from typing import Optional, Union, Callable
 
 import numpy as np
+from scipy.ndimage import gaussian_filter, gaussian_filter1d, zoom
 
 from astropy import units
 from astropy.io import fits
@@ -24,6 +25,12 @@ KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
 KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
 KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
+
+
+def __simple_report_callback(k, total):
+    pbar = get_pbar(k / total)
+    sys.stderr.write(f"\r{pbar} {k} / {total} \r")
+    sys.stderr.flush()
 
 
 def __cutout_argshandler(options=None):
@@ -121,6 +128,113 @@ def __cutout_argshandler(options=None):
             sys.exit(1)
     elif not os.path.isfile(args.regionfile):
         print("The file input regionfile does not exist!")
+        sys.exit(1)
+
+    return args
+
+
+def __smoothing_argshandler(options=None):
+    """
+    Parse the arguments given by the user.
+
+    Inputs
+    ------
+    options: list or None
+        If none, args are parsed from the command line, otherwise the options
+        list is used as input for argument parser.
+
+    Returns
+    -------
+    args: Namespace
+        A Namespace containing the parsed arguments. For more information see
+        the python documentation of the argparse module.
+    """
+    parser = argparse.ArgumentParser(
+        description='Apply a gaussian smoothing kernel to a spectral cubes '
+                    'spatially and/or along the spectral axis.'
+    )
+
+    parser.add_argument(
+        'input_fits_files', metavar='INPUT_FIST', type=str, nargs='+',
+        help='The spectral cube (or image) from which to extract a cutout.'
+    )
+    parser.add_argument(
+        '--spatial-sigma', metavar='SIGMA', type=float, default=1.0,
+        help='Set the sigma for the spatial gaussian kernel. If %(metavar)s '
+        'is 0 then no spatial smoothing is applied. If not specified the '
+        'default value %(metavar)s=%(default)f is used.'
+    )
+    parser.add_argument(
+        '--spatial-supersample', metavar='ZOOM_FACTOR', type=int, default=0,
+        help='Set the spatial supersampling factor. If %(metavar)s <= 1 then '
+        'no supersampling is applied. %(metavar)s=2 means that the output cube'
+        ' will have a doubled width and height, and so on. The default value '
+        'is %(metavar)s=%(default)d.'
+    )
+    parser.add_argument(
+        '--wave-supersample', metavar='ZOOM_FACTOR', type=int, default=0,
+        help='Set the wavelength supersampling factor. If %(metavar)s <= 1 '
+        'then no supersampling is applied. %(metavar)s=2 means that the output'
+        'cube will have a doubled spectral resolution, and so on. '
+        'The default value is %(metavar)s=%(default)d.'
+    )
+    parser.add_argument(
+        '--wave-sigma', metavar='SIGMA', type=float, default=0,
+        help='Set the sigma for the spectral gaussian kernel. If %(metavar)s '
+        'is 0 then no spectral smoothing is applied. If not specified the '
+        'default value %(metavar)s=%(default)f is used.'
+    )
+    parser.add_argument(
+        '--info-hdu', metavar='INFO_HDU', type=int, default=0,
+        help='The HDU containing cube metadata. If this argument '
+        'Set this to -1 to automatically detect the HDU containing the info. '
+        'NOTE that this value is zero indexed (i.e. firts HDU has index 0).'
+    )
+
+    parser.add_argument(
+        '--spec-hdu', metavar='SPEC_HDU', type=int, default=-1,
+        help='The HDU containing the spectral data to use. If this argument '
+        'Set this to -1 to automatically detect the HDU containing spectra. '
+        'NOTE that this value is zero indexed (i.e. second HDU has index 1).'
+    )
+
+    parser.add_argument(
+        '--var-hdu', metavar='VAR_HDU', type=int, default=-1,
+        help='The HDU containing the variance of the spectral data. '
+        'Set this to -1 if no variance data is present in the cube. '
+        'The default value is %(metavar)s=%(default)s.'
+        'NOTE that this value is zero indexed (i.e. third HDU has index 2).'
+    )
+
+    parser.add_argument(
+        '--mask-hdu', metavar='MASK_HDU', type=int, default=-1,
+        help='The HDU containing the valid pixel mask of the spectral data. '
+        'Set this to -1 if no mask is present in the cube. '
+        'The default value is %(metavar)s=%(default)s.'
+        'NOTE that this value is zero indexed (i.e. fourth HDU has index 3).'
+    )
+
+    parser.add_argument(
+        '--verbose', action='store_true', default=False,
+        help="Print verbose outout."
+    )
+    args = None
+    if options is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(options)
+
+    for inp_fits_file in args.input_fits_files:
+        if (inp_fits_file is not None) and (not os.path.isfile(inp_fits_file)):
+            print(f"The file {inp_fits_file} does not exist!")
+            sys.exit(1)
+
+    if (args.spatial_sigma == 0) and (args.wave_sigma == 0):
+        print(
+            "Spatial smoothing and spectral smooting cannot be both disabled, "
+            "please set at least one the options --wave-sigma or "
+            "--spatial-sigma."
+        )
         sys.exit(1)
 
     return args
@@ -732,9 +846,92 @@ def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     return valid_hdu
 
 
-def cutout_main(options=None):
+def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
+                spatial_sigma: Optional[float] = 1.0,
+                wave_sigma: Optional[float] = 0.0,
+                report_callback: Optional[Callable] = None) -> np.ndarray:
     """
-    Run the main program.
+    Smooth a datacube spatially and/or along the spectral axis.
+
+    Parameters
+    ----------
+    data : numpy.ndarray
+        The spectral datacube.
+    data_mask : numpy.ndarray, optional
+        The mask for the spectral datacube. The default is None.
+    spatial_sigma : float, optional
+        The sigma for the spatial smoothing gaussian kernel.
+        The default is 1.0.
+    wave_sigma : float, optional
+        The sigma fot the spectral smoothing gaussian kernel.
+        The default is 0.0.
+    report_callback : Callable or None, optional
+        A callable that will be execute every time the cutout of a single
+        slice of the cube is computed. Must accept in input two arguments:
+            - the number of slice processed so far
+            - the total number of slices.
+
+    Raises
+    ------
+    ValueError
+        If the shape of data does not match the shape of data_mask.
+
+    Returns
+    -------
+    smoothed_arr : numpy.ndarray
+        The smoothed version of the input data.
+
+    """
+    if data_mask is not None and data.shape != data_mask.shape:
+            raise ValueError("data and data_mask must have the same shape!")
+
+    smoothed_arr = data.copy()
+
+    if wave_sigma > 0:
+        for h in range(smoothed_arr.shape[1]):
+            for k in range(smoothed_arr.shape[2]):
+                if report_callback is not None:
+                    report_callback(k + 1, smoothed_arr.shape[1])
+                smoothed_spaxel = gaussian_filter1d(
+                    smoothed_arr[:, h, k],
+                    sigma=wave_sigma,
+                    mode='constant'
+                )
+                smoothed_arr[:, h, k] = smoothed_spaxel
+
+    if report_callback is not None:
+        print("")
+
+    if spatial_sigma > 0:
+        for k, data_slice in enumerate(smoothed_arr):
+            if report_callback is not None:
+                report_callback(k + 1, smoothed_arr.shape[0])
+            smoothed_slice = gaussian_filter(
+                data_slice,
+                sigma=spatial_sigma,
+                mode='constant'
+            )
+            smoothed_arr[k] = smoothed_slice
+
+    if report_callback is not None:
+        print("")
+
+    if data_mask is not None:
+        smoothed_mask = data_mask.copy().astype(bool)
+        for k, mask_slice in enumerate(smoothed_mask):
+            if report_callback is not None:
+                report_callback(k + 1, smoothed_mask.shape[0])
+                smoothed_mask[k] &= ~np.isfinite(smoothed_arr[k])
+        if report_callback is not None:
+            print("")
+        smoothed_mask = smoothed_mask.astype('int8')
+
+    return smoothed_arr, smoothed_mask
+
+
+def smoothing_main(options=None):
+    """
+    Run the main cutout program.
 
     Parameters
     ----------
@@ -746,11 +943,99 @@ def cutout_main(options=None):
     None.
 
     """
-    def simple_report_callback(k, total):
-        pbar = get_pbar(k / total)
-        sys.stderr.write(f"\r{pbar} {k} / {total} \r")
-        sys.stderr.flush()
+    args = __smoothing_argshandler(options)
 
+    if args.verbose:
+        report_callback = __simple_report_callback
+    else:
+        report_callback = None
+
+    for target_data_file in args.input_fits_files:
+        fits_base_name = os.path.basename(target_data_file)
+        fits_base_name = os.path.splitext(fits_base_name)[0]
+        if args.verbose:
+            print(f"\n[{fits_base_name}]")
+
+        with fits.open(target_data_file) as hdul:
+                spec_hdu = get_hdu(
+                    hdul,
+                    hdu_index=args.spec_hdu,
+                    valid_names=KNOWN_SPEC_EXT_NAMES,
+                    msg_err_notfound=(
+                        "ERROR: Cannot determine which HDU contains spectral "
+                        "data, try to specify it manually!"
+                    ),
+                    msg_index_error="ERROR: Cannot open HDU {} to read specra!"
+                )
+
+                spec_wcs = WCS(spec_hdu.header)
+
+                var_hdu = get_hdu(
+                    hdul,
+                    hdu_index=args.var_hdu,
+                    valid_names=KNOWN_VARIANCE_EXT_NAMES,
+                    msg_err_notfound=(
+                        "WARNING: Cannot determine which HDU contains the "
+                        "variance data, try to specify it manually!"
+                    ),
+                    msg_index_error="WARNING: Cannot open HDU {} to read the "
+                                    "variance!",
+                    exit_on_errors=False
+                )
+
+                mask_hdu = get_hdu(
+                    hdul,
+                    hdu_index=args.mask_hdu,
+                    valid_names=KNOWN_MASK_EXT_NAMES,
+                    msg_err_notfound=(
+                        "WARNING: Cannot determine which HDU contains the "
+                        "mask data, try to specify it manually!"
+                    ),
+                    msg_index_error="WARNING: Cannot open HDU {} to read the "
+                                    "mask!",
+                    exit_on_errors=False
+                )
+
+                if mask_hdu is not None:
+                    data_mask = mask_hdu.data
+
+                if args.verbose:
+                    print(">>> applying smoothing...")
+                    print(f"  - spatial_sigma: {args.spatial_sigma}")
+                    print(f"  - wave_sigma: {args.wave_sigma}")
+
+                smoothed_spec, smoothed_mask = smooth_cube(
+                    data=spec_hdu.data,
+                    data_mask=data_mask,
+                    spatial_sigma=args.spatial_sigma,
+                    wave_sigma=args.wave_sigma,
+                    report_callback=report_callback
+                )
+
+                spec_hdu.data = smoothed_spec
+                if mask_hdu is not None:
+                    mask_hdu.data = smoothed_mask
+
+                hdul.writeto(
+                    f"{fits_base_name}_smoothed.fits",
+                    overwrite=True
+                )
+
+
+def cutout_main(options=None):
+    """
+    Run the main cutout program.
+
+    Parameters
+    ----------
+    options : list or None, optional
+        A list of cli input prameters. The default is None.
+
+    Returns
+    -------
+    None.
+
+    """
     def updated_wcs_cutout_header(orig_header, cutout_header):
         new_header = orig_header.copy()
 
@@ -831,7 +1116,7 @@ def cutout_main(options=None):
             f" DQ EXT: {data_structure['mask-ext']}\n",
             file=sys.stderr
         )
-        report_callback = simple_report_callback
+        report_callback = __simple_report_callback
     else:
         report_callback = None
 
@@ -1041,7 +1326,3 @@ def cutout_main(options=None):
                     f"WARNING: not implemente yet [{data_structure['type']}]!",
                     file=sys.stderr
                 )
-
-
-if __name__ == '__main__':
-    cutout_main()
