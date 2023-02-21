@@ -1021,7 +1021,7 @@ def stack(data, wave_mask=None):
             f"\rstacking cube: {get_pbar(progress)} {progress:.2%}\r"
         )
         sys.stderr.flush()
-        if wave_mask is None or wave_mask[k]:
+        if wave_mask is None or wave_mask[k].any():
             new_data = np.nansum(np.array([new_data, dat]), axis=0)
     print("", file=sys.stderr)
     return new_data

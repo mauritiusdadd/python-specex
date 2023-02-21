@@ -290,7 +290,7 @@ def plot(options=None):
                     restframe = False
 
             flux_data = spec_hdu.data
-            spec_wcs = wcs.WCS(spec_hdu.header)
+            spec_wcs = wcs.WCS(spec_hdu.header, fobj=hdulist)
             var_data = var_hdu.data
 
             if nan_mask_hdu is not None:

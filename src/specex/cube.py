@@ -21,6 +21,7 @@ from astropy.nddata.utils import Cutout2D
 
 from .utils import get_pc_transform_params, rotate_data, get_pbar
 
+
 KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
 KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
 KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq']
@@ -846,6 +847,112 @@ def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
     return valid_hdu
 
 
+def cube_tiled_func(data, func, tile_size, *args, **kwargs):
+    data_shape = data.shape[-2:]
+    if isinstance(data, np.ma.MaskedArray):
+        result = np.ma.zeros(data_shape)
+    else:
+        result = np.zeros(data_shape)
+    for j in np.arange(data_shape[0], step=tile_size):
+        for k in np.arange(data_shape[1], step=tile_size):
+            tile = data[:, j:j+tile_size, k:k+tile_size]
+            # Skip empty tiles:
+            if not np.isfinite(tile).any():
+                result[j:j+tile_size, k:k+tile_size] = np.nan
+                try:
+                    result[j:j+tile_size, k:k+tile_size].mask = True
+                except AttributeError:
+                    pass
+                continue
+
+            processed_tile = func(tile, *args, **kwargs).copy()
+            result[j:j+tile_size, k:k+tile_size] = processed_tile
+            try:
+                result[j:j+tile_size, k:k+tile_size].mask = processed_tile.mask
+            except AttributeError:
+                pass
+
+    return result
+
+
+def correlate_spaxel(cube_data: np.ndarray,
+                     spaxel_data: np.ndarray,
+                     similarity_function: Optional[str] = 'rms'):
+
+    if spaxel_data.shape[0] != cube_data.shape[0]:
+        raise ValueError(
+            "spaxel_data and cube_data must have the same first dimension."
+        )
+
+    if len(spaxel_data.shape) == 1:
+        spaxel_data = spaxel_data[:, None, None]
+
+    x = cube_data - np.nanmedian(cube_data, axis=0)
+    x = x / np.nanmax(x, axis=0)
+    y = spaxel_data - np.nanmedian(spaxel_data)
+    y = y / np.nanmax(y)
+
+    if similarity_function == 'rms':
+        res = np.sqrt(np.nanmean((x - y)**2, axis=0))
+        return 1/(1 + res)
+    elif similarity_function == 'correlation':
+        res = np.nansum(x * y, axis=0)
+        return res / (np.nansum(x**2, axis=0) * np.nansum(y**2))
+
+
+def self_correlate(data: np.ndarray,
+                   data_mask: Optional[np.ndarray] = None,
+                   similarity_sigma_threshold: Optional[float] = 5,
+                   tile_size: Optional[int] = 32,
+                   block_size: Optional[int] = 2,
+                   similarity_function: Optional[str] = 'rms',
+                   report_callback: Optional[Callable] = None) -> np.ndarray:
+    if data_mask is not None and data.shape != data_mask.shape:
+            raise ValueError("data and data_mask must have the same shape!")
+
+    hei, wid = data.shape[1:]
+
+    sim_table = np.zeros((hei, wid))
+    # Dor each spaxel in the cube
+    block_id = 0
+    for h in np.arange(hei, step=block_size):
+        for k in np.arange(wid, step=block_size):
+            block_id += 1
+            if (
+                (sim_table[h:h+block_size, k:k+block_size] != 0).any() or
+                (
+                    data_mask is not None and
+                    (data_mask[:, h:h+block_size, k:k+block_size] != 0).any()
+                )
+            ):
+                continue
+
+            if report_callback is not None:
+                report_callback(block_id + 1, int(wid*hei / (block_size**2)))
+
+            spaxel_data = np.nansum(
+                data[:, h:h+block_size, k:k+block_size],
+                axis=(1, 2)
+            )
+
+            if not np.isfinite(spaxel_data).any():
+                continue
+
+            similarity_map = cube_tiled_func(
+                data,
+                correlate_spaxel,
+                tile_size=tile_size,
+                spaxel_data=spaxel_data,
+                similarity_function=similarity_function
+            )
+
+            thresh = np.nanmean(similarity_map)
+            thresh += similarity_sigma_threshold * np.nanstd(similarity_map)
+            similarity_mask = similarity_map >= thresh
+            sim_table[similarity_mask] = block_id
+    return sim_table
+
+
 def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
                 spatial_sigma: Optional[float] = 1.0,
                 wave_sigma: Optional[float] = 0.0,
@@ -889,9 +996,9 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
 
     if wave_sigma > 0:
         for h in range(smoothed_arr.shape[1]):
+            if report_callback is not None:
+                report_callback(h, smoothed_arr.shape[1])
             for k in range(smoothed_arr.shape[2]):
-                if report_callback is not None:
-                    report_callback(k + 1, smoothed_arr.shape[1])
                 smoothed_spaxel = gaussian_filter1d(
                     smoothed_arr[:, h, k],
                     sigma=wave_sigma,
@@ -956,7 +1063,7 @@ def smoothing_main(options=None):
         if args.verbose:
             print(f"\n[{fits_base_name}]")
 
-        with fits.open(target_data_file) as hdul:
+        with fits.open(target_data_file, mode='readonly') as hdul:
                 spec_hdu = get_hdu(
                     hdul,
                     hdu_index=args.spec_hdu,
@@ -1016,8 +1123,12 @@ def smoothing_main(options=None):
                 if mask_hdu is not None:
                     mask_hdu.data = smoothed_mask
 
+                out_fname = f"{fits_base_name}_smoothed.fits"
+                if args.verbose:
+                    print("  - saving to {out_fname}...")
+
                 hdul.writeto(
-                    f"{fits_base_name}_smoothed.fits",
+                    out_fname,
                     overwrite=True
                 )
 

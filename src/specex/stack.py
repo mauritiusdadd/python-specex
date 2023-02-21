@@ -20,7 +20,7 @@ from .cube import get_hdu
 
 
 def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
-                   dpi=150, wave_range=None):
+                   dpi=150, wave_ranges=None):
     """
     Stack and plot a spectral datacube.
 
@@ -61,12 +61,15 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
 
     img_wcs = WCS(ext.header)
 
-    wave_mask = None
-    if wave_range is not None and img_wcs.has_spectral:
-        wave_index = np.arange(ext.data.shape[0])
-        wave_angstrom = img_wcs.spectral.pixel_to_world(wave_index).Angstrom
-        wave_mask = wave_angstrom >= np.nanmin(wave_range)
-        wave_mask &= wave_angstrom <= np.nanmax(wave_range)
+    wave_mask = np.zeros(ext.data.shape[0], dtype=bool)
+    if wave_ranges and img_wcs.has_spectral:
+        for wave_range in wave_ranges:
+            wave_index = np.arange(ext.data.shape[0])
+            wave_angstrom = img_wcs.spectral.pixel_to_world(wave_index)
+            wave_angstrom = wave_angstrom.Angstrom
+            mask = wave_angstrom >= np.nanmin(wave_range)
+            mask &= wave_angstrom <= np.nanmax(wave_range)
+            wave_mask |= mask
 
     img_height, img_width = ext.data.shape[1], ext.data.shape[2]
     img_figsize = (
@@ -152,6 +155,13 @@ def __argshandler(options=None):
         'created based on the name of the input cube.'
     )
 
+    parser.add_argument(
+        '--wave-ranges', metavar='WAVE_RANGE', type=str, default=None,
+        help='Set the wavelength range(s) to stack, in the format '
+        'WAVE_RANGE=RANGE1_START-RANGE1_STOP,RANGE2_START-RANGE2_STOP,...'
+        ' If not specified, the whole wavelength range is used.'
+    )
+
     args = None
     if options is None:
         args = parser.parse_args()
@@ -212,10 +222,19 @@ def cube_stack(options=None):
             exit_on_errors=False
         )
 
+        if args.wave_ranges is not None:
+            wave_ranges = [
+                [float(k) for k in x.split('-')]
+                for x in args.wave_ranges.split(',')
+            ]
+        else:
+            wave_ranges = None
+
         dat, dat_wcs = stack_and_plot(
             spec_hdu,
             basename,
             'data',
+            wave_ranges=wave_ranges,
             dpi=args.dpi
         )
 
@@ -225,6 +244,7 @@ def cube_stack(options=None):
                 basename,
                 'variance',
                 override_wcs=dat_wcs,
+                wave_ranges=wave_ranges,
                 dpi=args.dpi
             )
 
@@ -235,6 +255,7 @@ def cube_stack(options=None):
                 'mask',
                 is_mask=True,
                 override_wcs=dat_wcs,
+                wave_ranges=wave_ranges,
                 dpi=args.dpi
             )
 
