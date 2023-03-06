@@ -85,6 +85,14 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
+        '--key-wrange', metavar='WAVE_RANGE', type=str, default=None,
+        help='Set the name of the column in the zcat that contains the range'
+        'of wavelength to plot. If not specified then the whole spectrum is '
+        'plotted. If specified and the range value is empty no plot is '
+        'produced for the object.'
+    )
+
+    parser.add_argument(
         '--restframe', default=False, action='store_true',
         help='If this option is specified, spectra will be plotted as if they '
         'were in the observer restframe (ie. they are de-redshifted). '
@@ -153,7 +161,6 @@ def plot(options=None):
                 file=sys.stderr
             )
             sys.exit(1)
-        zcat = zcat[args.key_id, args.key_z].copy()
 
         # Remove objects with masked or undefined IDs
         if isinstance(zcat[args.key_id], MaskedColumn):
@@ -261,6 +268,7 @@ def plot(options=None):
             except KeyError:
                 wavelenght_units = None
 
+            wave_range = None
             if zcat is not None:
                 try:
                     object_z = zcat.loc[object_id][args.key_z]
@@ -277,6 +285,16 @@ def plot(options=None):
                     except IndexError:
                         # Otherwise just go ahead
                         pass
+
+                    if args.key_wrange is not None:
+                        str_wrange = zcat.loc[object_id][args.key_wrange]
+                        try:
+                            wave_range = [
+                                float(x) for x in str_wrange.split('-')
+                            ]
+                        except Exception:
+                            continue
+
                 restframe = args.restframe
                 info_dict['Z'] = object_z
             else:
@@ -306,20 +324,20 @@ def plot(options=None):
                 if big_image['type'] == 'rgb':
                     cutout_dict = get_rgb_cutout(
                         big_image['data'],
-                        position=obj_center,
+                        center=obj_center,
                         size=cutout_size,
                         data_wcs=big_image['wcs']
                     )
-                    cutout = np.array(cutout_dict['data'])
+                    cutout = np.asarray(cutout_dict['data']).transpose(1, 2, 0)
                     cutout_wcs = cutout_dict['wcs'][0]
                 else:
                     cutout_dict = get_gray_cutout(
                         big_image['data'],
-                        position=obj_center,
+                        center=obj_center,
                         size=cutout_size,
                         data_wcs=big_image['wcs']
                     )
-                    cutout = cutout_dict['data'].transpose(1, 2, 0)
+                    cutout = np.array(cutout_dict['data'])
                     cutout_wcs = cutout_dict['wcs']
                 cutout_vmin = np.nanmin(big_image['data'])
                 cutout_vmax = np.nanmax(big_image['data'])
@@ -349,7 +367,8 @@ def plot(options=None):
                     'apertures': specex_apertures,
                     'aperture_ra': object_ra,
                     'aperture_dec': object_dec,
-                }
+                },
+                wave_range=wave_range
             )
 
             if args.outdir is None:
