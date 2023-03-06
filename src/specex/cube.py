@@ -447,6 +447,7 @@ def get_gray_cutout(data: np.ndarray,
 def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
                    center: Union[SkyCoord, tuple],
                    size: Union[tuple, list],
+                   angle: Optional[Union[float, units.Quantity]] = 0,
                    data_wcs: Optional[Union[WCS, list, tuple]] = None,
                    resample_to_wcs: bool = False):
     """
@@ -468,6 +469,9 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
         height of the cutout. if no WCS is specified, the values are assumed to
         be in pixels, else if a WCS is provided then the values are assumed to
         be in degrees. Astropy.units.Quantity values are also supported.
+    angle : float or astropy.units.Quantity, optional
+        The rotation angle of the cutout. If it is a float, then it is
+        interpreted in degrees. The default is 0.
     data_wcs : astropy.wcs.WCS or None, optional
         A WCS associated with the image data. The default is None.
     reample_to_wcs : bool, optional
@@ -541,9 +545,9 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
             "Parameter 'data' only supports ndarray or list/tuple of ndarrays."
         )
 
-    cutout_data_r = get_gray_cutout(data_r, center, size, data_wcs_r)
-    cutout_data_g = get_gray_cutout(data_g, center, size, data_wcs_g)
-    cutout_data_b = get_gray_cutout(data_b, center, size, data_wcs_b)
+    cutout_data_r = get_gray_cutout(data_r, center, size, angle, data_wcs_r)
+    cutout_data_g = get_gray_cutout(data_g, center, size, angle, data_wcs_g)
+    cutout_data_b = get_gray_cutout(data_b, center, size, angle, data_wcs_b)
 
     if not resample_to_wcs:
         cutout_dict = {

@@ -476,7 +476,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                   restframe=False, cutout=None, cutout_vmin=None,
                   cutout_vmax=None, cutout_wcs=None, redshift=None,
                   smoothing=None, wavelengt_units=None, flux_units=None,
-                  extra_info={}, extraction_info={}):
+                  extra_info={}, extraction_info={}, wave_range=None):
     """
     Plot a spectrum.
 
@@ -571,8 +571,12 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         wavelengths = wavelengths
         lines_z = redshift
 
-    w_min = np.nanmin(wavelengths)
-    w_max = np.nanmax(wavelengths)
+    if wave_range is None:
+        w_min = np.nanmin(wavelengths)
+        w_max = np.nanmax(wavelengths)
+    else:
+        w_min = np.min(wave_range)
+        w_max = np.max(wave_range)
 
     if wavelengt_units:
         x_label = f'Wavelenght [{wavelengt_units}]'
@@ -638,7 +642,8 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
             origin='lower',
             aspect='equal',
             vmin=cutout_vmin,
-            vmax=cutout_vmax
+            vmax=cutout_vmax,
+            zorder=0
         )
         ax1.set_aspect(1)
 
@@ -673,7 +678,8 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                 )
 
                 e_world_points_values = np.array([
-                    [x.ra.value, x.dec.value] for x in e_world_points
+                    [x.ra.value, x.dec.value]
+                    for x in e_world_points
                 ])
 
                 ax1.plot(
@@ -683,10 +689,9 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                     ls='-',
                     lw=0.8,
                     alpha=0.7,
+                    zorder=1,
                     transform=ax1.get_transform(
-                        ax1.get_transform(
-                            apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
-                        )
+                        apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
                     )
                 )
                 ax1.plot(
@@ -696,10 +701,9 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                     ls='--',
                     lw=0.8,
                     alpha=0.7,
+                    zorder=2,
                     transform=ax1.get_transform(
-                        ax1.get_transform(
-                            apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
-                        )
+                        apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
                     )
                 )
     else:

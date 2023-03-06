@@ -39,7 +39,7 @@ from . import utils
 from . import plot
 try:
     from . import rrspecex
-except ImportError:
+except Exception:
     HAS_RR = False
 else:
     HAS_RR = True
