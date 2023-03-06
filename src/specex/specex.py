@@ -38,7 +38,7 @@ from .cube import get_hdu
 
 try:
     from .rrspecex import rrspecex, get_templates
-except ImportError:
+except Exception:
     HAS_RR = False
 else:
     HAS_RR = True
