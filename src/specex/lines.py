@@ -30,9 +30,10 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
-
+from typing import Optional
 import numpy as np
-
+from scipy.stats import median_abs_deviation
+from scipy.signal import savgol_filter
 
 # Some important lines with corresponding wavelenghts in Angstrom
 RESTFRAME_LINES = [
@@ -156,3 +157,117 @@ def get_lines(name=None, line_type=None, wrange=None, z=0):
         ]
 
     return selected_lines
+
+
+def indentify_spectrum_lines(
+        wavelengths: np.ndarray,
+        flux: np.ndarray,
+        var: Optional[np.ndarray] = None,
+        sigma_threshold: Optional[float] = 6.0,
+        smoothing_window: Optional[int] = 51,
+        smoothing_order: Optional[int] = 1,
+        glob_smoothing: Optional[int] = 3):
+    """
+    Identify the position of clear emission or absorption lines.
+
+    Parameters
+    ----------
+    wavelengths : np.ndarray
+        The wavelengs corresponding to each flux value.
+    flux : numpy.ndarray
+        The spectrum itself.
+    var : numpy.ndarray, optional
+        The variance of the spectrum itself.
+        The default value is None.
+    sigma_threshold : float, optional
+        The threshold to use for line identification.
+        The default value is 5.0
+    smoothing_window : int, optional
+        Parameter to be passed to the smoothing function.
+        The default value is 51.
+    smoothing_order : int, optional
+        Parameter to be passed to the smoothing function.
+        The default value is 11.
+    glob_smoothing : int, optional
+        Parameter used for line identification.
+        The default value is 3
+
+    Returns
+    -------
+    identifications : list
+        A list of tuple. Each tuple ha the form of (k, w, l, h) and contains
+        the index k for the wavelenght w of the line, the approximate max width
+        l of the line and a height h of the line. Note that l and h are not
+        actual phisical quantities and should be used with caution when
+        comparing to other value from a different spectrum.
+    """
+    if np.isnan(flux).all():
+        return np.nan
+    else:
+        flux = savgol_filter(flux.copy(), glob_smoothing, 1)
+        flux = np.ma.array(flux, mask=np.isnan(flux))
+
+    if var is not None:
+        var = np.ma.array(var.copy(), mask=np.isnan(var))
+        var /= np.ma.max(var)
+    else:
+        var = 1.0
+
+    smoothed_spec = savgol_filter(flux, smoothing_window, smoothing_order)
+    smoothed_spec = np.ma.array(smoothed_spec, mask=np.isnan(smoothed_spec))
+
+    # Subtract the smoothed spectrum to the spectrum itself to get a
+    # crude estimation of the noise, then square it and divide for the variance
+    # and then go back with a square root
+    norm_noise = (flux - smoothed_spec)**2 / var
+    norm_noise = np.ma.sqrt(norm_noise)
+
+    # Get the median value of the noise. The median is more robust against the
+    # presence of lines with respect to the mean
+    noise_median = np.ma.median(norm_noise)
+
+    # Get the NMAD of the noise. We assume here that the noise has a
+    # unimodal distribution (eg. gaussian like), and this is a good assumption
+    # if the noise is due only to the random fluctuations
+    noise_nmad = median_abs_deviation(norm_noise, scale='normal')
+
+    norm_noise_deb = np.abs(norm_noise - noise_median)
+
+    # Get the possible lines
+    outlier = norm_noise_deb >= (sigma_threshold * noise_nmad)
+
+    # Delete identification with lenght 1 (almost all are fake)
+    for k, v in enumerate(outlier):
+        if (k == 0) or (k == len(outlier)-1):
+            continue
+        if v and ((outlier[k-1] == 0) and (outlier[k+1] == 0)):
+            outlier[k] = 0
+
+    # Merge almost contiguos identifications
+    for k in range(1, glob_smoothing+1):
+        outlier[k:] += outlier[:-k]
+        outlier[:-k] += outlier[k:]
+
+    # Get position, width and height of the identifications
+    identifications = []
+    c_start = None
+    c_wstart = None
+    c_end = None
+    for k, v in enumerate(outlier):
+        if v:
+            if c_start is None:
+                c_start = k
+                c_wstart = wavelengths[k]
+                c_end = None
+        elif c_start is not None:
+            if c_end is None:
+                c_end = k
+                c_wh = np.ma.max(norm_noise_deb[c_start: c_end])
+                c_max_pos = np.ma.argmax(norm_noise_deb[c_start: c_end])
+                c_pos_idx = c_start + c_max_pos
+                c_wpos = wavelengths[c_pos_idx]
+                c_wlen = wavelengths[k] - c_wstart
+                identifications.append((c_pos_idx, c_wpos, c_wlen, c_wh))
+                c_start = None
+
+    return identifications

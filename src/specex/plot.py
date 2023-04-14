@@ -176,7 +176,8 @@ def plot(options=None):
         except FileNotFoundError:
             print(f"ERROR: file not found '{args.cutout}'")
             sys.exit(1)
-        except IndexError:
+
+        if big_image is None:
             big_image = {
                 'data': fits.getdata(args.cutout),
                 'wcs': wcs.WCS(fits.getheader(args.cutout)),
@@ -242,15 +243,23 @@ def plot(options=None):
                 )
                 continue
             else:
+
+                try:
+                    object_coord_frame = main_header['FRAME']
+                except KeyError:
+                    object_coord_frame = 'fk5'
+
                 obj_center = SkyCoord(
                     object_ra, object_dec,
-                    unit='deg'
+                    unit='deg',
+                    frame=object_coord_frame
                 )
 
             info_dict = {
                 'ID': f"{object_id}",
                 'RA': obj_center.ra.to_string(precision=2),
                 'DEC': obj_center.dec.to_string(precision=2),
+                'FRAME': str(object_coord_frame).upper()
             }
             for key in ['Z', 'SN', 'SN_EMISS']:
                 try:
@@ -367,6 +376,7 @@ def plot(options=None):
                     'apertures': specex_apertures,
                     'aperture_ra': object_ra,
                     'aperture_dec': object_dec,
+                    'frame': object_coord_frame
                 },
                 wave_range=wave_range
             )

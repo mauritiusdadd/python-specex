@@ -744,7 +744,8 @@ def specex(options=None):
     cube_wcs = wcs.WCS(spec_hdu.header)
     celestial_wcs = cube_wcs.celestial
     spectral_wcs = cube_wcs.spectral
-    wcs_frame = wcs.utils.wcs_to_celestial_frame(cube_wcs)
+    # wcs_frame = wcs.utils.wcs_to_celestial_frame(cube_wcs)
+    coord_frame = 'fk5'  # frame of source coordinates
 
     # TODO: we assume here that the distorsion across the sky plane is
     #       negligible, but it is very bold to assume this is always the case.
@@ -789,7 +790,7 @@ def specex(options=None):
     obj_sky_coords = SkyCoord(
         sources[args.key_ra], sources[args.key_dec],
         unit=(ra_unit, dec_unit),
-        frame=wcs_frame
+        frame=coord_frame
     )
 
     obj_x, obj_y = wcs.utils.skycoord_to_pixel(
@@ -1058,6 +1059,7 @@ def specex(options=None):
             'CUBE': (basename_with_ext, "Spectral cube used for extraction"),
             'RA': (obj_ra, "Ra of the center of the object"),
             'DEC': (obj_dec, "Dec of the center of the object"),
+            'FRAME': (coord_frame, "Ra and Dec sky frame"),
             'NPIX': (np.sum(mask), 'Number of pixels used for this spectra'),
             'HISTORY': f'Extracted on {str(my_time)}',
             'ID': obj_id,

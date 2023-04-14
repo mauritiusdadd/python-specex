@@ -18,10 +18,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib import patches
+import matplotlib.patheffects as PathEffects
 
 from scipy.signal import savgol_filter
 from scipy.ndimage import rotate
-
+from scipy.stats import median_abs_deviation
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
 from astropy import wcs as apwcs
@@ -32,6 +33,154 @@ from .lines import get_lines
 
 
 _SDSS_SPECTRAL_TEMPLATES_PACKAGE = "http://classic.sdss.org/dr5/algorithms/spectemplates/spectemplatesDR2.tar.gz"
+
+
+class ScaleBar:
+    """A simple scalebar."""
+
+    def __init__(self, ax, x0=0.025, y0=0.025, length=1, size=0.025,
+                 orientation='hor', n_subunits=2, text=None, fontsize=8,
+                 units='arcsec', scale_factor=1):
+
+        self.ax = ax
+        self.units = units
+        self.start_pos = (x0, y0)
+        self.scale_factor = scale_factor
+        self.size = size
+
+        if orientation.lower().startswith('h'):
+            self.end_pos = (x0 + length, y0)
+        else:
+            self.end_pos = (x0, y0 + length)
+
+        self.orientation = orientation
+        self.n_subunits = n_subunits
+        self.length = length
+        self.scale_bar_elements = []
+
+        if text is None:
+            text = f"{length:.1f}"
+
+        length, _ = (
+            ax.transData + ax.transAxes.inverted()
+        ).transform([length, 0])
+
+        self.text_handler = ax.text(
+            x0 + length / 2,
+            y0 + 2 * size,
+            text,
+            horizontalalignment='center',
+            verticalalignment='bottom',
+            transform=ax.transAxes,
+            fontsize=fontsize
+        )
+
+        self.text_handler.set_path_effects(
+            (
+                PathEffects.withStroke(
+                    linewidth=3, foreground='white'
+                ),
+            )
+        )
+
+        delta = length / n_subunits
+
+        for i in range(n_subunits):
+            if orientation.lower().startswith('h'):
+                x = x0 + i*delta
+                y = y0
+                wid = delta
+                hei = size
+            else:
+                x = x0
+                y = y0 + i*delta
+                wid = size
+                hei = delta
+
+            if i % 2:
+                facecolor = 'white'
+                edgecolor = 'black'
+            else:
+                facecolor = 'black'
+                edgecolor = 'white'
+
+            scale_bar_element = patches.Rectangle(
+                (x, y),
+                wid,
+                hei,
+                transform=ax.transAxes,
+                facecolor=facecolor,
+                edgecolor=edgecolor,
+                lw=1,
+                ls='-',
+            )
+
+            ax.add_artist(scale_bar_element)
+            self.scale_bar_elements.append(scale_bar_element)
+
+    def update(self):
+        """
+        Update the ScaleBar.
+
+        Returns
+        -------
+        None.
+
+        """
+        length, _ = (
+            self.ax.transData + self.ax.transAxes.inverted()
+        ).transform([self.length, 0])
+
+        delta = length / self.n_subunits
+
+
+        self.text_handler.set_x(self.start_pos[0] + length / 2)
+        self.text_handler.set_y(self.start_pos[1] + 2 * self.size)
+
+        for i, rect in enumerate(self.scale_bar_elements):
+            if self.orientation.lower().startswith('h'):
+                x = self.start_pos[0] + i*delta
+                y = self.start_pos[1]
+                wid = delta
+                hei = self.size
+            else:
+                x = self.start_pos[0]
+                y = self.start_pos[1] + i*delta
+                wid = self.size
+                hei = delta
+
+            rect.set_x(x)
+            rect.set_y(y)
+            rect.set_width(wid)
+            rect.set_height(hei)
+
+    def set_wcs(self, wcs):
+        """
+        Set the WCS.
+
+        Parameters
+        ----------
+        wcs : astropy.wcs.WCS
+            The WCS to use.
+
+        Returns
+        -------
+        None.
+
+        """
+        star_coords = wcs.pixel_to_world(
+            *self.start_pos
+        )
+
+        end_coords = wcs.pixel_to_world(
+            *self.end_pos
+        )
+
+        sep = star_coords.separation(end_coords).to(self.units)
+        sep /= self.scale_factor
+
+        self.text_handler.set_text(f"{sep:.2f}")
+        self.update()
 
 
 def get_pbar(partial, total=None, wid=32, common_char='\u2588',
@@ -381,7 +530,7 @@ def get_ellipse_skypoints(center: coordinates.SkyCoord,
                           a: apu.quantity.Quantity,
                           b: apu.quantity.Quantity,
                           angle: apu.quantity.Quantity = 0*apu.deg,
-                          n_points: int = 25) -> list:
+                          n_points: int = 20) -> list:
     """
     Get points of an ellips on the skyplane.
 
@@ -630,12 +779,6 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         ax1 = fig.add_subplot(gs[:3, -1], projection=cutout_wcs)
         ax2 = fig.add_subplot(gs[3:, -1])
 
-        if cutout_wcs is not None:
-            ra_cunit, dec_cunit = cutout_wcs.celestial.wcs.cunit
-        else:
-            ra_cunit = apu.deg
-            dec_cunit = apu.deg
-
         ax1.axis('off')
         ax1.imshow(
             cutout,
@@ -653,6 +796,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
             ext_apertures = extraction_info['apertures']
             e_ra = extraction_info['aperture_ra']
             e_dec = extraction_info['aperture_dec']
+            e_frame = extraction_info['frame']
         except (TypeError, KeyError):
             # No extraction info present, just ignore
             pass
@@ -662,8 +806,8 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
 
             e_cc = coordinates.SkyCoord(
                 e_ra, e_dec,
-                unit=(ra_cunit, dec_cunit),
-                frame=apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
+                unit=('deg', 'deg'),
+                frame=e_frame
             )
 
             # and then draw extraction apertures
@@ -685,27 +829,30 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                 ax1.plot(
                     e_world_points_values[..., 0],
                     e_world_points_values[..., 1],
-                    color='#0000ff',
+                    color='black',
                     ls='-',
-                    lw=0.8,
+                    lw=1,
                     alpha=0.7,
                     zorder=1,
-                    transform=ax1.get_transform(
-                        apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
-                    )
+                    transform=ax1.get_transform(e_frame)
                 )
                 ax1.plot(
                     e_world_points_values[..., 0],
                     e_world_points_values[..., 1],
-                    color='#00ff00',
+                    color='cyan',
                     ls='--',
-                    lw=0.8,
+                    lw=1,
                     alpha=0.7,
                     zorder=2,
-                    transform=ax1.get_transform(
-                        apwcs.utils.wcs_to_celestial_frame(cutout_wcs)
-                    )
+                    transform=ax1.get_transform(e_frame)
                 )
+
+                scbar = ScaleBar(
+                    ax1,
+                    length=cutout.shape[1]/2
+                )
+                scbar.set_wcs(cutout_wcs)
+                scbar.update()
     else:
         ax1 = None
         ax2 = fig.add_subplot(gs[:, -1])
@@ -1061,7 +1208,12 @@ def nannmad(x, scale=1.48206, axis=None):
     return scale*mad
 
 
-def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
+
+
+def get_spectrum_snr(flux: np.ndarray,
+                     var: Optional[np.ndarray] = None,
+                     smoothing_window: Optional[int] = 51,
+                     smoothing_order: Optional[int] = 11):
     """
     Compute the SRN of a spectrum.
 
@@ -1069,6 +1221,9 @@ def get_spectrum_snr(flux, var=None, smoothing_window=51, smoothing_order=11):
     ----------
     flux : numpy.ndarray
         The spectrum itself.
+    var : numpy.ndarray, optional
+        The variance of the spectrum itself.
+        The default value is None.
     smoothing_window : int, optional
         Parameter to be passed to the smoothing function.
         The default is 51.
