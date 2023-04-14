@@ -22,7 +22,6 @@ import matplotlib.patheffects as PathEffects
 
 from scipy.signal import savgol_filter
 from scipy.ndimage import rotate
-from scipy.stats import median_abs_deviation
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
 from astropy import wcs as apwcs
@@ -132,7 +131,6 @@ class ScaleBar:
         ).transform([self.length, 0])
 
         delta = length / self.n_subunits
-
 
         self.text_handler.set_x(self.start_pos[0] + length / 2)
         self.text_handler.set_y(self.start_pos[1] + 2 * self.size)
@@ -1206,8 +1204,6 @@ def nannmad(x, scale=1.48206, axis=None):
     x_bar = np.ma.median(x, axis=axis)
     mad = np.ma.median(np.ma.abs(x - x_bar), axis=axis)
     return scale*mad
-
-
 
 
 def get_spectrum_snr(flux: np.ndarray,
