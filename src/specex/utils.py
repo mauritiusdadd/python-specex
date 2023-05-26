@@ -623,7 +623,8 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                   restframe=False, cutout=None, cutout_vmin=None,
                   cutout_vmax=None, cutout_wcs=None, redshift=None,
                   smoothing=None, wavelengt_units=None, flux_units=None,
-                  extra_info={}, extraction_info={}, wave_range=None):
+                  extra_info={}, extraction_info={}, wave_range=None,
+                  show_legend=True, axs=None):
     """
     Plot a spectrum.
 
@@ -681,6 +682,13 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         empty or None, extraction information are used to plot the apertures
         used by specex over the cutout (if provided).
         The default is {}.
+    wave_range: list, optional
+        Range of wavelenghts to plot. The default value is None.
+    show_legend: bool, optional
+        Show the legend if true. Default value it True.
+    axs: list of matplotlib.axes._subplots.AxesSubplots, optional
+        List of axes to use for plotting. If none a new figure with the
+        appropriate axes is created. The default value is None.
 
     Returns
     -------
@@ -735,18 +743,25 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
     else:
         y_label = 'Flux'
 
-    fig = plt.figure(figsize=(15, 5))
+    if axs is None:
+        fig = plt.figure(figsize=(15, 5))
 
-    # Make a grid of plots
-    gs = GridSpec(6, 6, figure=fig, hspace=0.1)
+        # Make a grid of plots
+        gs = GridSpec(6, 6, figure=fig, hspace=0.1)
+    else:
+        fig = axs[0].figure
 
     # If variance data are present, then make two plots on the left of the
     # figure. The top one is for the spectrum and the bottom one is for the
     # variance. Otherwise just make a bigger plot on the left only for the
     # spectrum.
     if variance is not None:
-        ax0 = fig.add_subplot(gs[:4, :-1])
-        ax3 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
+        if axs is None:
+            ax0 = fig.add_subplot(gs[:4, :-1])
+            ax3 = fig.add_subplot(gs[4:, :-1], sharex=ax0)
+        else:
+            ax0 = axs[0]
+            ax3 = axs[1]
 
         ax3.plot(
             wavelengths, variance,
@@ -765,17 +780,25 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         ax3.set_yscale('log')
         ax0.label_outer()
     else:
-        ax0 = fig.add_subplot(gs[:, :-1])
+        if axs is None:
+            ax0 = fig.add_subplot(gs[:, :-1])
+            ax3 = None
+        else:
+            ax0 = axs[0]
+            ax3 = axs[1]
         ax0.set_xlabel(x_label)
-        ax3 = None
 
     ax0.set_ylabel(y_label)
     ax0.set_xlim(w_min, w_max)
 
     # Plot a cutout
     if cutout is not None:
-        ax1 = fig.add_subplot(gs[:3, -1], projection=cutout_wcs)
-        ax2 = fig.add_subplot(gs[3:, -1])
+        if axs is None:
+            ax1 = fig.add_subplot(gs[:3, -1], projection=cutout_wcs)
+            ax2 = fig.add_subplot(gs[3:, -1])
+        else:
+            ax1 = axs[2]
+            ax2 = axs[3]
 
         ax1.axis('off')
         ax1.imshow(
@@ -845,15 +868,19 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                     transform=ax1.get_transform(e_frame)
                 )
 
-                scbar = ScaleBar(
-                    ax1,
-                    length=cutout.shape[1]/2
-                )
-                scbar.set_wcs(cutout_wcs)
-                scbar.update()
+        scbar = ScaleBar(
+            ax1,
+            length=cutout.shape[1]/2
+        )
+        scbar.set_wcs(cutout_wcs)
+        scbar.update()
     else:
-        ax1 = None
-        ax2 = fig.add_subplot(gs[:, -1])
+        if axs is None:
+            ax1 = None
+            ax2 = fig.add_subplot(gs[:, -1])
+        else:
+            ax1 = axs[2]
+            ax2 = axs[3]
 
     ax0.set_aspect('auto')
 
@@ -893,7 +920,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
     if redshift is not None:
         # Plotting absorption lines
         absorption_lines = get_lines(
-            line_type='A', wrange=wavelengths, z=lines_z
+            line_type='A', wrange=[w_min, w_max], z=lines_z
         )
         for line_lam, line_name, line_type in absorption_lines:
             ax0.axvline(
@@ -908,7 +935,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
 
         # Plotting emission lines
         emission_lines = get_lines(
-            line_type='E', wrange=wavelengths, z=lines_z
+            line_type='E', wrange=[w_min, w_max], z=lines_z
         )
         for line_lam, line_name, line_type in emission_lines:
             ax0.axvline(
@@ -924,7 +951,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
 
         # Plotting emission/absorption lines
         emission_lines = get_lines(
-            line_type='AE', wrange=wavelengths, z=lines_z
+            line_type='AE', wrange=[w_min, w_max], z=lines_z
         )
         for line_lam, line_name, line_type in emission_lines:
             ax0.axvline(
@@ -979,34 +1006,36 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                     zorder=12
                 )
 
-    handles, labels = ax0.get_legend_handles_labels()
-    newLabels, newHandles = [], []
-    for handle, label in zip(handles, labels):
-        if label not in newLabels:
-            newLabels.append(label)
-            newHandles.append(handle)
+    if show_legend:
+        handles, labels = ax0.get_legend_handles_labels()
+        newLabels, newHandles = [], []
+        for handle, label in zip(handles, labels):
+            if label not in newLabels:
+                newLabels.append(label)
+                newHandles.append(handle)
 
-    _ = ax0.legend(
-        newHandles, newLabels,
-        loc='upper center',
-        fancybox=True,
-        shadow=False,
-        bbox_to_anchor=(0.5, 1.15),
-        ncol=len(newHandles)
-    )
-
-    cell_text = [
-        [f'{key}', f"{val}"] for key, val in extra_info.items()
-    ]
-
-    ax2.axis("off")
-    if cell_text:
-        tbl = ax2.table(
-            cellText=cell_text,
-            colWidths=[0.4, 0.6],
-            loc='upper center'
+        _ = ax0.legend(
+            newHandles, newLabels,
+            loc='upper center',
+            fancybox=True,
+            shadow=False,
+            bbox_to_anchor=(0.5, 1.15),
+            ncol=len(newHandles)
         )
-        tbl.scale(1, 1.5)
+
+    if ax2 is not None:
+        cell_text = [
+            [f'{key}', f"{val}"] for key, val in extra_info.items()
+        ]
+
+        ax2.axis("off")
+        if cell_text:
+            tbl = ax2.table(
+                cellText=cell_text,
+                colWidths=[0.4, 0.6],
+                loc='upper center'
+            )
+            tbl.scale(1, 1.5)
 
     return fig, [ax0, ax1, ax2, ax3]
 
