@@ -419,6 +419,13 @@ def __plot_slice_argshandler(options=None):
     )
 
     parser.add_argument(
+        '--cube-vlim', metavar='VMIN,VMAX', type=str, default=None,
+        help='Set the minimum and maximum values for the colormap of the '
+        'cube animated cutout. If not specified, then vmin and vmax are '
+        'computed automatically by matplotlib backend.'
+    )
+
+    parser.add_argument(
         '--cutout', metavar='SOURCE_IMAGE', type=str, default=None,
         help='path of a FITS image (RGB or grayscale) used to make cutouts '
         'that will be included in the plots. The size of the cutout can be '
@@ -518,6 +525,14 @@ def plot_cube_slice_animation(options=None):
     n_spectra = len(args.spectra)
 
     cutout_size = apu.Quantity(args.cutout_size)
+
+    if args.cube_vlim is not None:
+        cube_vlim = [float(x) for x in args.cube_vlim.split(',')]
+        cube_vmin = np.min(cube_vlim)
+        cube_vmax = np.max(cube_vlim)
+    else:
+        cube_vmin = None
+        cube_vmax = None
 
     if args.cutout is not None:
         try:
@@ -758,6 +773,8 @@ def plot_cube_slice_animation(options=None):
             cmap=args.cmap,
             origin='lower',
             aspect='equal',
+            vmin=cube_vmin,
+            vmax=cube_vmax
         )
 
         if big_image:
