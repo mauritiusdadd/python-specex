@@ -37,12 +37,13 @@ from pkgutil import extend_path
 from . import specex
 from . import utils
 from . import plot
+
 try:
     from . import rrspecex
 except Exception:
     HAS_RR = False
 else:
-    HAS_RR = True
+    HAS_RR = rrspecex.HAS_REDROCK
 
 __version__ = importlib.metadata.version("specex")
 __path__ = extend_path(__path__, __name__)

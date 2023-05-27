@@ -605,8 +605,9 @@ def get_cube_cutout(data: np.ndarray,
     report_callback : Callable or None, optional
         A callable that will be execute every time the cutout of a single
         slice of the cube is computed. Must accept in input two arguments:
-            - the number of slice processed so far
-            - the total number of slices.
+
+          * the number of slice processed so far
+          * the total number of slices.
 
     Returns
     -------
@@ -979,8 +980,9 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
     report_callback : Callable or None, optional
         A callable that will be execute every time the cutout of a single
         slice of the cube is computed. Must accept in input two arguments:
-            - the number of slice processed so far
-            - the total number of slices.
+
+          * the number of slice processed so far
+          * the total number of slices.
 
     Raises
     ------

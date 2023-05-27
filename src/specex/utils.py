@@ -10,6 +10,8 @@ Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import os
 import sys
 import tarfile
+import platform
+import subprocess
 from typing import Optional
 from urllib import request
 
@@ -179,6 +181,28 @@ class ScaleBar:
 
         self.text_handler.set_text(f"{sep:.2f}")
         self.update()
+
+
+def find_prog(prog):
+    """
+    Find the path of a pregram in your PATH.
+
+    Parameters
+    ----------
+    prog : str
+        Name of the program.
+
+    Returns
+    -------
+    str
+        The path of the program.
+
+    """
+    cmd = "where" if platform.system() == "Windows" else "which"
+    try:
+        return subprocess.check_output([cmd, prog]).strip().decode()
+    except subprocess.CalledProcessError:
+        return None
 
 
 def get_pbar(partial, total=None, wid=32, common_char='\u2588',
@@ -1394,10 +1418,11 @@ def rotate_data(data: np.ndarray, angle: apu.Quantity,
     -------
     dict
         A dictionary with the the following keys and values.
-        'data' : numpy.ndarray
-            the rotated data
-        'wcs' : astropy.wcs.WCS or None
-            the updated WCS for the rotated data
+
+        * 'data' : numpy.ndarray
+            The rotated data
+        * 'wcs' : astropy.wcs.WCS or None
+            The updated WCS for the rotated data
     """
     if data_wcs is not None:
         # ndimage shape is [height, width] and element [0, 0] has

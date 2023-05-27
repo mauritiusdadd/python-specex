@@ -12,8 +12,8 @@ import sys
 import argparse
 import json
 import tempfile
+import subprocess
 
-import imageio
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -27,8 +27,19 @@ from astropy.table import Table, MaskedColumn
 from astropy.coordinates import SkyCoord
 from astropy.nddata import Cutout2D
 
-from .utils import plot_spectrum, get_pbar, load_rgb_fits
+from .utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
 from .cube import get_hdu, get_rgb_cutout, get_gray_cutout
+
+try:
+    import imageio
+except ModuleNotFoundError:
+    HAS_IMAGEIO = False
+else:
+    HAS_IMAGEIO = True
+
+FFMPEG_EXC = find_prog('ffmpeg')
+if FFMPEG_EXC is None:
+    FFMPEG_EXC = find_prog('ffmpeg.exe')
 
 
 def __plot_spectra_argshandler(options=None):
@@ -399,6 +410,8 @@ def __plot_slice_argshandler(options=None):
         A Namespace containing the parsed arguments. For more information see
         the python documentation of the argparse module.
     """
+    global FFMPEG_EXC
+
     parser = argparse.ArgumentParser(
         description='Plot spectra extracted with specex.'
     )
@@ -474,6 +487,31 @@ def __plot_slice_argshandler(options=None):
     )
 
     parser.add_argument(
+        '--out-fps', metavar='FPS', type=int, default=5,
+        help='Set the output framerate to %(metaver)s. The default value is '
+        '%(metavar)s=%(default)s'
+    )
+
+    parser.add_argument(
+        '--out-loop', metavar='LOOP_COUNT', type=int, default=0,
+        help='Set the number of times the animation is played. If '
+        '%(metavar)s=0 then the animation loops indefinitely. The default '
+        'value is %(metavar)s=%(default)s.'
+    )
+
+    parser.add_argument(
+        '--ffmpeg-exec', metavar='FFMPEG_PATH', type=str, default=FFMPEG_EXC,
+        help='Set the path of the FFMPEG executable. If not specified the '
+        'ffmepg executable is searched automatically in your system PATH. '
+    )
+
+    parser.add_argument(
+        '--ffmpeg', action='store_true', default=False,
+        help='Force the use the FFMPEG backend instead of imageio, useful if '
+        'you want to generate a video instead of a GIF.'
+    )
+
+    parser.add_argument(
         'datacube', metavar='DATA_CUBE', type=str, help='The datacube used '
         'to extract the spectra.'
     )
@@ -520,11 +558,32 @@ def plot_cube_slice_animation(options=None):
     None.
 
     """
+    global HAS_IMAGEIO
+    global FFMPEG_EXC
+
+    if not HAS_IMAGEIO:
+        if FFMPEG_EXC is None:
+            print(
+                "\nERROR: ffmpeg not found and imageio not installed!\n\n"
+                "This program requires either the python package imageio (the "
+                "preferred option) or a working version of FFMPEG. "
+                "If you already have FFMPEG try to manually set the executable "
+                "path with the --ffmpeg-exec option\n"
+            )
+            sys.exit(1)
+
     args = __plot_slice_argshandler(options)
 
     n_spectra = len(args.spectra)
 
     cutout_size = apu.Quantity(args.cutout_size)
+
+    out_fps = abs(args.out_fps)
+    out_loop = abs(args.out_loop)
+    ffmpeg_exec = args.ffmpeg_exec
+
+    if args.ffmpeg:
+        HAS_IMAGEIO = False
 
     if args.cube_vlim is not None:
         cube_vlim = [float(x) for x in args.cube_vlim.split(',')]
@@ -825,42 +884,69 @@ def plot_cube_slice_animation(options=None):
         axs.append(row_axs)
 
     bkg = fig.canvas.copy_from_bbox(fig.bbox)
-    with imageio.get_writer(args.outname, mode='I') as writer:
-        with tempfile.TemporaryDirectory() as tempdir:
-            for j, wav in enumerate(play_wav_ang):
-                progress = (j + 1) / len(play_wav_ang)
-                sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-                sys.stdout.flush()
 
-                fig.canvas.restore_region(bkg)
-                for k, (row_axs, spc) in enumerate(zip(axs, spectra_list)):
-                    row_axs['spec_cursor'].set_xdata([wav, wav])
-                    row_axs['var_cursor'].set_xdata([wav, wav])
+    if HAS_IMAGEIO:
+        writer = imageio.get_writer(
+            args.outname,
+            mode='I',
+            loop=out_loop,
+            duration=1 / out_fps
+        )
 
-                    current_cutout = Cutout2D(
-                        data=reduced_cube[j],
-                        position=spc[5],
-                        size=cutout_size,
-                        wcs=cube_wcs.celestial
+    with tempfile.TemporaryDirectory() as tempdir:
+        figname = os.path.join(tempdir, 'frame_%06d.png')
+        for j, wav in enumerate(play_wav_ang):
+            progress = (j + 1) / len(play_wav_ang)
+            sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
+            sys.stdout.flush()
+
+            fig.canvas.restore_region(bkg)
+            for k, (row_axs, spc) in enumerate(zip(axs, spectra_list)):
+                row_axs['spec_cursor'].set_xdata([wav, wav])
+                row_axs['var_cursor'].set_xdata([wav, wav])
+
+                current_cutout = Cutout2D(
+                    data=reduced_cube[j],
+                    position=spc[5],
+                    size=cutout_size,
+                    wcs=cube_wcs.celestial
+                )
+
+                if args.cube_smoothing:
+                    current_cutout_data = gaussian_filter(
+                        current_cutout.data,
+                        args.cube_smoothing,
+                        mode='constant'
                     )
+                else:
+                    current_cutout_data = current_cutout.data
 
-                    if args.cube_smoothing:
-                        current_cutout_data = gaussian_filter(
-                            current_cutout.data,
-                            args.cube_smoothing,
-                            mode='constant'
-                        )
-                    else:
-                        current_cutout_data = current_cutout.data
+                row_axs['cube_img'].set_data(current_cutout_data)
 
-                    row_axs['cube_img'].set_data(current_cutout_data)
+            fig.canvas.blit(fig.bbox)
+            fig.canvas.flush_events()
+            fig.savefig(
+                figname % j,
+                bbox_inches='tight',
+                dpi=args.out_dpi
+            )
+            if HAS_IMAGEIO:
+                writer.append_data(imageio.v3.imread(figname % j))
 
-                fig.canvas.blit(fig.bbox)
-                fig.canvas.flush_events()
-                figname = os.path.join(tempdir, f'{j:06d}.png')
-                fig.savefig(figname, bbox_inches='tight', dpi=args.out_dpi)
-
-                image = imageio.v3.imread(figname)
-                writer.append_data(image)
+        if HAS_IMAGEIO:
+            writer.close()
+        else:
+            print("Encoding with FFMPEG...")
+            ffmpeg_cmd = [
+                ffmpeg_exec, '-y', '-i', figname,
+                '-framerate', str(out_fps),
+                '-loop', str(out_loop),
+                args.outname
+            ]
+            result = subprocess.run(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE
+            )
+            print(result)
     plt.close(fig)
 

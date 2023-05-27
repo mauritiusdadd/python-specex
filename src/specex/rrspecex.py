@@ -25,13 +25,20 @@ from astropy.table import Table, join
 import astropy.wcs as wcs
 import matplotlib.pyplot as plt
 
-from redrock.utils import elapsed, get_mp
-from redrock.targets import Spectrum, Target, DistTargetsCopy
-from redrock.templates import load_dist_templates, find_templates, Template
-from redrock.results import write_zscan
-from redrock.zfind import zfind
-from redrock._version import __version__
-from redrock.archetypes import All_archetypes
+try:
+    import redrock
+except (ModuleNotFoundError, Exception):
+    HAS_REDROCK = False
+else:
+    HAS_REDROCK = True
+
+    from redrock.utils import elapsed, get_mp
+    from redrock.targets import Spectrum, Target, DistTargetsCopy
+    from redrock.templates import load_dist_templates, find_templates, Template
+    from redrock.results import write_zscan
+    from redrock.zfind import zfind
+    from redrock._version import __version__
+    from redrock.archetypes import All_archetypes
 
 from .utils import plot_zfit_check, get_mask_intervals, plot_scandata
 
@@ -436,6 +443,8 @@ def rrspecex(options=None, comm=None):
         A dictionary containing the redshift scanning information for each
         target
     """
+    global HAS_REDROCK
+
     global_start = elapsed(None, "", comm=comm)
     comm_size = 1
     comm_rank = 0

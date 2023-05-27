@@ -4,20 +4,14 @@
    contain the root `toctree` directive.
 
 Welcome to python-specex's documentation!
-=======================================
+=========================================
 
 .. automodule:: specex
    :members:
 
 .. toctree::
-   specex
-   rrspecex
-   plot
-   cube
-   lines
-   stack
-   utils
-   zeropoints
+   tutorials
+   docs
    :maxdepth: 2
    :caption: Contents:
 
