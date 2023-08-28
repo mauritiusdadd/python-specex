@@ -534,7 +534,9 @@ def rrspecex(options=None, comm=None):
             dwave,
             templates=args.templates,
             comm=comm,
-            mp_procs=mpprocs
+            mp_procs=mpprocs,
+            # use_gpu=True,
+            # gpu_mode=True
         )
 
         # Compute the redshifts, including both the coarse scan and the

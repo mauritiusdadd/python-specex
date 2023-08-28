@@ -905,6 +905,91 @@ def correlate_spaxel(cube_data: np.ndarray,
         return res / (np.nansum(x**2, axis=0) * np.nansum(y**2))
 
 
+def get_continuum_subtracted_slice(
+        data: np.ndarray,
+        line_wave: Union[int, units.Quantity],
+        line_window: Union[int, units.Quantity] = 10 * units.angstrom,
+        continuum_window: Union[int, units.Quantity] = 10 * units.angstrom,
+        variance: Optional[np.ndarray] = None,
+        data_mask: Optional[np.ndarray] = None,
+        cube_wcs: WCS = None
+) -> np.ndarray:
+    """
+    Get a continuum subtracted image from a spectral datacube.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        DESCRIPTION.
+    line_wave : Union[int, units.Quantity]
+        DESCRIPTION.
+    line_window : Union[int, units.Quantity], optional
+        DESCRIPTION. The default is 10 * units.angstrom.
+    continuum_window : Union[int, units.Quantity], optional
+        DESCRIPTION. The default is 10 * units.angstrom.
+    variance : Optional[np.ndarray], optional
+        DESCRIPTION. The default is None.
+    data_mask : Optional[np.ndarray], optional
+        DESCRIPTION. The default is None.
+    cube_wcs : WCS, optional
+        DESCRIPTION. The default is None.
+
+    Returns
+    -------
+    None.
+
+    """
+    param_is_dimensional = [
+        isinstance(x, units.Quantity)
+        for x in (line_wave, line_window, continuum_window)
+    ]
+
+    if any(param_is_dimensional):
+        if not all(param_is_dimensional):
+            raise ValueError(
+                "central_wave, line_window and continuum_window must be all "
+                "integer indices or all dimensional quantities."
+            )
+        elif cube_wcs is None:
+            raise ValueError(
+                "A valid WCS object must be provided when central_wave, "
+                "line_window and continuum_window are dimensional quantities."
+            )
+        line_wave_pix = cube_wcs.spectral.world_to_pixel(line_window)
+
+        line_window_pix_low = cube_wcs.spectral.world_to_pixel(
+            line_wave - line_window
+        )
+
+        line_window_pix_high = cube_wcs.spectral.world_to_pixel(
+            line_wave + line_window
+        )
+
+    else:
+        line_wave_pix = line_window
+        line_window_pix_low = int(line_wave_pix - line_window)
+        line_window_pix_high = int(line_wave_pix + line_window)
+
+        continuum_window_pix_low = int(
+            line_window_pix_low - continuum_window/2
+        )
+        continuum_window_pix_high = int(
+            line_window_pix_high + continuum_window/2
+        )
+
+        cx_low = (continuum_window_pix_low + line_window_pix_low) / 2
+        cy_high = data[
+            continuum_window_pix_low:line_window_pix_low, ...
+        ].mean()
+
+        cx_high = (line_window_pix_low + continuum_window_pix_high) / 2
+        cy_high = data[
+            continuum_window_pix_low:line_window_pix_low, ...
+        ].mean()
+
+
+    line_slice = data[line_window_pix_low:line_window_pix_high, ...]
+
 def self_correlate(data: np.ndarray,
                    data_mask: Optional[np.ndarray] = None,
                    similarity_sigma_threshold: Optional[float] = 5,
@@ -918,7 +1003,7 @@ def self_correlate(data: np.ndarray,
     hei, wid = data.shape[1:]
 
     sim_table = np.zeros((hei, wid))
-    # Dor each spaxel in the cube
+    # For each spaxel in the cube
     block_id = 0
     for h in np.arange(hei, step=block_size):
         for k in np.arange(wid, step=block_size):

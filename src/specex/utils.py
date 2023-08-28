@@ -29,6 +29,7 @@ from astropy.visualization import ZScaleInterval
 from astropy import wcs as apwcs
 from astropy import units as apu
 from astropy import coordinates
+from astropy import constants
 
 from .lines import get_lines
 
@@ -501,6 +502,101 @@ def load_rgb_fits(fits_file, ext_r=1, ext_g=2, ext_b=3):
     rgb_wcs = apwcs.WCS(fits.getheader(fits_file, ext=1))
 
     return {'data': rgb_image, 'wcs': rgb_wcs, 'type': 'rgb'}
+
+
+def log_rebin(wave, spec_list, oversample=1, flux_conserving=False):
+    """
+    Logarithmically rebin a spectrum conserving the flux.
+
+    Parameters
+    ----------
+    wave : list or numpy.ndarray
+        The wavelenghts of the originaò dispersion grating.
+    spec_list : list
+        A list of numpy.ndarrays corrsponding toe the fulx or other quantities
+        to be rebinned with the dispersion grating.
+    oversample : int, optional
+        Whether to oversample the new dispersion grating. The default is 1.
+    flux_conserving : bool, optional
+        If False conserve the flux density instead of the flux.
+        The default is False.
+
+    Raises
+    ------
+    ValueError
+        If wave is not monotonically increasing or if it does not have the
+        same dimension of the fluxes.
+
+    Returns
+    -------
+    rebinned_spec_list : list
+        A list containing the rebinned input fluxes.
+    log_wave : numpy.ndarray
+        The log-reminned disperions grating.
+    velscale : float
+        The velocity scale of the new dispersion grating.
+
+    """
+    wave = np.asarray(wave, dtype=float)
+    spec_list = [
+        np.asarray(x, dtype=float) for x in spec_list
+    ]
+
+    if np.any(np.diff(wave) <= 0):
+        raise ValueError("'wave' must be monotonically increasing")
+
+    if (
+            (len(wave.shape) != 1) or
+            np.any([wave.shape[0] != x.shape[0] for x in spec_list])
+    ):
+        raise ValueError(
+            "'wave' must be an array with the same lenght of the input spectra"
+        )
+
+    if wave.shape[0] == 2:
+        dlam = np.diff(wave) / (wave.shape[0] - 1)
+        lim = wave + [-0.5, 0.5]*dlam
+        borders = np.linspace(*lim, wave.shape[0] + 1)
+    else:
+        lim = 1.5*wave[[0, -1]] - 0.5*wave[[1, -2]]
+        borders = np.hstack([lim[0], (wave[1:] + wave[:-1])/2, wave[1]])
+        dlam = np.diff(borders)
+
+    ln_lim = np.log(lim)
+    c_km_h = constants.c.to(apu.km / apu.h).value
+
+    m = int(wave.shape[0] * oversample)
+    velscale = c_km_h * np.diff(ln_lim) / m
+    velscale = velscale.item()
+
+    new_borders = np.exp(ln_lim[0] + velscale / c_km_h * np.arange(m + 1))
+
+    if wave.shape[0] == 2:
+        k = ((new_borders - lim[0])/dlam)
+        k = k.clip(0, wave.shape[0] - 1).astype(int)
+    else:
+        k = (np.searchsorted(borders, new_borders) - 1)
+        k = k.clip(0, wave.shape[0] - 1).astype(int)
+
+    # Do analytic integral of step function
+    rebinned_spec_list = []
+    for spec in spec_list:
+        spec_rebin = np.add.reduceat((spec.T*dlam).T, k)[:-1]
+        # fix for design flaw of reduceat()
+        spec_rebin.T[...] *= np.diff(k) > 0
+        # Add to 1st dimension
+        spec_rebin.T[...] += np.diff(((new_borders - borders[k])) * spec[k].T)
+
+        if not flux_conserving:
+            # Divide 1st dimension
+            spec_rebin.T[...] /= np.diff(new_borders)
+
+        rebinned_spec_list.append(spec_rebin)
+
+    # Output np.log(wavelength): natural log of geometric mean
+    ln_lam = 0.5*np.log(new_borders[1:]*new_borders[:-1])
+
+    return rebinned_spec_list, ln_lam, velscale
 
 
 def plot_scandata(target, scandata):
