@@ -11,7 +11,7 @@ from __future__ import absolute_import, division, print_function
 
 import unittest
 
-from specex.plot import plot
+from specex.plot import plot_spectra
 
 from test import make_synt_specs
 
@@ -27,7 +27,7 @@ class TestSpexplot(unittest.TestCase):
             *spec_files
         ]
 
-        plot(options=plot_options)
+        plot_spectra(options=plot_options)
 
 
 if __name__ == '__main__':

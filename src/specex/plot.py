@@ -546,7 +546,7 @@ def __plot_slice_argshandler(options=None):
 
 def plot_cube_slice_animation(options=None):
     """
-    Plots animanted gif of the extracted sources.
+    Plot animanted gif of the extracted sources.
 
     Parameters
     ----------
@@ -567,8 +567,8 @@ def plot_cube_slice_animation(options=None):
                 "\nERROR: ffmpeg not found and imageio not installed!\n\n"
                 "This program requires either the python package imageio (the "
                 "preferred option) or a working version of FFMPEG. "
-                "If you already have FFMPEG try to manually set the executable "
-                "path with the --ffmpeg-exec option\n"
+                "If you already have FFMPEG try to manually set the executable"
+                " path with the --ffmpeg-exec option\n"
             )
             sys.exit(1)
 
@@ -949,4 +949,3 @@ def plot_cube_slice_animation(options=None):
             )
             print(result)
     plt.close(fig)
-
