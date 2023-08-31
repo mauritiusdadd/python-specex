@@ -14,8 +14,8 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 import traceback
-
 import argparse
+from glob import glob
 
 import numpy as np
 from scipy import sparse
@@ -507,7 +507,14 @@ def rrspecex(options=None, comm=None):
         # that could be changed to work like the DESI write_zbest() function.
         # Each target contains metadata which is propagated to the output zbest
         # table though.
-        targets, meta = read_spectra(args.spectra)
+
+        # Windows prompt does not expand globs, so let's do it
+        spectra_list = []
+        for globbed_fname in args.spectra:
+            for fname in glob(globbed_fname):
+                spectra_list.append(fname)
+
+        targets, meta = read_spectra(spectra_list)
 
         _ = elapsed(
             start, "Read of {} targets".format(len(targets)), comm=comm
@@ -556,6 +563,13 @@ def rrspecex(options=None, comm=None):
 
         _ = elapsed(start, "Computing redshifts took", comm=comm)
 
+        # Write the outputs
+        if args.output is not None:
+            start = elapsed(None, "", comm=comm)
+            if comm_rank == 0:
+                write_zscan(args.output, scandata, zfit, clobber=True)
+            _ = elapsed(start, "Writing zscan data took", comm=comm)
+
         # Change to upper case like DESI
         for colname in zfit.colnames:
             if colname.islower():
@@ -587,13 +601,6 @@ def rrspecex(options=None, comm=None):
                         fig, axs = plot_scandata(target, scandata)
                         fig.savefig(figname, dpi=150)
                         plt.close(fig)
-
-        # Write the outputs
-        if args.output is not None:
-            start = elapsed(None, "", comm=comm)
-            if comm_rank == 0:
-                write_zscan(args.output, scandata, zfit, clobber=True)
-            _ = elapsed(start, "Writing zscan data took", comm=comm)
 
         zbest = None
         if comm_rank == 0:
