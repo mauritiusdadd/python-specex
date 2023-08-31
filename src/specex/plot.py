@@ -14,6 +14,8 @@ import json
 import tempfile
 import subprocess
 
+from glob import glob
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -191,7 +193,13 @@ def plot_spectra(options=None):
     else:
         big_image = None
 
-    for j, spectrum_fits_file in enumerate(args.spectra):
+    # Windows prompt does not expand globs, so let's do it
+    spectra_list = []
+    for globbed_fname in args.spectra:
+        for fname in glob(globbed_fname):
+            spectra_list.append(fname)
+
+    for j, spectrum_fits_file in enumerate(spectra_list):
         progress = j / len(args.spectra)
         sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
         sys.stdout.flush()
