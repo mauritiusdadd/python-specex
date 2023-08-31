@@ -200,7 +200,7 @@ def plot_spectra(options=None):
             spectra_list.append(fname)
 
     for j, spectrum_fits_file in enumerate(spectra_list):
-        progress = j / len(args.spectra)
+        progress = j / len(spectra_list)
         sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
         sys.stdout.flush()
 
