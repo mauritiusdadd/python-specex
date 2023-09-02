@@ -1208,7 +1208,6 @@ def plot_zfit_check(target, zbest, plot_template=None, restframe=False,
     }
 
     lam = target.spectra[0].wave.copy()
-    print(np.min(lam))
 
     fig, axs = plot_spectrum(
         lam,

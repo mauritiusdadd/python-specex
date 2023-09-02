@@ -770,9 +770,14 @@ def rrspecex(options=None, comm=None):
         if args.debug:
             import IPython
             IPython.embed()
-    else:
-        return targets, zbest, scandata
+
+    return targets, zbest, scandata
+
+
+def main():
+    """Run rrspecex."""
+    _ = rrspecex()
 
 
 if __name__ == '__main__':
-    _ = rrspecex()
+    _ = main()

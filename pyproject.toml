@@ -49,7 +49,7 @@ repository = "https://github.com/mauritiusdadd/python-specex"
 
 [project.scripts]
 specex = "specex.specex:specex"
-rrspecex = "specex.rrspecex:rrspecex"
+rrspecex = "specex.rrspecex:main"
 specex-zeropointinfo = "specex.zeropoints:main"
 specex-cubestack = "specex.stack:cube_stack"
 specex-cutout = "specex.cube:cutout_main"
