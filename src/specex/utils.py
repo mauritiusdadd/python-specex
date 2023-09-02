@@ -1160,7 +1160,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
     return fig, [ax0, ax1, ax2, ax3]
 
 
-def plot_zfit_check(target, zbest, plot_template=None, restframe=True,
+def plot_zfit_check(target, zbest, plot_template=None, restframe=False,
                     wavelengt_units='Angstrom', flux_units=''):
     """
     Plot the check images for the fitted targets.
@@ -1207,10 +1207,12 @@ def plot_zfit_check(target, zbest, plot_template=None, restframe=True,
         'ZWARN': f"{t_best_data['ZWARN']}"
     }
 
+    lam = target.spectra[0].wave.copy()
+    print(np.min(lam))
+
     fig, axs = plot_spectrum(
-        target.spectra[0].wave,
+        lam,
         target.spectra[0].flux,
-        nan_mask=target.lam_mask,
         cutout=None,
         redshift=t_best_data['Z'],
         restframe=restframe,
@@ -1234,12 +1236,12 @@ def plot_zfit_check(target, zbest, plot_template=None, restframe=True,
                 coeffs = t_best_data['COEFF'][:best_template.nbasis]
                 template_flux = best_template.eval(
                     coeffs,
-                    target.spectra[0].wave,
+                    lam,
                     0 if restframe else t_best_data['Z'],
                 )
 
                 axs[0].plot(
-                    target.spectra[0].wave, template_flux,
+                    lam, template_flux,
                     ls='-',
                     lw=1,
                     alpha=0.7,

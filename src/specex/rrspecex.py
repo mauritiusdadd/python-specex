@@ -25,6 +25,8 @@ from astropy.table import Table, join
 import astropy.wcs as wcs
 import matplotlib.pyplot as plt
 
+from scipy.signal import savgol_filter
+
 try:
     import redrock
 except (ModuleNotFoundError, Exception):
@@ -40,7 +42,12 @@ else:
     from redrock._version import __version__
     from redrock.archetypes import All_archetypes
 
-from .utils import plot_zfit_check, get_mask_intervals, plot_scandata
+from .utils import (
+    plot_zfit_check, get_mask_intervals, plot_scandata, get_pbar
+)
+
+
+MUSE_RESOLUTION_ANG = 2.51
 
 
 def get_templates(template_types=[], filepath=False, templates=None):
@@ -132,7 +139,8 @@ def write_zbest(outfile, zbest, template_version, archetype_version):
     return
 
 
-def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
+def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None,
+                 memmap=True, resolution=2.51, smoothing=0, quite=False):
     """
     Read input spectra fits files.
 
@@ -151,11 +159,22 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         of the HDU. If this operation fails ValueError exception is raised.
         The default value is None.
     wd_hdu : int or None, optional
-        The index of the HDU that contains the wavelength.
+        The index of the HDU that contains the wavelength dispersion in pixels.
         If it is None, then the index is determined automatically by the name
         of the HDU. If this operation fails, no wavelenght dispersion will be
         used and the spectra will be considered having a uniform resolution.
         The default value is None.
+    memmap : bool, optional
+        Whether to use memmap or not. The default value is False.
+    resolution : float, optional
+        A fixed spectral resolution in Angrstrom to be used if no dispersion
+        information is available from the spectrum file itself. The default
+        value is 2.51 (the MUSE resolution).
+    smoothing : int, optional
+        A smooting to be applyed before redshift estimation.
+        A value of 0 means no smoothing. The default value is 0.
+    quite : bool, optional
+        Reduce the verbosity of the output.
 
     Raises
     ------
@@ -173,12 +192,22 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     """
     targets = []
     targetids = []
+    target_file_names = []
     specids = []
     sn_vals = []
     sn_var_vals = []
     sn_em_vals = []
+
+    # crop to templates limits
+    lmin = 3500.
+    lmax = 10000.
+
     for j, fits_file in enumerate(spectra_fits_list):
-        hdul = fits.open(fits_file)
+        if not quite:
+            progress = (j + 1) / len(spectra_fits_list)
+            sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
+            sys.stderr.flush()
+        hdul = fits.open(fits_file, memmap=memmap)
 
         valid_id_keys = [
             f"{i}{j}"
@@ -187,6 +216,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         ]
 
         target_id = f"{j:09}"
+        target_file_names.append(fits_file)
         spec_id = target_id
         for hdu in hdul:
             for key in valid_id_keys:
@@ -201,7 +231,11 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
             for hdu in hdul:
                 if hdu.name.lower() in ['spec', 'spectrum', 'data']:
                     flux = hdu.data
-                    spec_wcs = wcs.WCS(hdu.header)
+                    if smoothing > 0:
+                        window_size = 4*smoothing + 1
+                        flux = savgol_filter(flux, window_size, 3)
+                    spec_header = hdu.header
+                    spec_wcs = wcs.WCS(spec_header)
                     break
             else:
                 raise ValueError(
@@ -224,7 +258,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
                 if hdu.name.lower() in ['var', 'variance', 'stat']:
                     ivar = 1 / hdu.data
                     break
-                elif hdu.name.lower in ['ivar', 'ivariance']:
+                elif hdu.name.lower() in ['ivar', 'ivariance']:
                     ivar = hdu.data
                     break
             else:
@@ -257,8 +291,15 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
 
         # NOTE: Wavelenghts must be in Angstrom units
         pixel = np.arange(len(flux))
-        lam = spec_wcs.pixel_to_world(pixel).Angstrom
-
+        if spec_wcs.has_spectral:
+            lam = spec_wcs.pixel_to_world(pixel).Angstrom
+        else:
+            try:
+                coeff0 = spec_header["COEFF0"]
+                coeff1 = spec_header["COEFF1"]
+            except KeyError:
+                continue
+            lam = 10**(coeff0 + coeff1*pixel)
         flux = flux.astype('float32')
 
         if nanmask is None:
@@ -266,22 +307,52 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         else:
             flux_not_nan_mask = ~nanmask
 
-        lam_mask = np.array([
-            (lam[m_start], lam[m_end])
-            for m_start, m_end in get_mask_intervals(~flux_not_nan_mask)
-        ])
-
         flux = flux[flux_not_nan_mask]
         ivar = ivar[flux_not_nan_mask]
         lam = lam[flux_not_nan_mask]
         if wd is not None:
             wd = wd[flux_not_nan_mask]
+        else:
+            # If now wavelenght dispersion information is present, then
+            # compute it using the wavelenght
+            delta_lambda = np.ones_like(lam)
+            delta_lambda[1:] = (lam[1:] - lam[:-1])
+            wd = resolution / delta_lambda
+            wd[0] = wd[1]
+        wd[wd < 1e-3] = 2.
 
-        # If now wavelenght dispersion information is present, then fallback
-        # to a uniform resolution model (i.e. an identiry matrix)
-        if wd is None:
-            R = np.eye(lam.shape[0])
-            R = sparse.dia_matrix(R)
+        imin = abs(lam-lmin).argmin()
+        imax = abs(lam-lmax).argmin()
+
+        lam = lam[imin:imax]
+        flux = flux[imin:imax]
+        ivar = ivar[imin:imax]
+        wd = wd[imin:imax]
+
+        ndiag = int(4*np.ceil(wd.max())+1)
+        nbins = wd.shape[0]
+
+        ii = np.arange(lam.shape[0])
+        di = ii-ii[:, None]
+        di2 = di**2
+
+        # build resolution from wdisp
+        reso = np.zeros([ndiag, nbins])
+
+        for idiag in range(ndiag):
+            offset = ndiag//2-idiag
+            d = np.diagonal(di2, offset=offset)
+            if offset < 0:
+                reso[idiag, :len(d)] = np.exp(-d/2/wd[:len(d)]**2)
+            else:
+                reso[idiag, nbins-len(d):nbins] = np.exp(
+                    -d/2/wd[nbins-len(d):nbins]**2
+                )
+
+        reso /= np.sum(reso, axis=0)
+        offsets = ndiag//2 - np.arange(ndiag)
+        nwave = reso.shape[1]
+        R = sparse.dia_matrix((reso, offsets), (nwave, nwave))
 
         try:
             s_n = main_header['SN']
@@ -301,7 +372,6 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
         rrspec = Spectrum(lam, flux, ivar, R, None)
         target = Target(target_id, [rrspec])
         target.input_file = fits_file
-        target.lam_mask = flux_not_nan_mask
         target.spec_id = spec_id
         targets.append(target)
         targetids.append(target_id)
@@ -313,9 +383,13 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None):
     metatable = Table()
     metatable['TARGETID'] = targetids
     metatable['SPECID'] = specids
+    metatable['FILE'] = target_file_names
     metatable['SN'] = sn_vals
     metatable['SN_VAR'] = sn_var_vals
     metatable['SN_EMISS'] = sn_em_vals
+
+    if not quite:
+        print("", file=sys.stderr)
 
     return targets, metatable
 
@@ -408,6 +482,26 @@ def __argshandler(options=None):
         "--quite", action='store_true', default=False,
         help="Reduce program output at bare minimum. Do not print fitting "
         "result,"
+    )
+
+    parser.add_argument(
+        "--no-memmap", action='store_true', default=False,
+        help='Disable memmapping to speed the computation at a cost of an '
+        'increased memory usage.'
+    )
+
+    parser.add_argument(
+        "--resolution", type=float, default=2.51, help="A fixed resolution of "
+        "the spectrograph to be used if no resolution curve is present in the "
+        "input spectrum itself."
+    )
+
+    parser.add_argument(
+        '--smoothing', metavar='WINDOW_SIZE', type=int,  default=0,
+        help='If %(metavar)s >= 0, then the spectrua are smoothed before the '
+        'redshift estimation procedure is run.  %(metavar)s = 0 means that '
+        'no smoothing is applyed. If not specified, the default '
+        '%(metavar)s = %(default)s is used.'
     )
 
     args = None
@@ -514,7 +608,18 @@ def rrspecex(options=None, comm=None):
             for fname in glob(globbed_fname):
                 spectra_list.append(fname)
 
-        targets, meta = read_spectra(spectra_list)
+        targets, meta = read_spectra(
+            spectra_list,
+            memmap=not args.no_memmap,
+            resolution=args.resolution,
+            smoothing=args.smoothing,
+            quite=args.quite
+        )
+
+        if len(targets) == 0:
+            raise ValueError("No spectra were loaded!")
+        else:
+            print(f"Loaded {len(targets)} spectra")
 
         _ = elapsed(
             start, "Read of {} targets".format(len(targets)), comm=comm
@@ -536,7 +641,6 @@ def rrspecex(options=None, comm=None):
         )
 
         # Read the template data
-
         dtemplates = load_dist_templates(
             dwave,
             templates=args.templates,
@@ -550,7 +654,6 @@ def rrspecex(options=None, comm=None):
         # refinement.  This function only returns data on the rank 0 process.
 
         start = elapsed(None, "", comm=comm)
-
         scandata, zfit = zfind(
             dtargets,
             dtemplates,
@@ -575,67 +678,75 @@ def rrspecex(options=None, comm=None):
             if colname.islower():
                 zfit.rename_column(colname, colname.upper())
 
-        zfit = join(zfit, meta, keys=['TARGETID'], join_type='left')
-        zfit.remove_column('TARGETID')
+        matched_zfit = join(zfit, meta, keys=['TARGETID'], join_type='left')
 
-        if args.plot_zfit:
-            if comm_rank == 0:
+        zbest = None
+        if comm_rank == 0:
+            zbest = matched_zfit[matched_zfit['ZNUM'] == 0]
+            zbest.add_index('TARGETID')
+
+            if args.plot_zfit:
+
+                if not os.path.isdir(args.checkimg_outdir):
+                    os.makedirs(args.checkimg_outdir)
+
                 available_templates = get_templates(
                     templates=args.templates
                 )
                 for target in targets:
+                    orig_file_name = os.path.basename(
+                        zbest.loc[target.id]['FILE']
+                    )
+
                     fig, ax = plot_zfit_check(
                         target,
-                        zfit,
+                        zbest,
                         plot_template=available_templates
                     )
-                    figname = f'rrspecex_{target.id}.png'
+                    figname = f'rrspecex_{orig_file_name}.png'
                     if args.checkimg_outdir is not None:
                         figname = os.path.join(args.checkimg_outdir, figname)
                     fig.savefig(figname, dpi=150)
                     plt.close(fig)
 
                     if args.debug:
-                        figname = f'rrspecex_scandata_{target.id}.png'
+                        figname = f'rrspecex_scandata_{orig_file_name}.png'
                         figname = os.path.join(args.checkimg_outdir, figname)
                         fig, axs = plot_scandata(target, scandata)
                         fig.savefig(figname, dpi=150)
                         plt.close(fig)
 
-        zbest = None
-        if comm_rank == 0:
-            zbest = zfit[zfit['ZNUM'] == 0]
+            zbest.remove_column('TARGETID')
 
-        if args.zbest:
-            start = elapsed(None, "", comm=comm)
-            if comm_rank == 0:
+            if args.zbest:
+                start = elapsed(None, "", comm=comm)
+                if comm_rank == 0:
 
-                # Remove extra columns not needed for zbest
-                # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
-                # zbest.remove_columns(['ZNUM'])
+                    # Remove extra columns not needed for zbest
+                    # zbest.remove_columns(['zz', 'zzchi2', 'znum'])
+                    # zbest.remove_columns(['ZNUM'])
 
-                template_version = {
-                    t._template.full_type: t._template._version
-                    for t in dtemplates
-                }
-
-                archetype_version = None
-                if args.archetypes is not None:
-                    archetypes = All_archetypes(
-                        archetypes_dir=args.archetypes
-                    ).archetypes
-                    archetype_version = {
-                        name: arch._version
-                        for name, arch in archetypes.items()
+                    template_version = {
+                        t._template.full_type: t._template._version
+                        for t in dtemplates
                     }
 
-                write_zbest(
-                    args.zbest, zbest, template_version, archetype_version
-                )
+                    archetype_version = None
+                    if args.archetypes is not None:
+                        archetypes = All_archetypes(
+                            archetypes_dir=args.archetypes
+                        ).archetypes
+                        archetype_version = {
+                            name: arch._version
+                            for name, arch in archetypes.items()
+                        }
 
-            _ = elapsed(start, "Writing zbest data took", comm=comm)
+                    write_zbest(
+                        args.zbest, zbest, template_version, archetype_version
+                    )
 
-        if comm_rank == 0:
+                _ = elapsed(start, "Writing zbest data took", comm=comm)
+
             if (not args.zbest) and (args.output is None) and (not args.quite):
                 print("")
                 print(zbest)
@@ -655,11 +766,12 @@ def rrspecex(options=None, comm=None):
 
     _ = elapsed(global_start, "Total run time", comm=comm)
 
-    if args.debug:
-        import IPython
-        IPython.embed()
-
-    return targets, zbest, scandata
+    if comm_rank == 0:
+        if args.debug:
+            import IPython
+            IPython.embed()
+    else:
+        return targets, zbest, scandata
 
 
 if __name__ == '__main__':
