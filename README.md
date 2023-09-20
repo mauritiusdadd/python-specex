@@ -8,8 +8,22 @@ To install the latest stable version of specex, just use pip:
 
     $ pip install specex
 
-To install the bleeding edge version, clone the github repository use the command:
+Some functionalities are enabled only if some optional packages are installed, these packages can be installed by pip when installing Specex by specifing the desired configuration, for example
 
+    $ pip install specex[animation]
+
+will install the packages required to use the command specex-cube-anim, while with the command
+
+    $ pip install specex[animation,regions,redrock]
+
+also the packages to use rrspecex and to enable region file handling will be installed. To install all the optional dependencies use
+
+    $ pip install specex[all]
+
+To install the bleeding edge version, clone the github repository then use pip:
+
+    $ git clone 'https://github.com/mauritiusdadd/python-specex.git'
+    $ cd python-specex
     $ pip install .
 
 If you want to use the rrspecex script and the correspondig module, make sure to install also redrock. If you don't already have a system wide installation of redrock, a simple script is provided that creates a python venv and downloads and installs the required packages, in this case the commands to install specex are the following:
@@ -17,8 +31,7 @@ If you want to use the rrspecex script and the correspondig module, make sure to
     $ chmod +x redrock_venv_setup.sh
     $ ./redrock_venv_setup.sh
     $ . ./redrock_venv/bin/activate
-    $ pip install -r rrspecex-requirements.txt
-    $ pip install .
+    $ pip install .[redrock]
 
 # DOCUMENTATION
 
