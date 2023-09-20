@@ -482,27 +482,38 @@ def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
         The variance of the spectrum.
     """
     if weights is None:
-        sum_weights = 1
+        spatial_w = 1
     else:
-        sum_weights = weights[:, None]
+        if not isinstance(var_spaxels, np.ma.MaskedArray):
+            spatial_w = np.ma.array(weights, mask=np.isnan(weights))
+        else:
+            spatial_w = weights
+        spatial_w /= np.ma.max(spatial_w)
 
     if var_spaxels is not None:
         if not isinstance(var_spaxels, np.ma.MaskedArray):
             var_spaxels = np.ma.array(var_spaxels, mask=np.isnan(var_spaxels))
 
-        assert var_spaxels.shape == flux_spaxels.shape
-        sum_weights /= var_spaxels
+        if var_spaxels.shape != flux_spaxels.shape:
+            raise ValueError("Flux and variance have different shape!")
+        sum_weights = 1 / var_spaxels
+    else:
+        sum_weights = 1
 
     if not isinstance(flux_spaxels, np.ma.MaskedArray):
         flux_spaxels = np.ma.array(flux_spaxels, mask=np.isnan(flux_spaxels))
 
-    spectrum = np.ma.sum(flux_spaxels * sum_weights, axis=-1)
-    spectrum /= np.ma.sum(sum_weights, axis=-1)
+    # Summing spaxels weighted by the variance on the spectral axis and by
+    # sum_weights on the spatial axis
+
+    spectrum = np.ma.sum((flux_spaxels * sum_weights) * spatial_w, axis=-1)
+    spectrum /= np.ma.sum(sum_weights * spatial_w, axis=-1)
 
     if var_spaxels is None:
-        spectrum_var = np.ma.var(flux_spaxels, axis=-1)
+        spectrum_var = np.ma.var(flux_spaxels * spatial_w, axis=-1)
     else:
-        spectrum_var = np.ma.sum(var_spaxels, axis=-1)
+        spectrum_var = np.ma.sum(var_spaxels * spatial_w, axis=-1)
+    spectrum_var /= np.sum(spatial_w)
 
     if average:
         spectrum_var /= flux_spaxels.shape[-1]

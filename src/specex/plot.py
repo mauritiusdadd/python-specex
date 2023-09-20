@@ -28,6 +28,7 @@ from astropy import wcs
 from astropy.table import Table, MaskedColumn
 from astropy.coordinates import SkyCoord
 from astropy.nddata import Cutout2D
+from astropy.visualization import quantity_support
 
 from .utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
 from .cube import get_hdu, get_rgb_cutout, get_gray_cutout
@@ -76,7 +77,7 @@ def __plot_spectra_argshandler(options=None):
     )
 
     parser.add_argument(
-        '--key-id', metavar='KEY_ID', type=str, default='ID',
+        '--key-id', metavar='KEY_ID', type=str, default='SPECID',
         help='Set the name of the column in the zcat that contains the IDs of '
         'the spectra. See --zcat for more info. If this option is not '
         'specified, then he default value %(metavar)s = %(default)s is used.'
@@ -150,6 +151,7 @@ def plot_spectra(options=None):
     None.
 
     """
+    quantity_support()
     args = __plot_spectra_argshandler(options)
 
     if args.zcat is not None:
@@ -580,6 +582,7 @@ def plot_cube_slice_animation(options=None):
             )
             sys.exit(1)
 
+    quantity_support()
     args = __plot_slice_argshandler(options)
 
     n_spectra = len(args.spectra)

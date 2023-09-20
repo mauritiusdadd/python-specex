@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import argparse
+import logging
 
 import numpy as np
 import multiprocessing
@@ -21,6 +22,7 @@ from scipy.signal import savgol_filter
 from astropy import wcs
 from astropy.table import Table, Column
 from astropy.io import fits
+from astropy.io.registry import IORegistryError
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy import units
@@ -37,11 +39,27 @@ from .cube import KNOWN_MASK_EXT_NAMES
 from .cube import get_hdu
 
 try:
+    from regions import Regions
+except Exception:
+    HAS_REGION = False
+    
+else:
+    HAS_REGION = True
+
+
+try:
     from .rrspecex import rrspecex, get_templates
 except Exception:
     HAS_RR = False
 else:
     HAS_RR = True
+
+
+SPECTRA_WEIGHTING_MODES = {
+    'none': 'no weighting',
+    'whitelight': 'weighting using cube whitelight image',
+    '<file url>': 'weighting using an extrernal image',
+}
 
 
 def __argshandler(options=None):
@@ -97,13 +115,14 @@ def __argshandler(options=None):
         'respectively ALPHA_J2000, DELTA_J2000, A_IMAGE, B_IMAGE, THETA_IMAGE '
         'and KRON_RADIUS. If the catalog has different column names for these '
         'quantities, they can be overridden with a corresponding --key-* '
-        'argument (see below).'
+        'argument (see below). The sky frame of the RA and DEC coordinates can'
+        ' be set using --cat-skyframe.'
     )
 
     parser.add_argument(
         '--regionfile', metavar='REGFILE', type=str, default=None,
         help='A region file containing regions from which extract spectra. '
-        'The name of the refion will be used as ID for the spectra'
+        'The name of the refion will be used as ID for the spectra.'
     )
 
     parser.add_argument(
@@ -180,6 +199,15 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
+        '--weighting', metavar='MODE', type=str, default='None',
+        help='Set the spatial weighting for the spectra. Available modes are:'
+        + ';'.join([
+            f"{mode_name} for {mode_desc}"
+            for mode_name, mode_desc in SPECTRA_WEIGHTING_MODES.items()
+        ])
+    )
+
+    parser.add_argument(
         '--cat-pixelscale', metavar='PIXEL_SCALE', type=str, default='1mas',
         help='Set the scale size in mas of the major and minor axes. Useful if'
         'A and B are given in pixels instead of physical units (like in the '
@@ -190,6 +218,13 @@ def __argshandler(options=None):
         ' of a pixel of the image used to generate the input catalog. '
         'This parameter will be ignored if using a region file as input.'
         'The default value is %(metavar)s=%(default)s.'
+    )
+
+    parser.add_argument(
+        '--cat-format', metavar='FORMAT', type=str, default=None,
+        help='Manually set the format of the input catalog to %(metavar)s. '
+        'If not specified the program will try to automatically detect the '
+        'format.'
     )
 
     parser.add_argument(
@@ -253,6 +288,13 @@ def __argshandler(options=None):
         'specified then a suitable column will be selected according to its '
         'name or, if none is found, a new progressive id will be generated. '
         'This id will be included in the fits header.'
+    )
+
+    parser.add_argument(
+        '--cat-skyframe', metavar='SKY_FRAME', type=str, default='icrs',
+        help='Set the sky frame RA and DEC values of the input catalog. This '
+        'option is ignored if a region file is uesed for the extraction. '
+        'The default value is %(metavar)s=%(default)s.'
     )
 
     parser.add_argument(
@@ -477,7 +519,6 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
     spec_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
     spec_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
     spec_header["CDELT1"] = spec_hdu_header["CD3_3"]
-    spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
 
     nanmask = np.isnan(obj_spectrum)
 
@@ -553,10 +594,8 @@ def speclist2ez(spec_files, spec_hdu_name='SPECTRUM', var_hdu_name='VARIANCE'):
         txt_data += f'{file}[{var_hdu_name}](1) -\n'
     return txt_data
 
-
 def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
-                     key_a='A_WORLD', key_b='B_WORLD', key_theta='THETA_IMAGE',
-                     key_id='NUMBER', key_kron='KRON_RADIUS'):
+                     key_id='NUMBER', file_format='ds9'):
     """
     Parse a regionfile and return an asrtopy Table with sources information.
 
@@ -578,94 +617,40 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     key_dec : str, optional
         Name of the column that will contain DEC of the objects
         The default value is 'DELTA_J2000'.
-    key_a : str, optional
-        Name of the column that will contain the semi major axis.
-        The default value is 'A_WORLD'.
-    key_b : str, optional
-        Name of the column that will contain the semi minor axis.
-        The default value is 'B_WORLD'.
-    key_theta : str, optional
-        Name of the column that will contain angle between the major axis and
-        the principa axis of the image.
-        The default value is 'THETA_IMAGE'.
+    file_format : str, optional
+        Format of the input regionfile.
+        The default value is 'ds9'.
 
     Returns
     -------
     sources : astropy.table.Table
         The table containing the sources.
+    skyframe : None
+        Placeholder.
 
     """
-    def degstr2mas(degstr, degsep='°', minsep="'", secsep='"'):
-        deg_sep = degstr.find(degsep)
-        min_sep = degstr.find(minsep)
-        sec_sep = degstr.find(secsep)
-
-        degs = float(degstr[:deg_sep]) if deg_sep >= 0 else 0
-        mins = float(degstr[deg_sep+1:min_sep]) if min_sep >= 0 else 0
-        secs = float(degstr[min_sep+1:sec_sep]) if sec_sep >= 0 else 0
-
-        return (secs + 60*mins + 3600*degs) * units.arcsec
-
-    with open(regionfile, 'r') as f:
-        regions = f.read().splitlines()
-
     myt = Table(
-        names=[
-            key_id, key_ra, key_dec, key_a, key_b, key_theta, key_kron
-        ],
-        dtype=[
-            'U16', 'float32', 'float32', 'float32',
-            'float32', 'float32', 'float32'
-        ]
+        names=[key_id, key_ra, key_dec, 'region'],
+        units=[None, 'deg', 'deg', None],
+        dtype=[int, float, float, object]
     )
-
-    for j, reg in enumerate(regions):
-        reg = reg.replace(' ', '').lower().split('(')
-        if len(reg) < 2:
-            continue
-
-        regtype = reg[0]
-        regdata = reg[1].split('#')
-        regparams = regdata[0][:-1].split(',')
+    for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
         try:
-            regcomments = regdata[1]
-            t_start = regcomments.find('text={') + 6
-            if t_start < 0:
-                obj_name = ''
-            else:
-                t_end = regcomments.find('}', t_start)
-                obj_name = regcomments[t_start:t_end]
-        except IndexError:
-            obj_name = ''
+            reg_id = reg.meta['text']
+        except:
+            reg_id = j
 
-        if not obj_name:
-            obj_name = str(j)
-
-        obj_ra = float(regparams[0])
-        obj_dec = float(regparams[1])
-
-        if regtype == "circle":
-            obj_a = degstr2mas(regparams[2])
-            obj_b = obj_a
-            obj_theta = 0
-        elif regtype == "ellipse" or regtype == "box":
-            obj_a = degstr2mas(regparams[2])
-            obj_b = degstr2mas(regparams[3])
-            obj_theta = float(regparams[4])
-        elif regtype == 'polygon':
-            pass
+        try:
+            center = reg.center
+        except AttributeError:
+            c_ra = np.mean([x.ra.to('deg').value for x in reg.vertices])
+            c_dec = np.mean([x.dec.to('deg').value for x in reg.vertices])
+            new_row = [reg_id, c_ra, c_dec, reg]
         else:
-            print(
-                f"WARNING: '{regtype}' region type not supported yet!",
-                file=sys.stderr
-            )
-            continue
+            new_row = [reg_id, center.ra, center.dec, reg]
+        myt.add_row(new_row)
 
-        myt.add_row(
-            (obj_name, obj_ra, obj_dec, obj_a, obj_b, obj_theta, 1)
-        )
-    return myt
-
+    return myt, None
 
 def specex(options=None):
     """
@@ -676,35 +661,57 @@ def specex(options=None):
     None.
 
     """
+    # Get user input from argument parsers helper
     args = __argshandler(options)
 
+    # Working mode
+    mode = None
+
     if args.catalog is not None:
-        sources = Table.read(args.catalog)
+        if args.cat_format is not None:
+            sources = Table.read(args.catalog, format=args.cat_format)
+        else:
+            try:
+                sources = Table.read(args.catalog)
+            except IORegistryError:
+                try:
+                    sources = Table.read(args.catalog, format='ascii')
+                except IORegistryError:
+                    print(
+                        "ERROR: cannot determine the format of the input "
+                        "catalog. Try to specify it manually using the "
+                        "option --cat-format.",
+                        file=sys.stderr
+                    )
+                    sys.exit(1)
+
         basename_with_ext = os.path.basename(args.catalog)
         pixelscale = units.Quantity(args.cat_pixelscale)
+        coord_frame =  args.cat_skyframe  # frame of source coordinates
         if str(pixelscale.unit.physical_type) == 'dimensionless':
             pixelscale = pixelscale * units.mas
     elif args.regionfile is not None:
-        sources = parse_regionfile(
+        if not HAS_REGION:
+            logging.error(
+                "astropy regions package is needed to handle regionfiles!"
+            )
+            sys.exit(1)
+
+        sources, coord_frame = parse_regionfile(
             args.regionfile,
             key_ra=args.key_ra,
             key_dec=args.key_dec,
-            key_a=args.key_a,
-            key_b=args.key_b,
-            key_theta=args.key_theta,
             key_id=args.key_id,
-            key_kron=args.key_kron,
+            file_format=args.cat_format,
         )
         basename_with_ext = os.path.basename(args.regionfile)
         pixelscale = 1.0 * units.arcsec
+        mode = 'regions'
     else:
-        print(
+        logging.error(
             "You must provide at least an input catalog or a region file!",
-            file=sys.stderr
         )
         sys.exit(1)
-
-    # Get user input from argument parsers helper
 
     basename = os.path.splitext(basename_with_ext)[0]
 
@@ -744,8 +751,15 @@ def specex(options=None):
     cube_wcs = wcs.WCS(spec_hdu.header)
     celestial_wcs = cube_wcs.celestial
     spectral_wcs = cube_wcs.spectral
-    # wcs_frame = wcs.utils.wcs_to_celestial_frame(cube_wcs)
-    coord_frame = 'fk5'  # frame of source coordinates
+
+    # If weighting with an external image, read that
+    if args.weighting.lower() not in ['none', 'whitelight']:
+        if not os.path.isfile(args.weighting):
+            logging.error(
+                f"weighting image does not exist '{args.weighting}' "
+            )
+            sys.exit(1)
+        weight_image = fits.getdata(args.weighting)
 
     # TODO: we assume here that the distorsion across the sky plane is
     #       negligible, but it is very bold to assume this is always the case.
@@ -771,18 +785,16 @@ def specex(options=None):
     ra_unit = sources[args.key_ra].unit
     if ra_unit is None:
         if args.debug:
-            print(
+            logging.warning(
                 "RA data has no units, assuming values are in degrees!",
-                file=sys.stderr
             )
         ra_unit = 'deg'
 
     dec_unit = sources[args.key_dec].unit
     if dec_unit is None:
         if args.debug:
-            print(
+            logging.warning(
                 "DEC data has no units, assuming values are in degrees!",
-                file=sys.stderr
             )
         dec_unit = 'deg'
 
@@ -828,17 +840,18 @@ def specex(options=None):
     if not os.path.isdir(outdir):
         os.mkdir(outdir)
 
-    if args.mode == 'auto':
-        if (
-                args.key_a in sources.colnames and
-                args.key_b in sources.colnames and
-                args.key_kron in sources.colnames
-        ):
-            mode = 'kron_ellipse'
+    if mode is None:
+        if args.mode == 'auto':
+            if (
+                    args.key_a in sources.colnames and
+                    args.key_b in sources.colnames and
+                    args.key_kron in sources.colnames
+            ):
+                mode = 'kron_ellipse'
+            else:
+                mode = 'circular_aperture'
         else:
-            mode = 'circular_aperture'
-    else:
-        mode = args.mode
+            mode = args.mode
 
     print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
@@ -911,7 +924,18 @@ def specex(options=None):
         yy_tr = yy - source['CUBE_Y_IMAGE']
 
         anulus_mask = None
-        if mode == 'kron_ellipse':
+        if mode == 'regions':
+            anulus_mask = None
+            pix_reg = source['region'].to_pixel(celestial_wcs)
+            reg_mask = pix_reg.to_mask()
+            mask = reg_mask.to_image((img_height, img_width)) > 0
+            specex_apertures[obj_id] = (
+                1 * pixelscale,
+                1 * pixelscale,
+                0 * units.rad
+            )
+
+        elif mode == 'kron_ellipse':
             ang = np.deg2rad(source[args.key_theta])
 
             x_over_a = xx_tr*np.cos(ang) + yy_tr*np.sin(ang)
@@ -953,9 +977,8 @@ def specex(options=None):
                     0 * units.rad
                 )
             except TypeError:
-                print(
-                    f"WARNING: object {obj_id} has an invalid ID, skipping...",
-                    file=sys.stderr
+                logging.warning(
+                    f"object {obj_id} has an invalid ID, skipping..."
                 )
                 continue
 
@@ -985,31 +1008,42 @@ def specex(options=None):
             mask &= cube_footprint
 
         if np.sum(mask) == 0:
-            print(
-                f"WARNING: object {obj_id} has no footprint, skipping...",
-                file=sys.stderr
-            )
+            logging.warning(f"object {obj_id} has no footprint, skipping...")
             continue
 
+        obj_extraction_mask = np.zeros_like(mask, dtype='float32')
+        if args.weighting.lower() == 'none':
+            weights = None
+            obj_extraction_mask[mask] = 1.0
+        elif args.weighting.lower() == 'whitelight':
+            # summing selected spaxels along spectral alxis
+            w_arr = np.ma.array(
+                spec_hdu.data[:, mask], mask=np.isnan(spec_hdu.data[:, mask])
+            )
+            weights = np.ma.sum(w_arr, axis=0)
+            weights /= np.ma.max(weights)
+            obj_extraction_mask[mask] = weights
+        else:
+            raise NotImplementedError()
+
         obj_spectrum, obj_spectrum_var = get_spectrum(
-            spec_hdu.data[:, mask],
-            var_hdu.data[:, mask] if var_hdu is not None else None
+            flux_spaxels=spec_hdu.data[:, mask],
+            var_spaxels=var_hdu.data[:, mask] if var_hdu is not None else None,
+            weights=weights
         )
 
         obj_spectrum = obj_spectrum.filled(np.nan)
         obj_spectrum_var = obj_spectrum_var.filled(np.nan)
 
         if np.sum(np.isnan(obj_spectrum_var[~np.isnan(obj_spectrum)])) != 0:
-            print(
-                f"\nWARNING: object {obj_id}  is weird! Skipping...\n",
-                file=sys.stderr
+            logging.warning(
+                f"\nWARNING: object {obj_id}  is weird! Skipping...\n"
             )
             continue
 
         if np.sum(~np.isnan(obj_spectrum)) < 100:
-            print(
-                f"WARNING: object {obj_id} has invalid data...",
-                file=sys.stderr
+            logging.warning(
+                f"WARNING: object {obj_id} has invalid data..."
             )
 
         if anulus_mask is not None:
@@ -1023,10 +1057,9 @@ def specex(options=None):
 
         if np.sum(~np.isnan(obj_spectrum)) == 0:
             if args.debug:
-                print(
+                logging.warning(
                     f"WARNING: object {obj_id} has no spectral data, "
-                    "skipping...",
-                    file=sys.stderr
+                    "skipping..."
                 )
             continue
 
@@ -1039,10 +1072,9 @@ def specex(options=None):
            ):
 
             if args.debug:
-                print(
+                logging.warning(
                     f"WARNING: object {obj_id} has SNR={sn_spec:.2f} < "
-                    f"{args.sn_threshold}, skipping...",
-                    file=sys.stderr
+                    f"{args.sn_threshold}, skipping..."
                 )
             continue
 
@@ -1095,7 +1127,7 @@ def specex(options=None):
 
         # Add also the extracted pixels to the extraction map
         if args.check_images:
-            extracted_data += mask
+            extracted_data += obj_extraction_mask
             if anulus_mask is not None:
                 extracted_data -= anulus_mask
 

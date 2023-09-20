@@ -776,7 +776,11 @@ def rrspecex(options=None, comm=None):
 
 def main():
     """Run rrspecex."""
-    _ = rrspecex()
+    try:
+        _ = rrspecex()
+    except Exception as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

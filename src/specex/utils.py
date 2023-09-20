@@ -30,6 +30,7 @@ from astropy import wcs as apwcs
 from astropy import units as apu
 from astropy import coordinates
 from astropy import constants
+from astropy.visualization import quantity_support
 
 from .lines import get_lines
 
@@ -854,12 +855,26 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         w_max = np.max(wave_range)
 
     if wavelengt_units:
-        x_label = f'Wavelenght [{wavelengt_units}]'
+        try:
+            x_unit = apu.Unit(wavelengt_units).to_string(
+                'latex', fraction='inline'
+            )
+        except Exception:
+            x_label = f'Wavelenght [{wavelengt_units}]'
+        else:
+            x_label = f'Wavelenght [{x_unit}]'
     else:
         x_label = 'Wavelenght'
 
     if flux_units:
-        y_label = f'Flux [{flux_units}]'
+        try:
+            y_unit = apu.Unit(flux_units).to_string(
+                'latex', fraction='inline'
+            )
+        except Exception:
+            y_label = f'Flux [{flux_units}]'
+        else:
+            y_label = f'Flux [{y_unit}]'
     else:
         y_label = 'Flux'
 

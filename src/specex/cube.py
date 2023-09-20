@@ -25,6 +25,8 @@ from .utils import get_pc_transform_params, rotate_data, get_pbar
 KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
 KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
 KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq']
+KNOWN_WAVE_EXT_NAMES = ['wave', 'wavelenght', 'lambda', 'lam']
+KNOWN_RCURVE_EXT_NAMES = ['r', 'reso', 'resolution', 'rcurve']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
 
 
