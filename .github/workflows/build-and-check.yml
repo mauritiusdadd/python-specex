@@ -51,9 +51,8 @@ jobs:
         chmod +x redrock_venv_setup.sh && ./redrock_venv_setup.sh --noenv
     - name: Running tests
       run: |
-        python -m pytest --cov --cov-report xml
+        python -m coverage run -m unittest test/test_all.py
     - name: Coveralls
       uses: coverallsapp/github-action@v2
       with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          path-to-lcov: coverage.xml

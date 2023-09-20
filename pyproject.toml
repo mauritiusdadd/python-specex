@@ -40,11 +40,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov", "regions"]
 animations = ["imageio"]
 regions = ["regions"]
 redrock = ["numba", "sqlalchemy", "healpy", "requests", "fitsio", "photutils", "h5py"]
 all = ["specex[animations,regions,redrock]"]
+test = ["coverage"]
 
 [project.urls]
 documentation = "https://python-specex.readthedocs.io/en/latest"
