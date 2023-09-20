@@ -68,7 +68,7 @@ We can also apply a spatial weighting using the parameter ``--weighting``, for e
 
 .. code-block:: bash
 
-    specex --catalog sources.cat --mode circular_aperture --aperture-size 1.5arcsec --outdir extracted_spectra_wsum --check-images ADP.2023-09-01T12_56_41.595.fits
+    specex --catalog sources.cat --mode circular_aperture --aperture-size 1.5arcsec --weighting whitelight --outdir extracted_spectra_wsum --check-images ADP.2023-09-01T12_56_41.595.fits
 
 the extraction map now reflects the weighting of each spaxels
 

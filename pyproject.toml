@@ -40,8 +40,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "regions"]
 animations = ["imageio"]
+regions = ["regions"]
 
 [project.urls]
 documentation = "https://python-specex.readthedocs.io/en/latest"
