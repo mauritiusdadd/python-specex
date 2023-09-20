@@ -632,7 +632,7 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     myt = Table(
         names=[key_id, key_ra, key_dec, 'region'],
         units=[None, 'deg', 'deg', None],
-        dtype=[int, float, float, object]
+        dtype=[str, float, float, object]
     )
     for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
         try:
