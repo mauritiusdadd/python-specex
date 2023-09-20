@@ -44,35 +44,16 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install regions imageio
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Install specex
+    - name: Install specex and dependencies
       run: |
-        pip install .
-    - name: Test specex
-      run: |
-        echo "Testing base specex functionality..."
-        python -m unittest test/test_specex.py
-    - name: Test specexplot
-      run: |
-        echo "Testing specex-plot..."
-        python -m unittest test/test_specexplot.py
-    - name: Test source detection
-      run: |
-        echo "Testing source detection functionality"
-        python -m unittest test/test_sources.py
-    - name: Test cubestack
-      run: |
-        python -m unittest test/test_cubestack.py
-    - name: Test zeropointinfo
-      run: |
-        python -m unittest test/test_zeropointinfo.py
-    - name: Test cutouts
-      run: |
-        python -m unittest test/test_cutout.py
-    - name: Test rrspecex
-      run: |
-        echo "Install redrock"
+        pip install .[all,test]
         chmod +x redrock_venv_setup.sh && ./redrock_venv_setup.sh --noenv
-        echo "Testing base rrspecex functionality..."
-        python -m unittest test/test_rrspecex.py
+    - name: Running tests
+      run: |
+        python -m pytest --cov --cov-report xml
+    - name: Coveralls
+      uses: coverallsapp/github-action@v2
+      with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          path-to-lcov: coverage.xml
