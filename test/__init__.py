@@ -82,6 +82,9 @@ def get_hst_test_images(out_dir: str = TEST_DATA_PATH,
         sys.stderr.write(report_str)
         sys.stderr.flush()
 
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+
     print("Downloading HST test file...")
     outfile_list = []
     for target_file in HST_TEST_FITS:
