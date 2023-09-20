@@ -35,6 +35,3 @@ jobs:
           files: |
             LICENSE
             README.md
-
-      - name: Coveralls
-        uses: coverallsapp/github-action@v2
