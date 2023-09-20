@@ -48,11 +48,14 @@ ellipse(182.6349624,39.4062180,2.500",1.500",217.21022)
 """
 
 
-class TestZeropointInfo(unittest.TestCase):
+class MyTests(unittest.TestCase):
 
     test_hst_imgs = get_hst_test_images()
+    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
+    spec_files = make_synt_specs.main()
 
     def test_zeropoint_info(self):
+        print(">>> Testing zeropoint_info...\n")
         if not self.test_hst_imgs:
             print(
                 "Failed to download HST test images, skipping this test...",
@@ -61,24 +64,16 @@ class TestZeropointInfo(unittest.TestCase):
             return True
         zpinfo(self.test_hst_imgs)
 
-
-class TestCubeStacking(unittest.TestCase):
-
-    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
-
     def test_stack_cube(self):
+        print(">>> Testing cube_stack...\n")
         print(self.cube_file)
         cube_stack_options = [
             self.cube_file
         ]
         cube_stack(cube_stack_options)
 
-
-class TestCutout(unittest.TestCase):
-
-    test_hst_imgs = get_hst_test_images()
-
     def test_grayscale_cutout(self):
+        print(">>> Testing grayscale cutout...\n")
         if not self.test_hst_imgs:
             print(
                 "Failed to download HST test images, skipping this test...",
@@ -103,8 +98,7 @@ class TestCutout(unittest.TestCase):
                 break
 
     def test_cube_cutout(self):
-        reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
-
+        print(">>> Testing cube cutout...\n")
         regfile = os.path.join(
             TEST_DATA_PATH, 'cutout_test_cube.reg'
         )
@@ -115,24 +109,16 @@ class TestCutout(unittest.TestCase):
         cutout_options = [
             '--verbose',
             '--regionfile', regfile,
-            cube_file
+            self.cube_file
         ]
         cutout_main(cutout_options)
 
-
-class TestSourceDetection(unittest.TestCase):
-
-    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
-
     def test_extract_sources(self):
+        print(">>> Testing sources detection from datacube...\n")
         detect_from_cube([self.cube_file])
 
-
-class TestSpex(unittest.TestCase):
-
-    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
-
     def test_specex_catalog_success(self):
+        print(">>> Testing specex catalog...\n")
         specex_options = [
             '--catalog', self.cat_file,
             '--mode', 'circular_aperture',
@@ -143,6 +129,7 @@ class TestSpex(unittest.TestCase):
         specex(options=specex_options)
 
     def test_specex_regionfile_success(self):
+        print(">>> Testing specex regionfile...")
         specex_options = [
             '--regionfile', self.reg_file,
             '--mode', 'kron_ellipse',
@@ -150,16 +137,13 @@ class TestSpex(unittest.TestCase):
         ]
         specex(options=specex_options)
 
-
-class TestSpexplot(unittest.TestCase):
-
     def test_plot_success(self):
-        spec_files = make_synt_specs.main()
+        print(">>> Testing specex-plot...")
 
         plot_options = [
             '--restframe',
             '--outdir', 'test_plot_out',
-            *spec_files
+            *self.spec_files
         ]
 
         plot_spectra(options=plot_options)
@@ -201,25 +185,20 @@ class TestRRSpex(unittest.TestCase):
 """
 
 if __name__ == '__main__':
-    test_00 = TestZeropointInfo()
-    test_00.test_zeropoint_info()
+    tests = MyTests()
+    tests.test_zeropoint_info()
 
-    test_01 = TestCubeStacking()
-    test_01.test_stack_cube()
+    tests.test_stack_cube()
 
-    test_02 = TestCutout()
-    test_02.test_grayscale_cutout()
-    test_02.test_cube_cutout()
+    tests.test_grayscale_cutout()
+    tests.test_cube_cutout()
 
-    test_03 = TestSourceDetection()
-    test_03.test_extract_sources()
+    tests.test_extract_sources()
 
-    test_04 = TestSpex()
-    test_04.test_specex_catalog_success()
-    test_04.test_specex_regionfile_success()
+    tests.test_specex_catalog_success()
+    tests.test_specex_regionfile_success()
 
-    test_05 = TestSpexplot()
-    test_05.test_plot_success()
+    tests.test_plot_success()
 
     # if HAS_RR:
     #     test_06 = TestRRSpex()

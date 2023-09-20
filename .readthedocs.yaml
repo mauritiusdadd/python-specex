@@ -14,7 +14,7 @@ build:
     pre_install:
       - chmod +x redrock_venv_setup.sh
       - ./redrock_venv_setup.sh --noenv
-      - pip install .
+      - pip install .[all]
 
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
