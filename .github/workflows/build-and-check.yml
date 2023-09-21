@@ -36,7 +36,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+    - name: Cache test data
+        id: cache-test
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-test-data
+        with:
+            path: ./test/data
     - name: Set up Python 3.10
       uses: actions/setup-python@v3
       with:

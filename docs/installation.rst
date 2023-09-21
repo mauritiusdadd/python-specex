@@ -44,7 +44,7 @@ This is a list of the name of all optional dependency groups
 Installing from GitHub
 ======================
 
-If you like to use the bleeding-edge version, you can install Specex directly from the |github_mark| `GitHub repository <github_repo>`_
+If you like to use the bleeding-edge version, you can install Specex directly from the |github_mark| `GitHub repository <https://github.com/mauritiusdadd/python-specex>`_
 
 .. code-block:: bash
 

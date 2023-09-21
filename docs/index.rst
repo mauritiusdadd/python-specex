@@ -6,13 +6,11 @@
 Welcome to Specex's documentation!
 #########################################
 
-|github_mark| `Source Code <github_repo>`_
+|github_mark| `Source Code <https://github.com/mauritiusdadd/python-specex>`_
 
 .. |github_mark| image:: pics/github-mark.png
    :height: 1em
-   :target: github_repo
-
-.. _github_repo: https://github.com/mauritiusdadd/python-specex
+   :target: https://github.com/mauritiusdadd/python-specex
 
 .. toctree::
    self
