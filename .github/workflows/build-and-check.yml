@@ -43,7 +43,8 @@ jobs:
         env:
           cache-name: cache-test-data
         with:
-            path: ./test/data
+            path: |
+              ./test/data
     - name: Set up Python 3.10
       uses: actions/setup-python@v3
       with:
