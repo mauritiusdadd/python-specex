@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SPEX - SPectra EXtractor.
+SPECEX - SPECtra EXtractor.
 
 redrock wrapper tools for python-specex spectra.
 This program is based on the structure of redrock.external.boss function.
 
-Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 
 from __future__ import absolute_import, division, print_function

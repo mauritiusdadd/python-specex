@@ -3,7 +3,7 @@ SPEX - SPectra EXtractor.
 
 Emission and absorption line dictionary
 
-Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:

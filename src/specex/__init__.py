@@ -1,9 +1,9 @@
 """
-SPEX - SPectra EXtractor.
+SPECEX - SPECtra EXtractor.
 
 Extract spectra from spectral data cubes and find their redshift.
 
-Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:

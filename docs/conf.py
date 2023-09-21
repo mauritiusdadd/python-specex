@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../src'))
 # -- Project information -----------------------------------------------------
 
 project = 'python-specex'
-copyright = "2023, Maurizio D'Addona"
+copyright = "2022-2023, Maurizio D'Addona <mauritiusdadd@gmail.com>"
 author = "Maurizio D'Addona"
 
 # The full version, including alpha/beta/rc tags
@@ -69,6 +69,14 @@ html_static_path = ['_static']
 html_css_files = [
     'css/custom.css',
 ]
+
+html_context = {
+    "display_github": True, # Integrate GitHub
+    "github_user": "mauritiusdadd", # Username
+    "github_repo": "python-specex", # Repo name
+    "github_version": "main", # Version
+    "conf_py_path": "/docs/", # Path in the checkout to the docs root
+}
 
 # EPUB options
 epub_show_urls = 'footnote'

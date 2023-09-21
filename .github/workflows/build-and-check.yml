@@ -54,5 +54,3 @@ jobs:
         python -m coverage run -m unittest test/test_all.py
     - name: Coveralls
       uses: coverallsapp/github-action@v2
-      with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"

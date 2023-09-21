@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SPEX - SPectra EXtractor.
+SPECEX - SPECtra EXtractor.
 
 This module provides functions to calculate the zeropoints of a FITS image.
 
@@ -10,7 +10,7 @@ For more information take a look at the following links:
  - https://www.stsci.edu/hst/wfpc2/Wfpc2_dhb/wfpc2_ch52.html
  - https://www.stsci.edu/hst/instrumentation/acs/data-analysis/zeropoints
 
-Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import sys
 import argparse

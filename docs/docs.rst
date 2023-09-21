@@ -1,5 +1,3 @@
-Python Modules Documentation
-=======================================
 
 .. toctree::
    module_docs/specex
@@ -11,5 +9,5 @@ Python Modules Documentation
    module_docs/stack
    module_docs/utils
    module_docs/zeropoints
-   :maxdepth: 2
+   :maxdepth: 0
    :caption: Contents:

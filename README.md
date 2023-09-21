@@ -1,4 +1,4 @@
-# python-specex [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7808292.svg)](https://doi.org/10.5281/zenodo.7808292) [![Build Status](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml/badge.svg)](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml) [![Documentation Status](https://readthedocs.org/projects/python-specex/badge/?version=latest)](https://python-specex.readthedocs.io/en/latest/?badge=latest)
+# python-specex [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7808292.svg)](https://doi.org/10.5281/zenodo.7808292) [![Documentation Status](https://readthedocs.org/projects/python-specex/badge/?version=latest)](https://python-specex.readthedocs.io/en/latest/?badge=latest) [![Build Status](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml/badge.svg)](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml) [![Coverage Status](https://coveralls.io/repos/github/mauritiusdadd/python-specex/badge.svg?branch=main)](https://coveralls.io/github/mauritiusdadd/python-specex?branch=main)
 
 Extract spectra from fits cubes
 

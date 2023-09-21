@@ -1,7 +1,12 @@
 Tutorial 2 - Redshift estimation
 ================================
 
-**NOTE:** In order to run ``rrspecex``, *Redrock* [:ref:`1<references_02>`] must be installed. If you use ``rrspecex`` please cite also *Redrock* in your papaer.
+.. important::
+
+  In order to run ``rrspecex``, *Redrock* [:ref:`1<references_02>`] must be installed.
+
+.. note::
+  If you use ``rrspecex`` please cite also *Redrock* [:ref:`1<references_02>`] in your papaer.
 
 Using the same data and spectra extracted in the :ref:`first tutorial<tutorial_1>`, we can compute the redshift of the spectra using the command ``rrspecex``. For example, let's compute the redshift for the two spectra extracted with the regionfile.
 

@@ -78,8 +78,11 @@ the extraction map now reflects the weighting of each spaxels
 
 Run specex with a regionfile
 ----------------------------
+.. important::
 
-If the python package *Atropy-Regions* [:ref:`6<references_01>`] is installed, Specex also supports region files as input intstead of catalogs. The input region file can be specified using ``--regionfile`` and, in the case it is not automatically identified, its format can be set using ``--cat-format``. For example, suppose we have a region file named :ref:`test_regions.reg<src_regionfile>` created with *SAO DS9* [:ref:`7<references_01>`], like shown in this figure
+  Region file handling is supported only if *Atropy-Regions* [:ref:`6<references_01>`] is installed
+
+Specex also supports region files as input intstead of catalogs. The input region file can be specified using ``--regionfile`` and, in the case it is not automatically identified, its format can be set using ``--cat-format``. For example, suppose we have a region file named :ref:`test_regions.reg<src_regionfile>` created with *SAO DS9* [:ref:`7<references_01>`], like shown in this figure
 
 .. image:: pics/test_cube_region.png
   :width: 75%

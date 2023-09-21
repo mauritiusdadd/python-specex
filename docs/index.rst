@@ -3,21 +3,69 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to python-specex's documentation!
-=========================================
+Welcome to Specex's documentation!
+#########################################
 
-.. automodule:: specex
-   :members:
+|github_mark| `Source Code <github_repo>`_
+
+.. |github_mark| image:: pics/github-mark.png
+   :height: 1em
+   :target: github_repo
+
+.. _github_repo: https://github.com/mauritiusdadd/python-specex
+
+.. toctree::
+   self
+   genindex
+   modindex
+   :hidden:
+   :maxdepth: 1
+
+
+.. toctree::
+   installation
+   :maxdepth: 1
+   :caption: Installation Guide:
 
 .. toctree::
    tutorials
+   :maxdepth: 1
+   :caption: Getting Started:
+
+.. toctree::
    docs
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 1
+   :caption: Modules and Functions
 
-Indices and tables
-==================
+License
+*******
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+BSD 3-Clause License
+
+Copyright (c) 2022-2023, Maurizio D'Addona <mauritiusdadd@gmail.com>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE

@@ -1,6 +1,10 @@
 Tutorial 4 - Plot animated cube slice
 =====================================
 
+.. important::
+
+  ``specex-cube-anim`` requirest the python package *imageio* [:ref::ref:`1<references_04>`]
+
 We can plot animated gif of the specrtum of one or more objects using the command ``specex-cube-anim``, for example
 
 .. code-block:: bash
@@ -12,3 +16,10 @@ will generate an animated gif named *spec_anim_14.gif* for the spectrum *spec_14
 .. image:: pics/spec_anim_14.gif
   :width: 100%
   :alt: A picture showing the animated GIF generated with specex-cube-anim
+
+.. _references_04:
+
+References
+----------
+
+#. `Imageio <https://pypi.org/project/imageio/>`_

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SPEX - SPectra EXtractor.
+SPECEX - SPECtra EXtractor.
 
 This module provides functions to stack spectral cubes.
 
-Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import os
 import sys

@@ -1,5 +1,12 @@
-#!/usr/bin/env python
-"""Make cutouts of spectral cubes."""
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SPECEX - SPECtra EXtractor.
+
+This module provides utility functions to handle spectroscopic datacubes.
+
+Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
+"""
 
 import os
 import re
