@@ -548,10 +548,6 @@ def rrspecex(options=None, comm=None):
     global HAS_REDROCK
     global HAS_IPYTHON
 
-    if args.debug:
-        sys.excepthook = exception_handler
-        
-
     global_start = elapsed(None, "", comm=comm)
     comm_size = 1
     comm_rank = 0
@@ -560,6 +556,9 @@ def rrspecex(options=None, comm=None):
         comm_rank = comm.rank
 
     args = __argshandler(options)
+
+    if args.debug:
+        sys.excepthook = exception_handler
 
     # Check arguments - all processes have this, so just check on the first
     # process
