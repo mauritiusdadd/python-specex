@@ -8,7 +8,6 @@ This module provides functions to stack spectral cubes.
 Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import os
-import sys
 import argparse
 import numpy as np
 from astropy.wcs import WCS

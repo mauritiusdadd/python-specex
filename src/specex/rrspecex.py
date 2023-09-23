@@ -28,12 +28,6 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 
 try:
-    import redrock
-except (ModuleNotFoundError, Exception):
-    HAS_REDROCK = False
-else:
-    HAS_REDROCK = True
-
     from redrock.utils import elapsed, get_mp
     from redrock.targets import Spectrum, Target, DistTargetsCopy
     from redrock.templates import load_dist_templates, find_templates, Template
@@ -41,10 +35,14 @@ else:
     from redrock.zfind import zfind
     from redrock._version import __version__
     from redrock.archetypes import All_archetypes
+except (ModuleNotFoundError, Exception):
+    HAS_REDROCK = False
+else:
+    HAS_REDROCK = True
 
 from .exceptions import exception_handler
 from .utils import (
-    plot_zfit_check, get_mask_intervals, plot_scandata, get_pbar
+    plot_zfit_check, plot_scandata, get_pbar
 )
 
 from .cube import (
@@ -777,11 +775,6 @@ def rrspecex(options=None, comm=None):
             comm.Abort()
 
     _ = elapsed(global_start, "Total run time", comm=comm)
-
-    if comm_rank == 0:
-        if args.debug:
-            import IPython
-            IPython.embed()
 
     return targets, zbest, scandata
 

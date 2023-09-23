@@ -32,13 +32,6 @@ from astropy.visualization import quantity_support
 
 from .utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
 from .cube import get_hdu, get_rgb_cutout, get_gray_cutout
-from .cube import (
-    KNOWN_SPEC_EXT_NAMES,
-    KNOWN_VARIANCE_EXT_NAMES,
-    KNOWN_INVAR_EXT_NAMES,
-    KNOWN_MASK_EXT_NAMES,
-    KNOWN_RCURVE_EXT_NAMES
-)
 
 from .specex import load_specex_file
 
@@ -216,7 +209,6 @@ def plot_spectra(options=None):
         sys.stdout.flush()
 
         sp_dict = load_specex_file(spectrum_fits_file)
-
 
         if any(
                 x is None for x in [

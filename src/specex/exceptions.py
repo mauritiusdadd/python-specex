@@ -5,10 +5,9 @@ Created on Sat Sep 23 11:45:22 2023
 
 @author: daddona
 """
-
+import sys
 
 try:
-    import IPython
     from IPython.core import ultratb
 except Exception:
     HAS_IPYTHON = False

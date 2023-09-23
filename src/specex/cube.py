@@ -16,7 +16,7 @@ import warnings
 from typing import Optional, Union, Callable
 
 import numpy as np
-from scipy.ndimage import gaussian_filter, gaussian_filter1d, zoom
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from astropy import units
 from astropy.io import fits
@@ -980,6 +980,7 @@ def get_continuum_subtracted_slice(
         line_window_pix_low = int(line_wave_pix - line_window)
         line_window_pix_high = int(line_wave_pix + line_window)
 
+        """
         continuum_window_pix_low = int(
             line_window_pix_low - continuum_window/2
         )
@@ -988,7 +989,7 @@ def get_continuum_subtracted_slice(
         )
 
         cx_low = (continuum_window_pix_low + line_window_pix_low) / 2
-        cy_high = data[
+        cy_low = data[
             continuum_window_pix_low:line_window_pix_low, ...
         ].mean()
 
@@ -996,9 +997,10 @@ def get_continuum_subtracted_slice(
         cy_high = data[
             continuum_window_pix_low:line_window_pix_low, ...
         ].mean()
-
+        """
 
     line_slice = data[line_window_pix_low:line_window_pix_high, ...]
+
 
 def self_correlate(data: np.ndarray,
                    data_mask: Optional[np.ndarray] = None,
@@ -1008,7 +1010,7 @@ def self_correlate(data: np.ndarray,
                    similarity_function: Optional[str] = 'rms',
                    report_callback: Optional[Callable] = None) -> np.ndarray:
     if data_mask is not None and data.shape != data_mask.shape:
-            raise ValueError("data and data_mask must have the same shape!")
+        raise ValueError("data and data_mask must have the same shape!")
 
     hei, wid = data.shape[1:]
 
@@ -1091,7 +1093,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
 
     """
     if data_mask is not None and data.shape != data_mask.shape:
-            raise ValueError("data and data_mask must have the same shape!")
+        raise ValueError("data and data_mask must have the same shape!")
 
     smoothed_arr = data.copy()
 
@@ -1165,73 +1167,73 @@ def smoothing_main(options=None):
             print(f"\n[{fits_base_name}]")
 
         with fits.open(target_data_file, mode='readonly') as hdul:
-                spec_hdu = get_hdu(
-                    hdul,
-                    hdu_index=args.spec_hdu,
-                    valid_names=KNOWN_SPEC_EXT_NAMES,
-                    msg_err_notfound=(
-                        "ERROR: Cannot determine which HDU contains spectral "
-                        "data, try to specify it manually!"
-                    ),
-                    msg_index_error="ERROR: Cannot open HDU {} to read specra!"
-                )
+            spec_hdu = get_hdu(
+                hdul,
+                hdu_index=args.spec_hdu,
+                valid_names=KNOWN_SPEC_EXT_NAMES,
+                msg_err_notfound=(
+                    "ERROR: Cannot determine which HDU contains spectral "
+                    "data, try to specify it manually!"
+                ),
+                msg_index_error="ERROR: Cannot open HDU {} to read specra!"
+            )
 
-                spec_wcs = WCS(spec_hdu.header)
+            spec_wcs = WCS(spec_hdu.header)
 
-                var_hdu = get_hdu(
-                    hdul,
-                    hdu_index=args.var_hdu,
-                    valid_names=KNOWN_VARIANCE_EXT_NAMES,
-                    msg_err_notfound=(
-                        "WARNING: Cannot determine which HDU contains the "
-                        "variance data, try to specify it manually!"
-                    ),
-                    msg_index_error="WARNING: Cannot open HDU {} to read the "
-                                    "variance!",
-                    exit_on_errors=False
-                )
+            var_hdu = get_hdu(
+                hdul,
+                hdu_index=args.var_hdu,
+                valid_names=KNOWN_VARIANCE_EXT_NAMES,
+                msg_err_notfound=(
+                    "WARNING: Cannot determine which HDU contains the "
+                    "variance data, try to specify it manually!"
+                ),
+                msg_index_error="WARNING: Cannot open HDU {} to read the "
+                                "variance!",
+                exit_on_errors=False
+            )
 
-                mask_hdu = get_hdu(
-                    hdul,
-                    hdu_index=args.mask_hdu,
-                    valid_names=KNOWN_MASK_EXT_NAMES,
-                    msg_err_notfound=(
-                        "WARNING: Cannot determine which HDU contains the "
-                        "mask data, try to specify it manually!"
-                    ),
-                    msg_index_error="WARNING: Cannot open HDU {} to read the "
-                                    "mask!",
-                    exit_on_errors=False
-                )
+            mask_hdu = get_hdu(
+                hdul,
+                hdu_index=args.mask_hdu,
+                valid_names=KNOWN_MASK_EXT_NAMES,
+                msg_err_notfound=(
+                    "WARNING: Cannot determine which HDU contains the "
+                    "mask data, try to specify it manually!"
+                ),
+                msg_index_error="WARNING: Cannot open HDU {} to read the "
+                                "mask!",
+                exit_on_errors=False
+            )
 
-                if mask_hdu is not None:
-                    data_mask = mask_hdu.data
+            if mask_hdu is not None:
+                data_mask = mask_hdu.data
 
-                if args.verbose:
-                    print(">>> applying smoothing...")
-                    print(f"  - spatial_sigma: {args.spatial_sigma}")
-                    print(f"  - wave_sigma: {args.wave_sigma}")
+            if args.verbose:
+                print(">>> applying smoothing...")
+                print(f"  - spatial_sigma: {args.spatial_sigma}")
+                print(f"  - wave_sigma: {args.wave_sigma}")
 
-                smoothed_spec, smoothed_mask = smooth_cube(
-                    data=spec_hdu.data,
-                    data_mask=data_mask,
-                    spatial_sigma=args.spatial_sigma,
-                    wave_sigma=args.wave_sigma,
-                    report_callback=report_callback
-                )
+            smoothed_spec, smoothed_mask = smooth_cube(
+                data=spec_hdu.data,
+                data_mask=data_mask,
+                spatial_sigma=args.spatial_sigma,
+                wave_sigma=args.wave_sigma,
+                report_callback=report_callback
+            )
 
-                spec_hdu.data = smoothed_spec
-                if mask_hdu is not None:
-                    mask_hdu.data = smoothed_mask
+            spec_hdu.data = smoothed_spec
+            if mask_hdu is not None:
+                mask_hdu.data = smoothed_mask
 
-                out_fname = f"{fits_base_name}_smoothed.fits"
-                if args.verbose:
-                    print("  - saving to {out_fname}...")
+            out_fname = f"{fits_base_name}_smoothed.fits"
+            if args.verbose:
+                print("  - saving to {out_fname}...")
 
-                hdul.writeto(
-                    out_fname,
-                    overwrite=True
-                )
+            hdul.writeto(
+                out_fname,
+                overwrite=True
+            )
 
 
 def cutout_main(options=None):

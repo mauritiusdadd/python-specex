@@ -48,7 +48,6 @@ try:
     from regions import Regions
 except Exception:
     HAS_REGION = False
-    
 else:
     HAS_REGION = True
 
@@ -60,13 +59,6 @@ except Exception:
 else:
     HAS_RR = True
 
-try:
-    import IPython
-    from IPython.core import ultratb
-except Exception:
-    HAS_IPYTHON = False
-else:
-    HAS_IPYTHON = True
 
 SPECTRA_WEIGHTING_MODES = {
     'none': 'no weighting',
@@ -601,7 +593,7 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
         The index or name of the HDU containing the flux nan mask.
         The default is None.
     smoothing : int, optional
-        If greather than zero, the the spectrum is smoothed with a window of 
+        If greather than zero, the the spectrum is smoothed with a window of
         this size. The default is 0.
 
     Raises
@@ -613,7 +605,7 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
     -------
     dict
         A dict containing the following keys:
-        
+
         * 'id': the ID of the spectrum,
         * 'main_header': the FITS header of the primary HDU,
         * 'wavelength': the wavelengths of the dispersion grid,
@@ -631,7 +623,7 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
             for i in ['', 'OBJ', 'OBJ_', 'TARGET', 'TARGET_']
             for j in ['ID', 'NUMBER', 'UID', 'UUID']
         ]
-        
+
         spec_id = None
         for hdu in hdul:
             for key in valid_id_keys:
@@ -712,13 +704,13 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
                 )
             else:
                 try:
-                    coeff0 = spec_header["COEFF0"]
-                    coeff1 = spec_header["COEFF1"]
+                    coeff0 = spec_hdu.header["COEFF0"]
+                    coeff1 = spec_hdu.header["COEFF1"]
                 except KeyError:
                     lam = None
                 else:
                     lam = (10**(coeff0 + coeff1*pixel)).astype('float32')
-                    
+
             try:
                 flux_units = spec_hdu.header['BUNIT']
             except KeyError:
@@ -729,13 +721,13 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
             except KeyError:
                 wavelength_units = None
 
-        if mask_hdu is None:        
+        if mask_hdu is None:
             flux_nan_mask = None
         else:
             flux_nan_mask = mask_hdu.data.astype(bool)
             if flux is not None:
                 flux_nan_mask |= np.isnan(flux)
-        
+
         if var_hdu is None:
             if ivar_hdu is None:
                 var = None
@@ -758,13 +750,16 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
                 wd = savgol_filter(wd, smoothing_window_size, 3)
             wd = wd.astype('float32')
 
-        if (flux is not None) and (var is not None) and flux.shape!=var.shape:
+        if (
+            (flux is not None) and
+            (var is not None) and
+            flux.shape != var.shape
+        ):
             raise ValueError(
-                f"'{fits_file}' - "
+                f"'{filename}' - "
                 "Spectral data invalid or corruptede: Flux data shape "
                 "do not match variance data one!"
             )
-
 
     return {
         'id': spec_id,
@@ -774,10 +769,9 @@ def load_specex_file(filename, spec_hdu_index=None, var_hdu_index=None,
         'variance': var,
         'r_curve': wd,
         'nan_mask': flux_nan_mask,
-        'flux_units':flux_units,
+        'flux_units': flux_units,
         'wavelength_units': wavelength_units
     }
-
 
 
 def speclist2ez(spec_files, spec_hdu_name='SPECTRUM', var_hdu_name='VARIANCE'):
@@ -852,7 +846,7 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
         try:
             reg_id = reg.meta['text']
-        except:
+        except Exception:
             reg_id = j
 
         try:

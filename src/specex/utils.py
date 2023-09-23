@@ -30,7 +30,6 @@ from astropy import wcs as apwcs
 from astropy import units as apu
 from astropy import coordinates
 from astropy import constants
-from astropy.visualization import quantity_support
 
 from .lines import get_lines
 
@@ -838,7 +837,7 @@ def plot_masked_regions(ax, wavelengths, nan_mask, wave_range=None,
 
 
 def plot_lines(ax, wave_range, lw=0.7, lines_z=0, label_size='medium',
-               colors=['green', 'red', 'yellow'], label_y = 0.02,
+               colors=['green', 'red', 'yellow'], label_y=0.02,
                alpha=[0.5, 0.75, 0.9], ls=['--', '--', '--'],
                label_rotation=90,):
     """
