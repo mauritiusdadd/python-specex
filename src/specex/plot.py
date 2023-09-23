@@ -32,6 +32,15 @@ from astropy.visualization import quantity_support
 
 from .utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
 from .cube import get_hdu, get_rgb_cutout, get_gray_cutout
+from .cube import (
+    KNOWN_SPEC_EXT_NAMES,
+    KNOWN_VARIANCE_EXT_NAMES,
+    KNOWN_INVAR_EXT_NAMES,
+    KNOWN_MASK_EXT_NAMES,
+    KNOWN_RCURVE_EXT_NAMES
+)
+
+from .specex import load_specex_file
 
 try:
     import imageio
@@ -206,206 +215,161 @@ def plot_spectra(options=None):
         sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
         sys.stdout.flush()
 
-        with fits.open(spectrum_fits_file) as hdulist:
-            main_header = get_hdu(
-                hdulist,
-                hdu_index=0,
-                valid_names=['PRIMARY', 'primary'],
-                msg_index_error="WARNING: No Primary HDU",
-                exit_on_errors=False
-            ).header
-            spec_hdu = get_hdu(
-                hdulist,
-                valid_names=['SPEC', 'spec', 'SPECTRUM', 'spectrum'],
-                msg_err_notfound="WARNING: No spectrum HDU",
-                exit_on_errors=False
-            )
-            var_hdu = get_hdu(
-                hdulist,
-                valid_names=['VAR', 'var', 'VARIANCE', 'variance'],
-                msg_err_notfound="WARNING: No variance HDU",
-                exit_on_errors=False
-            )
+        sp_dict = load_specex_file(spectrum_fits_file)
 
-            nan_mask_hdu = get_hdu(
-                hdulist,
-                valid_names=[
-                    'NAN_MASK', 'nan_mask',
-                    'NANMASK', 'MASK',
-                    'nanmask', 'mask'
-                ],
-                exit_on_errors=False
-            )
 
-            if any(x is None for x in [main_header, spec_hdu, var_hdu]):
-                print(f"Skipping file '{spectrum_fits_file}'\n")
-                continue
+        if any(
+                x is None for x in [
+                    sp_dict['main_header'],
+                    sp_dict['flux'],
+                    sp_dict['variance']
+                ]
+        ):
+            print(f"Skipping file '{spectrum_fits_file}'\n")
+            continue
+
+        try:
+            object_ra = sp_dict['main_header']['RA']
+            object_dec = sp_dict['main_header']['DEC']
+            object_id = sp_dict['main_header']['ID']
+            extraction_mode = sp_dict['main_header']['EXT_MODE']
+            specex_apertures = [
+                apu.Quantity(x)
+                for x in json.loads(sp_dict['main_header']['EXT_APER'])
+            ]
+        except KeyError:
+            print(
+                f"Skipping file with invalid header: {spectrum_fits_file}"
+            )
+            continue
+        else:
 
             try:
-                object_ra = main_header['RA']
-                object_dec = main_header['DEC']
-                object_id = main_header['ID']
-                extraction_mode = main_header['EXT_MODE']
-                specex_apertures = [
-                    apu.Quantity(x)
-                    for x in json.loads(main_header['EXT_APER'])
-                ]
+                object_coord_frame = sp_dict['main_header']['FRAME']
+            except KeyError:
+                object_coord_frame = 'icrs'
+
+            obj_center = SkyCoord(
+                object_ra, object_dec,
+                unit='deg',
+                frame=object_coord_frame
+            )
+
+        info_dict = {
+            'ID': f"{object_id}",
+            'RA': obj_center.ra.to_string(precision=2),
+            'DEC': obj_center.dec.to_string(precision=2),
+            'FRAME': str(object_coord_frame).upper()
+        }
+        for key in ['Z', 'SN', 'SN_EMISS']:
+            try:
+                info_dict[key] = f"{sp_dict['main_header'][key]:.4f}"
+            except KeyError:
+                continue
+
+        wave_range = None
+        if zcat is not None:
+            try:
+                object_z = zcat.loc[object_id][args.key_z]
             except KeyError:
                 print(
-                    f"Skipping file with invalid header: {spectrum_fits_file}"
+                    f"WARNING: '{object_id}' not in zcat, skipping...",
+                    file=sys.stderr
                 )
                 continue
             else:
-
                 try:
-                    object_coord_frame = main_header['FRAME']
-                except KeyError:
-                    object_coord_frame = 'fk5'
+                    # In case of repeated objects
+                    object_z = object_z[0]
+                except IndexError:
+                    # Otherwise just go ahead
+                    pass
 
-                obj_center = SkyCoord(
-                    object_ra, object_dec,
-                    unit='deg',
-                    frame=object_coord_frame
-                )
-
-            info_dict = {
-                'ID': f"{object_id}",
-                'RA': obj_center.ra.to_string(precision=2),
-                'DEC': obj_center.dec.to_string(precision=2),
-                'FRAME': str(object_coord_frame).upper()
-            }
-            for key in ['Z', 'SN', 'SN_EMISS']:
-                try:
-                    info_dict[key] = f"{main_header[key]:.4f}"
-                except KeyError:
-                    continue
-
-            try:
-                flux_units = spec_hdu.header['BUNIT']
-            except KeyError:
-                flux_units = None
-
-            try:
-                wavelenght_units = spec_hdu.header['CUNIT1']
-            except KeyError:
-                wavelenght_units = None
-
-            wave_range = None
-            if zcat is not None:
-                try:
-                    object_z = zcat.loc[object_id][args.key_z]
-                except KeyError:
-                    print(
-                        f"WARNING: '{object_id}' not in zcat, skipping...",
-                        file=sys.stderr
-                    )
-                    continue
-                else:
+                if args.key_wrange is not None:
+                    str_wrange = zcat.loc[object_id][args.key_wrange]
                     try:
-                        # In case of repeated objects
-                        object_z = object_z[0]
-                    except IndexError:
-                        # Otherwise just go ahead
-                        pass
+                        wave_range = [
+                            float(x) for x in str_wrange.split('-')
+                        ]
+                    except Exception:
+                        continue
 
-                    if args.key_wrange is not None:
-                        str_wrange = zcat.loc[object_id][args.key_wrange]
-                        try:
-                            wave_range = [
-                                float(x) for x in str_wrange.split('-')
-                            ]
-                        except Exception:
-                            continue
-
+            restframe = args.restframe
+            info_dict['Z'] = object_z
+        else:
+            # If no zcat is provided, check if redshift information is
+            # stored in the spectrum itself
+            if 'Z' in info_dict:
+                object_z = float(info_dict['Z'])
                 restframe = args.restframe
-                info_dict['Z'] = object_z
             else:
-                # If no zcat is provided, check if redshift information is
-                # stored in the spectrum itself
-                if 'Z' in info_dict:
-                    object_z = float(info_dict['Z'])
-                    restframe = args.restframe
-                else:
-                    object_z = None
-                    restframe = False
+                object_z = None
+                restframe = False
 
-            flux_data = spec_hdu.data
-            spec_wcs = wcs.WCS(spec_hdu.header, fobj=hdulist)
-            var_data = var_hdu.data
-
-            if nan_mask_hdu is not None:
-                nan_mask = nan_mask_hdu.data == 1
+        if big_image is not None:
+            if big_image['type'] == 'rgb':
+                cutout_dict = get_rgb_cutout(
+                    big_image['data'],
+                    center=obj_center,
+                    size=cutout_size,
+                    data_wcs=big_image['wcs']
+                )
+                cutout = np.asarray(cutout_dict['data']).transpose(1, 2, 0)
+                cutout_wcs = cutout_dict['wcs'][0]
             else:
-                nan_mask = None
+                cutout_dict = get_gray_cutout(
+                    big_image['data'],
+                    center=obj_center,
+                    size=cutout_size,
+                    data_wcs=big_image['wcs']
+                )
+                cutout = np.array(cutout_dict['data'])
+                cutout_wcs = cutout_dict['wcs']
+            cutout_vmin = np.nanmin(big_image['data'])
+            cutout_vmax = np.nanmax(big_image['data'])
+        else:
+            cutout = None
+            cutout_wcs = None
+            cutout_vmin = None
+            cutout_vmax = None
 
-            # NOTE: Wavelenghts must be in Angstrom units
-            pixel = np.arange(len(flux_data))
-            wavelenghts = spec_wcs.pixel_to_world(pixel).Angstrom
+        fig, axs = plot_spectrum(
+            sp_dict['wavelength'],
+            sp_dict['flux'],
+            sp_dict['variance'],
+            nan_mask=sp_dict['nan_mask'],
+            redshift=object_z,
+            restframe=restframe,
+            cutout=cutout,
+            cutout_wcs=cutout_wcs,
+            cutout_vmin=cutout_vmin,
+            cutout_vmax=cutout_vmax,
+            flux_units=sp_dict['flux_units'],
+            wavelengt_units=sp_dict['wavelength_units'],
+            smoothing=args.smoothing,
+            extra_info=info_dict,
+            extraction_info={
+                'mode': extraction_mode,
+                'apertures': specex_apertures,
+                'aperture_ra': object_ra,
+                'aperture_dec': object_dec,
+                'frame': object_coord_frame
+            },
+            wave_range=wave_range
+        )
 
-            if big_image is not None:
-                if big_image['type'] == 'rgb':
-                    cutout_dict = get_rgb_cutout(
-                        big_image['data'],
-                        center=obj_center,
-                        size=cutout_size,
-                        data_wcs=big_image['wcs']
-                    )
-                    cutout = np.asarray(cutout_dict['data']).transpose(1, 2, 0)
-                    cutout_wcs = cutout_dict['wcs'][0]
-                else:
-                    cutout_dict = get_gray_cutout(
-                        big_image['data'],
-                        center=obj_center,
-                        size=cutout_size,
-                        data_wcs=big_image['wcs']
-                    )
-                    cutout = np.array(cutout_dict['data'])
-                    cutout_wcs = cutout_dict['wcs']
-                cutout_vmin = np.nanmin(big_image['data'])
-                cutout_vmax = np.nanmax(big_image['data'])
-            else:
-                cutout = None
-                cutout_wcs = None
-                cutout_vmin = None
-                cutout_vmax = None
+        if args.outdir is None:
+            outdir = os.path.dirname(spectrum_fits_file)
+        else:
+            outdir = args.outdir
+            if not os.path.isdir(outdir):
+                os.makedirs(outdir)
 
-            fig, axs = plot_spectrum(
-                wavelenghts,
-                flux_data,
-                var_data,
-                nan_mask=nan_mask,
-                redshift=object_z,
-                restframe=restframe,
-                cutout=cutout,
-                cutout_wcs=cutout_wcs,
-                cutout_vmin=cutout_vmin,
-                cutout_vmax=cutout_vmax,
-                flux_units=flux_units,
-                wavelengt_units=wavelenght_units,
-                smoothing=args.smoothing,
-                extra_info=info_dict,
-                extraction_info={
-                    'mode': extraction_mode,
-                    'apertures': specex_apertures,
-                    'aperture_ra': object_ra,
-                    'aperture_dec': object_dec,
-                    'frame': object_coord_frame
-                },
-                wave_range=wave_range
-            )
-
-            if args.outdir is None:
-                outdir = os.path.dirname(spectrum_fits_file)
-            else:
-                outdir = args.outdir
-                if not os.path.isdir(outdir):
-                    os.makedirs(outdir)
-
-            fig_out_name = os.path.basename(spectrum_fits_file)
-            fig_out_name = os.path.splitext(fig_out_name)[0]
-            fig_out_path = os.path.join(outdir, f"{fig_out_name}.png")
-            fig.savefig(fig_out_path, dpi=150)
-            plt.close(fig)
+        fig_out_name = os.path.basename(spectrum_fits_file)
+        fig_out_name = os.path.splitext(fig_out_name)[0]
+        fig_out_path = os.path.join(outdir, f"{fig_out_name}.png")
+        fig.savefig(fig_out_path, dpi=150)
+        plt.close(fig)
 
     print(f"\r{get_pbar(1)} 100%")
 

@@ -42,10 +42,18 @@ else:
     from redrock._version import __version__
     from redrock.archetypes import All_archetypes
 
+from .exceptions import exception_handler
 from .utils import (
     plot_zfit_check, get_mask_intervals, plot_scandata, get_pbar
 )
 
+from .cube import (
+    KNOWN_SPEC_EXT_NAMES,
+    KNOWN_VARIANCE_EXT_NAMES,
+    KNOWN_INVAR_EXT_NAMES,
+    KNOWN_MASK_EXT_NAMES,
+    KNOWN_RCURVE_EXT_NAMES
+)
 
 MUSE_RESOLUTION_ANG = 2.51
 
@@ -229,7 +237,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None,
 
         if spec_hdu is None:
             for hdu in hdul:
-                if hdu.name.lower() in ['spec', 'spectrum', 'data']:
+                if hdu.name.lower() in KNOWN_SPEC_EXT_NAMES:
                     flux = hdu.data
                     if smoothing > 0:
                         window_size = 4*smoothing + 1
@@ -247,7 +255,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None,
             spec_wcs = wcs.WCS(hdul[spec_hdu].header)
 
         for hdu in hdul:
-            if hdu.name.lower() in ['mask', 'nanmask', 'nan_mask', 'nans']:
+            if hdu.name.lower() in KNOWN_MASK_EXT_NAMES:
                 nanmask = hdu.data.astype(bool)
                 break
         else:
@@ -255,10 +263,10 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None,
 
         if var_hdu is None:
             for hdu in hdul:
-                if hdu.name.lower() in ['var', 'variance', 'stat']:
+                if hdu.name.lower() in KNOWN_VARIANCE_EXT_NAMES:
                     ivar = 1 / hdu.data
                     break
-                elif hdu.name.lower() in ['ivar', 'ivariance']:
+                elif hdu.name.lower() in KNOWN_INVAR_EXT_NAMES:
                     ivar = hdu.data
                     break
             else:
@@ -272,7 +280,7 @@ def read_spectra(spectra_fits_list, spec_hdu=None, var_hdu=None, wd_hdu=None,
 
         if wd_hdu is None:
             for hdu in hdul:
-                if hdu.name.lower() in ['wd', 'dispersion', 'resolution']:
+                if hdu.name.lower() in KNOWN_RCURVE_EXT_NAMES:
                     wd = hdu.data
                     break
             else:
@@ -538,6 +546,11 @@ def rrspecex(options=None, comm=None):
         target
     """
     global HAS_REDROCK
+    global HAS_IPYTHON
+
+    if args.debug:
+        sys.excepthook = exception_handler
+        
 
     global_start = elapsed(None, "", comm=comm)
     comm_size = 1
@@ -774,14 +787,5 @@ def rrspecex(options=None, comm=None):
     return targets, zbest, scandata
 
 
-def main():
-    """Run rrspecex."""
-    try:
-        _ = rrspecex()
-    except Exception as exc:
-        print(exc, file=sys.stderr)
-        sys.exit(1)
-
-
 if __name__ == '__main__':
-    _ = main()
+    _ = rrspecex()

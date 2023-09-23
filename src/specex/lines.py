@@ -243,7 +243,7 @@ def get_spectrum_lines(
         the index k for the wavelenght w of the line, the approximate max width
         l of the line and a height h of the line. Note that l and h are not
         actual phisical quantities and should be used with caution when
-        comparing to other value from a different spectrum.
+        comparing to other values from a different spectrum.
     """
     if np.isnan(flux).all():
         return np.nan

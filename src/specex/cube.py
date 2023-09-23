@@ -31,9 +31,10 @@ from .utils import get_pc_transform_params, rotate_data, get_pbar
 
 KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
 KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
-KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq']
+KNOWN_INVAR_EXT_NAMES = ['ivar', 'ivariance']
+KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq', 'nan_mask']
 KNOWN_WAVE_EXT_NAMES = ['wave', 'wavelenght', 'lambda', 'lam']
-KNOWN_RCURVE_EXT_NAMES = ['r', 'reso', 'resolution', 'rcurve']
+KNOWN_RCURVE_EXT_NAMES = ['r', 'reso', 'resolution', 'rcurve', 'wd']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
 
 
@@ -807,7 +808,7 @@ def _get_fits_data_structure(fits_file):
     return data_structure
 
 
-def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
+def get_hdu(hdl, valid_names, hdu_index=None, msg_err_notfound=None,
             msg_index_error=None, exit_on_errors=True):
     """
     Find a valid HDU in a HDUList.
@@ -818,8 +819,8 @@ def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
         A list of HDUs.
     valid_names : list or tuple of str
         A list of possible names for the valid HDU.
-    hdu_index : int, optional
-        Manually specify which HDU to use. The default is -1.
+    hdu_index : int or str, optional
+        Manually specify which HDU to use. The default is None.
     msg_err_notfound : str or None, optional
         Error message to be displayed if no valid HDU is found.
         The default is None.
@@ -839,7 +840,7 @@ def get_hdu(hdl, valid_names, hdu_index=-1, msg_err_notfound=None,
 
     """
     valid_hdu = None
-    if hdu_index < 0:
+    if hdu_index is None:
         # Try to detect HDU containing spectral data
         for hdu in hdl:
             if hdu.name.lower() in valid_names:

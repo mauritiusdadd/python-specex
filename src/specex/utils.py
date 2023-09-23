@@ -512,7 +512,7 @@ def log_rebin(wave, spec_list, oversample=1, flux_conserving=False):
     Parameters
     ----------
     wave : list or numpy.ndarray
-        The wavelenghts of the originaò dispersion grating.
+        The wavelengths of the originaò dispersion grating.
     spec_list : list
         A list of numpy.ndarrays corrsponding toe the fulx or other quantities
         to be rebinned with the dispersion grating.
@@ -740,6 +740,196 @@ def get_ellipse_skypoints(center: coordinates.SkyCoord,
     return ellipse_points
 
 
+def plot_masked_regions(ax, wavelengths, nan_mask, wave_range=None,
+                        label_min_wid=100):
+    """
+    Plot a mask over a region containing missing data.
+
+    Parameters
+    ----------
+    ax : TYPE
+        DESCRIPTION.
+    wavelengths : TYPE
+        DESCRIPTION.
+    nan_mask : TYPE
+        DESCRIPTION.
+    wave_range : TYPE, optional
+        DESCRIPTION. The default is None.
+    label_min_wid : intm optional
+        The default value is 100.
+    Returns
+    -------
+    region_patches : dict
+        DESCRIPTION.
+
+    """
+    region_patches = {
+        'background': [],
+        'area': [],
+        'text': []
+    }
+
+    if nan_mask is None:
+        return region_patches
+
+    if wave_range is None:
+        w_min = np.nanmin(wavelengths)
+        w_max = np.nanmax(wavelengths)
+    else:
+        w_min = np.min(wave_range)
+        w_max = np.max(wave_range)
+
+    lam_mask = np.array([
+        (wavelengths[m_start], wavelengths[m_end])
+        for m_start, m_end in get_mask_intervals(nan_mask)
+    ])
+
+    w_min = np.nanmin(wavelengths)
+    w_max = np.nanmax(wavelengths)
+
+    for lam_inter in lam_mask:
+        rect = patches.Rectangle(
+            (lam_inter[0], 0),
+            lam_inter[1] - lam_inter[0], 1,
+            transform=ax.get_xaxis_transform(),
+            linewidth=1,
+            fill=True,
+            edgecolor='black',
+            facecolor='white',
+            zorder=10
+        )
+        ax.add_patch(rect)
+        region_patches['background'].append(rect)
+
+        rect = patches.Rectangle(
+            (lam_inter[0], 0),
+            lam_inter[1] - lam_inter[0], 1,
+            transform=ax.get_xaxis_transform(),
+            linewidth=1,
+            fill=True,
+            edgecolor='black',
+            facecolor='white',
+            hatch='///',
+            zorder=11
+        )
+        ax.add_patch(rect)
+        region_patches['area'].append(rect)
+        if (
+            (lam_inter[1] > w_min + label_min_wid) and
+            (lam_inter[0] < w_max - label_min_wid)
+        ):
+            text = ax.text(
+                (lam_inter[0] + lam_inter[1]) / 2, 0.5,
+                "MISSING DATA",
+                transform=ax.get_xaxis_transform(),
+                va='center',
+                ha='center',
+                rotation=90,
+                bbox={
+                    'facecolor': 'white',
+                    'edgecolor': 'black',
+                    'boxstyle': 'round,pad=0.5',
+                },
+                zorder=12,
+                clip_on=True
+            )
+            region_patches['text'].append(text)
+    return region_patches
+
+
+def plot_lines(ax, wave_range, lw=0.7, lines_z=0, label_size='medium',
+               colors=['green', 'red', 'yellow'], label_y = 0.02,
+               alpha=[0.5, 0.75, 0.9], ls=['--', '--', '--'],
+               label_rotation=90,):
+    """
+    Plot emission and/or absorption lines.
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+        The Axes where to draw the lines.
+    wave_range : liat or numpy.ndarray
+        wavelength range.
+    lw : float, optional
+        width of the plotted lines. The default is 0.7.
+    lines_z : float, optional
+        The redshift. The default is 0.
+    label_size : float or str, optional
+        The size of the labels. The deafult value is 'medium'.
+    colors : list of 3 colors, optional
+        The color used to draw the different type of lines. The first color is
+        assinged to absorption lines, the second one to emission lines and the
+        third one to lines that can be both absoprtion and emission.
+        The default value is ['green', 'red', 'yellow'].
+    label_y : float, optional
+        The position of the labels in axis-coordinates.
+        The default value is 0.02
+    alpha : list of 3 floats, optional
+        The value of the alpha transparence used to draw the lines. The order
+        is the same of the colors array. The default value is [0.5, 0.75, 0.9].
+    ls : list of 3 line styles, optional
+        Styles used to plot lines. The order is the same of the colors array.
+        The default value is ['--', '--', '--']
+    label_rotation : float, optional
+        The rotation in degrees of the labels. The default value is 90
+    Returns
+    -------
+    None.
+
+    """
+    w_min = np.min(wave_range)
+    w_max = np.max(wave_range)
+
+    absorption_lines = get_lines(
+        line_type='A', wrange=[w_min, w_max], z=lines_z
+    )
+    for line_lam, line_name, line_type in absorption_lines:
+        ax.axvline(
+            line_lam, color=colors[0], ls='--', lw=lw, alpha=alpha[0],
+            label='absorption lines'
+        )
+        ax.text(
+            line_lam, label_y, line_name, rotation=label_rotation,
+            transform=ax.get_xaxis_transform(),
+            zorder=99,
+            fontsize=label_size
+        )
+
+    # Plotting emission lines
+    emission_lines = get_lines(
+        line_type='E', wrange=[w_min, w_max], z=lines_z
+    )
+    for line_lam, line_name, line_type in emission_lines:
+        ax.axvline(
+            line_lam, color=colors[1], ls='--', lw=lw, alpha=alpha[1],
+            label='emission lines',
+            zorder=2
+        )
+        ax.text(
+            line_lam, label_y, line_name, rotation=label_rotation,
+            transform=ax.get_xaxis_transform(),
+            zorder=99,
+            fontsize=label_size
+        )
+
+    # Plotting emission/absorption lines
+    emission_lines = get_lines(
+        line_type='AE', wrange=[w_min, w_max], z=lines_z
+    )
+    for line_lam, line_name, line_type in emission_lines:
+        ax.axvline(
+            line_lam, color=colors[2], ls='--', lw=lw, alpha=alpha[2],
+            label='emission/absorption lines',
+            zorder=3
+        )
+        ax.text(
+            line_lam, label_y, line_name, rotation=label_rotation,
+            transform=ax.get_xaxis_transform(),
+            zorder=99,
+            fontsize=label_size
+        )
+
+
 def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                   restframe=False, cutout=None, cutout_vmin=None,
                   cutout_vmax=None, cutout_wcs=None, redshift=None,
@@ -804,7 +994,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         used by specex over the cutout (if provided).
         The default is {}.
     wave_range: list, optional
-        Range of wavelenghts to plot. The default value is None.
+        Range of wavelengths to plot. The default value is None.
     show_legend: bool, optional
         Show the legend if true. Default value it True.
     axs: list of matplotlib.axes._subplots.AxesSubplots, optional
@@ -819,17 +1009,11 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         A list of the axes subplots in the figure.
     """
     if nan_mask is not None:
-        lam_mask = np.array([
-            (wavelengths[m_start], wavelengths[m_end])
-            for m_start, m_end in get_mask_intervals(nan_mask)
-        ])
-
         if variance is not None:
             var_max = np.nanmax(variance[~nan_mask])
         else:
             var_max = 1
     else:
-        lam_mask = None
         if variance is not None:
             var_max = np.nanmax(variance)
         else:
@@ -840,8 +1024,6 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
 
     if restframe and redshift is not None:
         wavelengths = wavelengths / (1 + redshift)
-        if lam_mask is not None:
-            lam_mask = lam_mask / (1 + redshift)
         lines_z = 0
     else:
         wavelengths = wavelengths
@@ -860,11 +1042,11 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
                 'latex', fraction='inline'
             )
         except Exception:
-            x_label = f'Wavelenght [{wavelengt_units}]'
+            x_label = f'Wavelength [{wavelengt_units}]'
         else:
-            x_label = f'Wavelenght [{x_unit}]'
+            x_label = f'Wavelength [{x_unit}]'
     else:
-        x_label = 'Wavelenght'
+        x_label = 'Wavelength'
 
     if flux_units:
         try:
@@ -1053,93 +1235,10 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         )
 
     if redshift is not None:
-        # Plotting absorption lines
-        absorption_lines = get_lines(
-            line_type='A', wrange=[w_min, w_max], z=lines_z
-        )
-        for line_lam, line_name, line_type in absorption_lines:
-            ax0.axvline(
-                line_lam, color='green', ls='--', lw=0.7, alpha=0.5,
-                label='absorption lines'
-            )
-            ax0.text(
-                line_lam, 0.02, line_name, rotation=90,
-                transform=ax0.get_xaxis_transform(),
-                zorder=99
-            )
-
-        # Plotting emission lines
-        emission_lines = get_lines(
-            line_type='E', wrange=[w_min, w_max], z=lines_z
-        )
-        for line_lam, line_name, line_type in emission_lines:
-            ax0.axvline(
-                line_lam, color='red', ls='--', lw=0.7, alpha=0.75,
-                label='emission lines',
-                zorder=2
-            )
-            ax0.text(
-                line_lam, 0.02, line_name, rotation=90,
-                transform=ax0.get_xaxis_transform(),
-                zorder=99
-            )
-
-        # Plotting emission/absorption lines
-        emission_lines = get_lines(
-            line_type='AE', wrange=[w_min, w_max], z=lines_z
-        )
-        for line_lam, line_name, line_type in emission_lines:
-            ax0.axvline(
-                line_lam, color='yellow', ls='--', lw=0.5, alpha=0.9,
-                label='emission/absorption lines',
-                zorder=3
-            )
-            ax0.text(
-                line_lam, 0.02, line_name, rotation=90,
-                transform=ax0.get_xaxis_transform(),
-                zorder=99
-            )
+        plot_lines(ax0, [w_min, w_max], lines_z=lines_z)
 
     # Draw missing data or invalid data regions
-    if lam_mask is not None:
-        for lam_inter in lam_mask:
-            rect = patches.Rectangle(
-                (lam_inter[0], 0),
-                lam_inter[1] - lam_inter[0], 1,
-                transform=ax0.get_xaxis_transform(),
-                linewidth=1,
-                fill=True,
-                edgecolor='black',
-                facecolor='white',
-                zorder=10
-            )
-            rect = patches.Rectangle(
-                (lam_inter[0], 0),
-                lam_inter[1] - lam_inter[0], 1,
-                transform=ax0.get_xaxis_transform(),
-                linewidth=1,
-                fill=True,
-                edgecolor='black',
-                facecolor='white',
-                hatch='///',
-                zorder=11
-            )
-            ax0.add_patch(rect)
-            if ((lam_inter[1] > w_min + 100) and (lam_inter[0] < w_max - 100)):
-                ax0.text(
-                    (lam_inter[0] + lam_inter[1]) / 2, 0.5,
-                    "MISSING DATA",
-                    transform=ax0.get_xaxis_transform(),
-                    va='center',
-                    ha='center',
-                    rotation=90,
-                    bbox={
-                        'facecolor': 'white',
-                        'edgecolor': 'black',
-                        'boxstyle': 'round,pad=0.5',
-                    },
-                    zorder=12
-                )
+    _ = plot_masked_regions(ax0, wavelengths, nan_mask, wave_range)
 
     if show_legend:
         handles, labels = ax0.get_legend_handles_labels()
@@ -1194,7 +1293,7 @@ def plot_zfit_check(target, zbest, plot_template=None, restframe=False,
     rest_frame : bool, optional
         Whether to plot the spectrum at restrframe.
     wave_units : str, optional
-        The units of the wavelenght grid. The default value id 'Angstrom'
+        The units of the wavelength grid. The default value id 'Angstrom'
     flux_units : str, optional
         The units of the spectum. The default value is ''.
 
@@ -1309,7 +1408,7 @@ def get_mask_intervals(mask):
     return regions
 
 
-def stack(data, wave_mask=None):
+def stack(data, wave_mask=None, quite=False):
     """
     Stack the spectral cube along wavelength axis.
 
@@ -1318,8 +1417,11 @@ def stack(data, wave_mask=None):
     data : numpy.ndarray
         The spectral datacube.
     wave_mask : 1D np.ndarray, optional
-        Optional wavelength mask. Wavelenght corresponding to a False will not
+        Optional wavelength mask. Wavelength corresponding to a False will not
         be used in the stacking. The default is None.
+    quite : bool, optional
+        Whether to avoid printing a progress bar or not.
+        The default value is False.
 
     Returns
     -------
@@ -1330,11 +1432,12 @@ def stack(data, wave_mask=None):
     img_height, img_width = data.shape[1], data.shape[2]
     new_data = np.zeros((img_height, img_width))
     for k, dat in enumerate(data):
-        progress = (k + 1) / len(data)
-        sys.stderr.write(
-            f"\rstacking cube: {get_pbar(progress)} {progress:.2%}\r"
-        )
-        sys.stderr.flush()
+        if (not quite) and (k % 10 == 0):
+            progress = (k + 1) / len(data)
+            sys.stderr.write(
+                f"\rstacking cube: {get_pbar(progress)} {progress:.2%}\r"
+            )
+            sys.stderr.flush()
         if wave_mask is None or wave_mask[k].any():
             new_data = np.nansum(np.array([new_data, dat]), axis=0)
     print("", file=sys.stderr)
