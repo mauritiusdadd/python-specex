@@ -54,12 +54,12 @@ def static_vars(**kwargs):
     Parameters
     ----------
     **kwargs : TYPE
-        DESCRIPTION.
+        Keyword arguments will be added as attributes.
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    func
+        The decorator function.
 
     """
     def decorate(func):
@@ -927,6 +927,7 @@ def plot_masked_regions(ax, wavelengths, nan_mask, wave_range=None,
         DESCRIPTION. The default is None.
     label_min_wid : intm optional
         The default value is 100.
+
     Returns
     -------
     region_patches : dict
@@ -1042,6 +1043,7 @@ def plot_lines(ax, wave_range, lw=0.7, lines_z=0, label_size='medium',
         The default value is ['--', '--', '--']
     label_rotation : float, optional
         The rotation in degrees of the labels. The default value is 90
+
     Returns
     -------
     None.

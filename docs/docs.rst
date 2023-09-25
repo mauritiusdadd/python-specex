@@ -9,5 +9,6 @@
    module_docs/stack
    module_docs/utils
    module_docs/zeropoints
+   module_docs/exceptions
    :maxdepth: 0
    :caption: Contents:

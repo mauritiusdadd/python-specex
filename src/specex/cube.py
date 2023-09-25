@@ -196,6 +196,7 @@ class SpectraCube():
             The default is None.
         mode : Optional[str], optional
             The mode passed to astropy.io.fits.open
+
         Returns
         -------
         SpectraCube.

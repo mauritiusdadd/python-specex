@@ -37,11 +37,13 @@ The cube can be smoothed also along the spectra axis using a sigma in either phy
 or pixel unit
 
 .. code-block:: bash
+
     specex-smooth ADP.2023-09-01T12_56_41.595.fits --wave-sigma 1angstrom
 
 And, of course, spatial and spectral smoothing can be applied at the same time
 
 .. code-block:: bash
+
     specex-smooth ADP.2023-09-01T12_56_41.595.fits --spatial-sigma 0.5arcsec,0.3arcsec --wave-sigma 1angstrom
 
 Making Cutouts
