@@ -28,7 +28,7 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata.utils import Cutout2D
 
 from .utils import get_pc_transform_params, rotate_data, get_pbar
-from .utils import HAS_REGION, parse_regionfile
+from .utils import HAS_REGION, parse_regionfile, simple_pbar_callback
 from .exceptions import get_ipython_embedder
 
 if HAS_REGION:
@@ -277,12 +277,6 @@ class SpectraCube():
         if self.hdul is None:
             return False
         self.hdul.writeto(filename, **kwargs)
-
-
-def __simple_report_callback(k, total):
-    pbar = get_pbar(k / total)
-    sys.stderr.write(f"\r{pbar} {k} / {total} \r")
-    sys.stderr.flush()
 
 
 def __cutout_argshandler(options=None):
@@ -804,7 +798,7 @@ def get_cube_cutout(data: np.ndarray,
 
         cutout_data.append(cutout['data'])
         if report_callback is not None:
-            report_callback(k, data.shape[0])
+            report_callback(k, data.shape[0]-1)
 
     cutout_data = np.array(cutout_data)
 
@@ -1142,6 +1136,9 @@ def self_correlate(data: np.ndarray,
     block_id = 0
     for h in np.arange(hei, step=block_size):
         for k in np.arange(wid, step=block_size):
+            if report_callback is not None:
+                report_callback(block_id, int(wid*hei / (block_size**2))-1)
+
             block_id += 1
             if (
                 (sim_table[h:h+block_size, k:k+block_size] != 0).any() or
@@ -1151,9 +1148,6 @@ def self_correlate(data: np.ndarray,
                 )
             ):
                 continue
-
-            if report_callback is not None:
-                report_callback(block_id + 1, int(wid*hei / (block_size**2)))
 
             spaxel_data = np.nansum(
                 data[:, h:h+block_size, k:k+block_size],
@@ -1237,8 +1231,15 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
             wave_sigma = cube_wcs.spectral.world_to_pixel(p0 + wave_sigma)
     do_wave_smoohting = wave_sigma > 0
 
-    if isinstance(spatial_sigma, Number):
-        dp_spatial_smoothing = spatial_sigma > 0
+    if (
+        isinstance(spatial_sigma, Number) or
+        isinstance(spatial_sigma[0], Number)
+    ):
+        try:
+            dp_spatial_smoothing = spatial_sigma > 0
+        except TypeError:
+            dp_spatial_smoothing = spatial_sigma[0] > 0
+            dp_spatial_smoothing |= spatial_sigma[1] > 0
     else:
         if cube_wcs is None:
             raise ValueError(
@@ -1266,7 +1267,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
     if do_wave_smoohting:
         for h in range(smoothed_arr.shape[1]):
             if report_callback is not None:
-                report_callback(h, smoothed_arr.shape[1])
+                report_callback(h, smoothed_arr.shape[1] - 1)
             for k in range(smoothed_arr.shape[2]):
                 smoothed_spaxel = gaussian_filter1d(
                     smoothed_arr[:, h, k],
@@ -1281,7 +1282,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
     if dp_spatial_smoothing:
         for k, data_slice in enumerate(smoothed_arr):
             if report_callback is not None:
-                report_callback(k + 1, smoothed_arr.shape[0])
+                report_callback(k, smoothed_arr.shape[0] - 1)
             smoothed_slice = gaussian_filter(
                 data_slice,
                 sigma=spatial_sigma,
@@ -1296,7 +1297,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
         smoothed_mask = data_mask.copy().astype(bool)
         for k, mask_slice in enumerate(smoothed_mask):
             if report_callback is not None:
-                report_callback(k + 1, smoothed_mask.shape[0])
+                report_callback(k, smoothed_mask.shape[0] - 1)
                 smoothed_mask[k] &= ~np.isfinite(smoothed_arr[k])
         if report_callback is not None:
             print("")
@@ -1324,7 +1325,7 @@ def smoothing_main(options=None):
     args = __smoothing_argshandler(options)
 
     if args.verbose:
-        report_callback = __simple_report_callback
+        report_callback = simple_pbar_callback
     else:
         report_callback = None
 
@@ -1333,15 +1334,21 @@ def smoothing_main(options=None):
     except ValueError:
         wave_sigma = units.Quantity(args.wave_sigma)
 
+    spatial_sigma_list = args.spatial_sigma.split(',')
     try:
-        spatial_sigma = float(args.spatial_sigma)
-    except ValueError:
-        spatial_sigma_list = args.spatial_sigma.split(',')
         if len(spatial_sigma_list) > 1:
-            spatial_sigma = [
+            spatial_sigma = (
+                float(spatial_sigma_list[0]),
+                float(spatial_sigma_list[1])
+            )
+        else:
+            spatial_sigma = float(spatial_sigma_list[0])
+    except ValueError:
+        if len(spatial_sigma_list) > 1:
+            spatial_sigma = (
                 units.Quantity(spatial_sigma_list[0]),
                 units.Quantity(spatial_sigma_list[1])
-            ]
+            )
         else:
             spatial_sigma = units.Quantity(spatial_sigma_list[0])
 
@@ -1568,7 +1575,7 @@ def cutout_main(options=None):
             f" DQ EXT: {data_structure['mask-ext']}\n",
             file=sys.stderr
         )
-        report_callback = __simple_report_callback
+        report_callback = simple_pbar_callback
     else:
         report_callback = None
 

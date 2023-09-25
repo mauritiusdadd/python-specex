@@ -29,10 +29,10 @@ from astropy import units
 
 import matplotlib.pyplot as plt
 
-from .utils import plot_zfit_check, get_log_img, get_pbar
+from .utils import plot_zfit_check, get_log_img
 from .utils import stack, plot_scandata
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
-from .utils import HAS_REGION, parse_regionfile
+from .utils import HAS_REGION, parse_regionfile, simple_pbar_callback
 from .sources import get_spectrum
 from .cube import get_hdu, SpectraCube
 from .exceptions import exception_handler
@@ -1063,9 +1063,7 @@ def specex(options=None):
             )
 
         for i, source in enumerate(sources[:n_objects]):
-            progress = (i + 1) / n_objects
-            sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-            sys.stderr.flush()
+            simple_pbar_callback(i, n_objects-1)
 
             if key_id is not None:
                 obj_id = source[key_id]
@@ -1393,12 +1391,8 @@ def specex(options=None):
                     os.mkdir(x2_plots_out_dir)
 
             for i, target in enumerate(targets):
-                progress = (i + 1) / len(targets)
-                sys.stderr.write(
-                    "\rGenerating previews "
-                    f"{get_pbar(progress)} {progress:.2%}\r"
-                )
-                sys.stderr.flush()
+                logging.info("Generating previews...")
+                simple_pbar_callback(i, n_objects-1)
 
                 fig, axs = plot_zfit_check(
                     target,

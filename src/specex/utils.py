@@ -9,6 +9,7 @@ Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
 import os
 import sys
+import time
 import tarfile
 import logging
 import platform
@@ -44,6 +45,28 @@ else:
 
 
 _SDSS_SPECTRAL_TEMPLATES_PACKAGE = "http://classic.sdss.org/dr5/algorithms/spectemplates/spectemplatesDR2.tar.gz"
+
+
+def static_vars(**kwargs):
+    """
+    Add attributes to a function.
+
+    Parameters
+    ----------
+    **kwargs : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+    def decorate(func):
+        for k in kwargs:
+            setattr(func, k, kwargs[k])
+        return func
+    return decorate
 
 
 class ScaleBar:
@@ -250,6 +273,78 @@ def get_pbar(partial, total=None, wid=32, common_char='\u2588',
     pbar_full += upper_char*(total_prog - common_prog)
     pbar_full += lower_char*(prog - common_prog)
     return (f"\u2595{{:<{wid}}}\u258F").format(pbar_full)
+
+
+@static_vars(prev_iter_text_len=0)
+def loop_print(text, file=sys.stdout, end=None):
+    """
+    Print a single line of text.
+
+    This function can be used to print a row of text that should be
+    overwritten in a next iteration.
+
+    Remember to use loop_print.reset() before a new loop.
+
+    Parameters
+    ----------
+    text : TYPE
+        DESCRIPTION.
+    file : TYPE, optional
+        DESCRIPTION. The default is sys.stdout.
+
+    Returns
+    -------
+    None.
+
+    """
+    text_len = len(text)
+    delta_str_len = loop_print.prev_iter_text_len - text_len
+    if delta_str_len > 0:
+        text += " " * (delta_str_len)
+    file.write(f"\r{text} \r")
+    if end:
+        file.write(end)
+        loop_print.prev_iter_text_len = 0
+    else:
+        loop_print.prev_iter_text_len = text_len
+    file.flush()
+
+
+@static_vars(last_time=0)
+def simple_pbar_callback(k, total, min_interval=1):
+    """
+    Print a progressbar with a cooldown interval.
+
+    Parameters
+    ----------
+    k : float
+        DESCRIPTION.
+    total : float
+        DESCRIPTION.
+    min_interval : TYPE, optional
+        Miniumum interval in seconds between two printings. The default is 1.
+
+    Returns
+    -------
+    None.
+
+    """
+    if (k <= 0):
+        loop_print.prev_iter_text_len = 0
+        simple_pbar_callback.last_time = 0
+
+    if (
+        (k <= 1) or
+        (k == total) or
+        (time.perf_counter() - simple_pbar_callback.last_time) > min_interval
+    ):
+        simple_pbar_callback.last_time = time.perf_counter()
+        pbar = get_pbar(k / total)
+        loop_print(f"\r{pbar} {k / total:.2%} \r")
+
+    if (k >= total):
+        loop_print.prev_iter_text_len = 0
+        simple_pbar_callback.last_time = 0
 
 
 def get_sdss_spectral_templates(outdir: str, use_cached: bool = True) -> list:
