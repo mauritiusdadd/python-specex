@@ -32,8 +32,9 @@ import matplotlib.pyplot as plt
 from .utils import plot_zfit_check, get_log_img, get_pbar
 from .utils import stack, plot_scandata
 from .utils import get_spectrum_snr, get_spectrum_snr_emission
+from .utils import HAS_REGION, parse_regionfile
 from .sources import get_spectrum
-from .cube import get_hdu
+from .cube import get_hdu, SpectraCube
 from .exceptions import exception_handler
 
 from .cube import (
@@ -43,14 +44,6 @@ from .cube import (
     KNOWN_MASK_EXT_NAMES,
     KNOWN_RCURVE_EXT_NAMES
 )
-
-try:
-    from regions import Regions
-except Exception:
-    HAS_REGION = False
-else:
-    HAS_REGION = True
-
 
 try:
     from .rrspecex import rrspecex, get_templates
@@ -377,6 +370,36 @@ def __argshandler(options=None):
 def get_spplate_fits(cube_header, spec_header, obj_ids, spec_data,
                      var_data=None, and_mask_data=None, or_mask_data=None,
                      wdisp_data=None, sky_data=None):
+    """
+    Generate a plate fits file similar to the ones used in SDSS.
+
+    Parameters
+    ----------
+    cube_header : TYPE
+        DESCRIPTION.
+    spec_header : TYPE
+        DESCRIPTION.
+    obj_ids : TYPE
+        DESCRIPTION.
+    spec_data : TYPE
+        DESCRIPTION.
+    var_data : TYPE, optional
+        DESCRIPTION. The default is None.
+    and_mask_data : TYPE, optional
+        DESCRIPTION. The default is None.
+    or_mask_data : TYPE, optional
+        DESCRIPTION. The default is None.
+    wdisp_data : TYPE, optional
+        DESCRIPTION. The default is None.
+    sky_data : TYPE, optional
+        DESCRIPTION. The default is None.
+
+    Returns
+    -------
+    hdul : TYPE
+        DESCRIPTION.
+
+    """
     spec_hdu = fits.PrimaryHDU()
     ivar_hdu = fits.ImageHDU()
     andmsk_hdu = fits.ImageHDU()
@@ -803,65 +826,6 @@ def speclist2ez(spec_files, spec_hdu_name='SPECTRUM', var_hdu_name='VARIANCE'):
     return txt_data
 
 
-def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
-                     key_id='NUMBER', file_format='ds9'):
-    """
-    Parse a regionfile and return an asrtopy Table with sources information.
-
-    Note that the only supported shape are 'circle', 'ellipse' and 'box',
-    other shapes in the region file will be ignored. Note also that 'box'
-    is treated as the bounding box of an ellipse.
-
-    Parameters
-    ----------
-    regionfile : str
-        Path of the regionfile.
-    pixel_scale : float or None, optional
-        The pixel scale in mas/pixel used to compute the dimension of the
-        size of the objects. If None, height and width in the region file will
-        be considered already in pixel units.
-    key_ra : str, optional
-        Name of the column that will contain RA of the objects.
-        The default value is 'ALPHA_J2000'.
-    key_dec : str, optional
-        Name of the column that will contain DEC of the objects
-        The default value is 'DELTA_J2000'.
-    file_format : str, optional
-        Format of the input regionfile.
-        The default value is 'ds9'.
-
-    Returns
-    -------
-    sources : astropy.table.Table
-        The table containing the sources.
-    skyframe : None
-        Placeholder.
-
-    """
-    myt = Table(
-        names=[key_id, key_ra, key_dec, 'region'],
-        units=[None, 'deg', 'deg', None],
-        dtype=[str, float, float, object]
-    )
-    for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
-        try:
-            reg_id = reg.meta['text']
-        except Exception:
-            reg_id = j
-
-        try:
-            center = reg.center
-        except AttributeError:
-            c_ra = np.mean([x.ra.to('deg').value for x in reg.vertices])
-            c_dec = np.mean([x.dec.to('deg').value for x in reg.vertices])
-            new_row = [reg_id, c_ra, c_dec, reg]
-        else:
-            new_row = [reg_id, center.ra, center.dec, reg]
-        myt.add_row(new_row)
-
-    return myt, None
-
-
 def specex(options=None):
     """
     Run the main program.
@@ -902,7 +866,7 @@ def specex(options=None):
 
         basename_with_ext = os.path.basename(args.catalog)
         pixelscale = units.Quantity(args.cat_pixelscale)
-        coord_frame =  args.cat_skyframe  # frame of source coordinates
+        coord_frame = args.cat_skyframe  # frame of source coordinates
         if str(pixelscale.unit.physical_type) == 'dimensionless':
             pixelscale = pixelscale * units.mas
     elif args.regionfile is not None:
@@ -930,554 +894,537 @@ def specex(options=None):
 
     basename = os.path.splitext(basename_with_ext)[0]
 
-    hdl = fits.open(args.input_cube[0])
-
-    spec_hdu = get_hdu(
-        hdl,
-        hdu_index=args.spec_hdu,
-        valid_names=KNOWN_SPEC_EXT_NAMES,
-        msg_err_notfound="ERROR: Cannot determine which HDU contains spectral "
-                         "data, try to specify it manually!",
-        msg_index_error="ERROR: Cannot open HDU {} to read specra!"
-    )
-
-    var_hdu = get_hdu(
-        hdl,
-        hdu_index=args.var_hdu,
-        valid_names=KNOWN_VARIANCE_EXT_NAMES,
-        msg_err_notfound="WARNING: Cannot determine which HDU contains the "
-                         "variance data, try to specify it manually!",
-        msg_index_error="WARNING: Cannot open HDU {} to read the "
-                        "variance!",
-        exit_on_errors=False
-    )
-
-    mask_hdu = get_hdu(
-        hdl,
-        hdu_index=args.mask_hdu,
-        valid_names=KNOWN_MASK_EXT_NAMES,
-        msg_err_notfound="WARNING: Cannot determine which HDU contains the "
-                         "mask data, try to specify it manually!",
-        msg_index_error="WARNING: Cannot open HDU {} to read the mask!",
-        exit_on_errors=False
-    )
-
-    if args.debug:
-        print(f"Flux HDU: {spec_hdu.name}")
-        if var_hdu is not None:
-            print(f"Variance HDU: {var_hdu.name}")
-        if mask_hdu is not None:
-            print(f"Mask HDU: {mask_hdu.name}")
-
-    # Get spectral and celstial WCS from the cube
-    cube_wcs = wcs.WCS(spec_hdu.header)
-    celestial_wcs = cube_wcs.celestial
-    spectral_wcs = cube_wcs.spectral
-
-    # If weighting with an external image, read that
-    if args.weighting.lower() not in ['none', 'whitelight']:
-        if not os.path.isfile(args.weighting):
-            logging.error(
-                f"weighting image does not exist '{args.weighting}' "
-            )
-            sys.exit(1)
-        weight_image = fits.getdata(args.weighting)
-
-    # TODO: we assume here that the distorsion across the sky plane is
-    #       negligible, but it is very bold to assume this is always the case.
-    #       A more general approach that takes into account also distortion
-    #       in function of the position on the sky is needed.
-    # Get the pixelscales in arcsec/pixel.
-    cube_pixelscale_x, cube_pixelscale_y = [
-        units.Quantity(sc_val, u)
-        for sc_val, u in zip(
-            wcs.utils.proj_plane_pixel_scales(celestial_wcs),
-            celestial_wcs.wcs.cunit
-        )
-    ]
-
-    if args.debug:
-        print(
-            "Cube X and Y pixelscales are: "
-            f"{cube_pixelscale_x.to(units.arcsec)}, "
-            f"{cube_pixelscale_y.to(units.arcsec)}",
-            file=sys.stderr
-        )
-
-    ra_unit = sources[args.key_ra].unit
-    if ra_unit is None:
+    with SpectraCube.open(args.input_cube[0]) as my_cube:
         if args.debug:
-            logging.warning(
-                "RA data has no units, assuming values are in degrees!",
+            print(f"Flux HDU: {my_cube.spec_hdu.name}")
+            if my_cube.var_hdu is not None:
+                print(f"Variance HDU: {my_cube.var_hdu.name}")
+            if my_cube.mask_hdu is not None:
+                print(f"Mask HDU: {my_cube.mask_hdu.name}")
+
+        # Get spectral and celstial WCS from the cube
+        celestial_wcs = my_cube.getSpecWCS().celestial
+        spectral_wcs = my_cube.getSpecWCS().spectral
+
+        # If weighting with an external image, read that
+        if args.weighting.lower() not in ['none', 'whitelight']:
+            if not os.path.isfile(args.weighting):
+                logging.error(
+                    f"weighting image does not exist '{args.weighting}' "
+                )
+                sys.exit(1)
+            # TODO: add external weight image handilng
+            weight_image = fits.getdata(args.weighting)
+
+        # TODO: we assume here that the distorsion across the sky plane is
+        #       negligible, but it is very bold to assume this is always the case.
+        #       A more general approach that takes into account also distortion
+        #       in function of the position on the sky is needed.
+        # Get the pixelscales in arcsec/pixel.
+        cube_pixelscale_x, cube_pixelscale_y = [
+            units.Quantity(sc_val, u)
+            for sc_val, u in zip(
+                wcs.utils.proj_plane_pixel_scales(celestial_wcs),
+                celestial_wcs.wcs.cunit
             )
-        ra_unit = 'deg'
-
-    dec_unit = sources[args.key_dec].unit
-    if dec_unit is None:
-        if args.debug:
-            logging.warning(
-                "DEC data has no units, assuming values are in degrees!",
-            )
-        dec_unit = 'deg'
-
-    # Get the objects positions in the cube (in pixels)
-    obj_sky_coords = SkyCoord(
-        sources[args.key_ra], sources[args.key_dec],
-        unit=(ra_unit, dec_unit),
-        frame=coord_frame
-    )
-
-    obj_x, obj_y = wcs.utils.skycoord_to_pixel(
-        coords=obj_sky_coords,
-        wcs=celestial_wcs
-    )
-
-    sources.add_column(obj_x, name='CUBE_X_IMAGE')
-    sources.add_column(obj_y, name='CUBE_Y_IMAGE')
-
-    img_height, img_width = spec_hdu.data.shape[1], spec_hdu.data.shape[2]
-
-    yy, xx = np.meshgrid(
-        np.arange(img_height),
-        np.arange(img_width),
-        indexing='ij'
-    )
-
-    if args.check_images:
-        extracted_data = np.zeros((img_height, img_width))
-
-    # Chech if there is a footprint mask in the cube
-    if mask_hdu is not None:
-        cube_footprint = mask_hdu.data.prod(axis=0) == 0
-        if args.invert_mask:
-            cube_footprint = ~cube_footprint
-    else:
-        cube_footprint = None
-
-    if args.outdir is None:
-        outdir = f'{basename}_spectra'
-    else:
-        outdir = args.outdir
-
-    if not os.path.isdir(outdir):
-        os.mkdir(outdir)
-
-    if mode is None:
-        if args.mode == 'auto':
-            if (
-                    args.key_a in sources.colnames and
-                    args.key_b in sources.colnames and
-                    args.key_kron in sources.colnames
-            ):
-                mode = 'kron_ellipse'
-            else:
-                mode = 'circular_aperture'
-        else:
-            mode = args.mode
-
-    print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
-
-    n_objects = len(sources)
-    if args.nspectra:
-        n_objects = int(args.nspectra)
-
-    # Try to identify the column with object IDs
-    if args.key_id is None:
-        valid_id_keys = [
-            f"{i}{j}"
-            for i in ['', 'OBJ', 'OBJ_', 'TARGET', 'TARGET_']
-            for j in ['ID', 'NUMBER', 'UID', 'UUID']
         ]
 
-        for key in valid_id_keys:
-            if key.lower() in sources.colnames:
-                key_id = key.lower()
-                break
-            elif key.upper() in sources.colnames:
-                key_id = key.upper()
-                break
-        else:
-            key_id = None
-    else:
-        key_id = args.key_id
+        if args.debug:
+            print(
+                "Cube X and Y pixelscales are: "
+                f"{cube_pixelscale_x.to(units.arcsec)}, "
+                f"{cube_pixelscale_y.to(units.arcsec)}",
+                file=sys.stderr
+            )
 
-    out_specfiles = []
-    specex_apertures = {}  # these values are in physical units (arcsecs)
-    specex_anuli = {}  # these values are in physical units (arcsecs)
-    source_ids = []
+        ra_unit = sources[args.key_ra].unit
+        if ra_unit is None:
+            if args.debug:
+                logging.warning(
+                    "RA data has no units, assuming values are in degrees!",
+                )
+            ra_unit = 'deg'
 
-    valid_sources_mask = np.zeros(len(sources), dtype=bool)
+        dec_unit = sources[args.key_dec].unit
+        if dec_unit is None:
+            if args.debug:
+                logging.warning(
+                    "DEC data has no units, assuming values are in degrees!",
+                )
+            dec_unit = 'deg'
 
-    # Check wheter to use anuli to compute background
-    anulus_str = args.anulus_size.lower().strip().split(',')
-
-    anulus_r_in = None
-    anulus_r_out = None
-    if anulus_str and len(anulus_str) == 2:
-        try:
-            anulus_r1 = float(anulus_str[0])
-            anulus_r2 = float(anulus_str[1])
-        except ValueError:
-            pass
-        else:
-            anulus_r_in = min(anulus_r1, anulus_r2)
-            anulus_r_out = max(anulus_r1, anulus_r2)
-
-    if args.debug:
-        print(
-            f"Read {len(sources[:n_objects])} sources from "
-            "input catalog/regionfile...",
-            file=sys.stderr
+        # Get the objects positions in the cube (in pixels)
+        obj_sky_coords = SkyCoord(
+            sources[args.key_ra], sources[args.key_dec],
+            unit=(ra_unit, dec_unit),
+            frame=coord_frame
         )
 
-    for i, source in enumerate(sources[:n_objects]):
-        progress = (i + 1) / n_objects
-        sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-        sys.stderr.flush()
+        obj_x, obj_y = wcs.utils.skycoord_to_pixel(
+            coords=obj_sky_coords,
+            wcs=celestial_wcs
+        )
 
-        if key_id is not None:
-            obj_id = source[key_id]
+        sources.add_column(obj_x, name='CUBE_X_IMAGE')
+        sources.add_column(obj_y, name='CUBE_Y_IMAGE')
+
+        img_height, img_width = my_cube.getSpatialSizePixels()
+        yy, xx = np.meshgrid(
+            np.arange(img_height),
+            np.arange(img_width),
+            indexing='ij'
+        )
+
+        if args.check_images:
+            extracted_data = np.zeros((img_height, img_width))
+
+        # Chech if there is a footprint mask in the cube
+        if my_cube.mask_hdu is not None:
+            cube_footprint = my_cube.mask_hdu.data.prod(axis=0) == 0
+            if args.invert_mask:
+                cube_footprint = ~cube_footprint
         else:
-            obj_id = f"{i:06}"
+            cube_footprint = None
 
-        obj_ra = source[args.key_ra]
-        obj_dec = source[args.key_dec]
-        xx_tr = xx - source['CUBE_X_IMAGE']
-        yy_tr = yy - source['CUBE_Y_IMAGE']
+        if args.outdir is None:
+            outdir = f'{basename}_spectra'
+        else:
+            outdir = args.outdir
 
-        anulus_mask = None
-        if mode == 'regions':
-            anulus_mask = None
-            pix_reg = source['region'].to_pixel(celestial_wcs)
-            reg_mask = pix_reg.to_mask()
-            mask = reg_mask.to_image((img_height, img_width)) > 0
-            specex_apertures[obj_id] = (
-                1 * pixelscale,
-                1 * pixelscale,
-                0 * units.rad
-            )
+        if not os.path.isdir(outdir):
+            os.mkdir(outdir)
 
-        elif mode == 'kron_ellipse':
-            ang = np.deg2rad(source[args.key_theta])
+        if mode is None:
+            if args.mode == 'auto':
+                if (
+                        args.key_a in sources.colnames and
+                        args.key_b in sources.colnames and
+                        args.key_kron in sources.colnames
+                ):
+                    mode = 'kron_ellipse'
+                else:
+                    mode = 'circular_aperture'
+            else:
+                mode = args.mode
 
-            x_over_a = xx_tr*np.cos(ang) + yy_tr*np.sin(ang)
-            x_over_a /= source[args.key_a]
+        print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
-            y_over_b = xx_tr*np.sin(ang) - yy_tr*np.cos(ang)
-            y_over_b /= source[args.key_b]
+        n_objects = len(sources)
+        if args.nspectra:
+            n_objects = int(args.nspectra)
 
-            specex_apertures[obj_id] = (
-                source[args.key_a] * pixelscale,
-                source[args.key_b] * pixelscale,
-                source[args.key_theta] * units.rad
-            )
+        # Try to identify the column with object IDs
+        if args.key_id is None:
+            valid_id_keys = [
+                f"{i}{j}"
+                for i in ['', 'OBJ', 'OBJ_', 'TARGET', 'TARGET_']
+                for j in ['ID', 'NUMBER', 'UID', 'UUID']
+            ]
 
-            mask = (x_over_a**2 + y_over_b**2) < (1.0/source[args.key_kron])
+            for key in valid_id_keys:
+                if key.lower() in sources.colnames:
+                    key_id = key.lower()
+                    break
+                elif key.upper() in sources.colnames:
+                    key_id = key.upper()
+                    break
+            else:
+                key_id = None
+        else:
+            key_id = args.key_id
 
-        elif mode == 'kron_circular':
-            kron_circular = source[args.key_kron] * source[args.key_b]
-            kron_circular /= source[args.key_a]
+        out_specfiles = []
+        specex_apertures = {}  # these values are in physical units (arcsecs)
+        specex_anuli = {}  # these values are in physical units (arcsecs)
+        source_ids = []
 
-            specex_apertures[obj_id] = (
-                kron_circular * pixelscale,
-                kron_circular * pixelscale,
-                0 * units.rad
-            )
+        valid_sources_mask = np.zeros(len(sources), dtype=bool)
 
-            mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
+        # Check wheter to use anuli to compute background
+        anulus_str = args.anulus_size.lower().strip().split(',')
 
-        elif mode == 'circular_aperture':
-            aperture_size = units.Quantity(args.aperture_size)
-            aperture_radius = aperture_size / 2
-            if str(aperture_size.unit.physical_type) == 'dimensionless':
-                aperture_radius = aperture_radius * units.mas
-
+        anulus_r_in = None
+        anulus_r_out = None
+        if anulus_str and len(anulus_str) == 2:
             try:
+                anulus_r1 = float(anulus_str[0])
+                anulus_r2 = float(anulus_str[1])
+            except ValueError:
+                pass
+            else:
+                anulus_r_in = min(anulus_r1, anulus_r2)
+                anulus_r_out = max(anulus_r1, anulus_r2)
+
+        if args.debug:
+            print(
+                f"Read {len(sources[:n_objects])} sources from "
+                "input catalog/regionfile...",
+                file=sys.stderr
+            )
+
+        for i, source in enumerate(sources[:n_objects]):
+            progress = (i + 1) / n_objects
+            sys.stderr.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
+            sys.stderr.flush()
+
+            if key_id is not None:
+                obj_id = source[key_id]
+            else:
+                obj_id = f"{i:06}"
+
+            obj_ra = source[args.key_ra]
+            obj_dec = source[args.key_dec]
+            xx_tr = xx - source['CUBE_X_IMAGE']
+            yy_tr = yy - source['CUBE_Y_IMAGE']
+
+            anulus_mask = None
+            if mode == 'regions':
+                anulus_mask = None
+                pix_reg = source['region'].to_pixel(celestial_wcs)
+                reg_mask = pix_reg.to_mask()
+                mask = reg_mask.to_image((img_height, img_width)) > 0
                 specex_apertures[obj_id] = (
-                    aperture_radius,
-                    aperture_radius,
+                    1 * pixelscale,
+                    1 * pixelscale,
                     0 * units.rad
                 )
-            except TypeError:
+
+            elif mode == 'kron_ellipse':
+                ang = np.deg2rad(source[args.key_theta])
+
+                x_over_a = xx_tr*np.cos(ang) + yy_tr*np.sin(ang)
+                x_over_a /= source[args.key_a]
+
+                y_over_b = xx_tr*np.sin(ang) - yy_tr*np.cos(ang)
+                y_over_b /= source[args.key_b]
+
+                specex_apertures[obj_id] = (
+                    source[args.key_a] * pixelscale,
+                    source[args.key_b] * pixelscale,
+                    source[args.key_theta] * units.rad
+                )
+
+                mask = (x_over_a**2 + y_over_b**2) < (1.0/source[args.key_kron])
+
+            elif mode == 'kron_circular':
+                kron_circular = source[args.key_kron] * source[args.key_b]
+                kron_circular /= source[args.key_a]
+
+                specex_apertures[obj_id] = (
+                    kron_circular * pixelscale,
+                    kron_circular * pixelscale,
+                    0 * units.rad
+                )
+
+                mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
+
+            elif mode == 'circular_aperture':
+                aperture_size = units.Quantity(args.aperture_size)
+                aperture_radius = aperture_size / 2
+                if str(aperture_size.unit.physical_type) == 'dimensionless':
+                    aperture_radius = aperture_radius * units.mas
+
+                try:
+                    specex_apertures[obj_id] = (
+                        aperture_radius,
+                        aperture_radius,
+                        0 * units.rad
+                    )
+                except TypeError:
+                    logging.warning(
+                        f"object {obj_id} has an invalid ID, skipping..."
+                    )
+                    continue
+
+                xx_scaled = xx_tr * cube_pixelscale_x
+                yy_scaled = yy_tr * cube_pixelscale_y
+
+                mask = (xx_scaled**2 + yy_scaled**2) < (aperture_radius)**2
+
+                # TODO: fix here
+                """
+                if anulus_r_in and anulus_r_out:
+                    specex_anuli[obj_id] = (
+                        anulus_r_in,
+                        anulus_r_out
+                    )
+
+                    anulus_mask_out = rad_coords <= anulus_r_out / cube_pixelscale
+                    anulus_mask_in = rad_coords > anulus_r_in / cube_pixelscale
+
+                    anulus_mask = anulus_mask_in & anulus_mask_out
+                else:
+                    specex_anuli[obj_id] = None
+                    anulus_mask = None
+                """
+
+            if cube_footprint is not None:
+                mask &= cube_footprint
+
+            if np.sum(mask) == 0:
                 logging.warning(
-                    f"object {obj_id} has an invalid ID, skipping..."
+                    f"object {obj_id} has no footprint, skipping..."
                 )
                 continue
 
-            xx_scaled = xx_tr * cube_pixelscale_x
-            yy_scaled = yy_tr * cube_pixelscale_y
-
-            mask = (xx_scaled**2 + yy_scaled**2) < (aperture_radius)**2
-
-            # TODO: fix here
-            """
-            if anulus_r_in and anulus_r_out:
-                specex_anuli[obj_id] = (
-                    anulus_r_in,
-                    anulus_r_out
+            obj_extraction_mask = np.zeros_like(mask, dtype='float32')
+            if args.weighting.lower() == 'none':
+                weights = None
+                obj_extraction_mask[mask] = 1.0
+            elif args.weighting.lower() == 'whitelight':
+                # summing selected spaxels along spectral alxis
+                w_arr = np.ma.array(
+                    my_cube.spec_hdu.data[:, mask],
+                    mask=np.isnan(my_cube.spec_hdu.data[:, mask]),
+                    dtype='float32'
                 )
-
-                anulus_mask_out = rad_coords <= anulus_r_out / cube_pixelscale
-                anulus_mask_in = rad_coords > anulus_r_in / cube_pixelscale
-
-                anulus_mask = anulus_mask_in & anulus_mask_out
+                weights = np.ma.sum(w_arr, axis=0)
+                weights /= np.ma.max(weights)
+                obj_extraction_mask[mask] = weights
             else:
-                specex_anuli[obj_id] = None
-                anulus_mask = None
-            """
+                raise NotImplementedError()
 
-        if cube_footprint is not None:
-            mask &= cube_footprint
-
-        if np.sum(mask) == 0:
-            logging.warning(f"object {obj_id} has no footprint, skipping...")
-            continue
-
-        obj_extraction_mask = np.zeros_like(mask, dtype='float32')
-        if args.weighting.lower() == 'none':
-            weights = None
-            obj_extraction_mask[mask] = 1.0
-        elif args.weighting.lower() == 'whitelight':
-            # summing selected spaxels along spectral alxis
-            w_arr = np.ma.array(
-                spec_hdu.data[:, mask],
-                mask=np.isnan(spec_hdu.data[:, mask]),
-                dtype='float32'
-            )
-            weights = np.ma.sum(w_arr, axis=0)
-            weights /= np.ma.max(weights)
-            obj_extraction_mask[mask] = weights
-        else:
-            raise NotImplementedError()
-
-        obj_spectrum, obj_spectrum_var = get_spectrum(
-            flux_spaxels=spec_hdu.data[:, mask],
-            var_spaxels=var_hdu.data[:, mask] if var_hdu is not None else None,
-            weights=weights
-        )
-
-        obj_spectrum = obj_spectrum.filled(np.nan)
-        obj_spectrum_var = obj_spectrum_var.filled(np.nan)
-
-        if np.sum(np.isnan(obj_spectrum_var[~np.isnan(obj_spectrum)])) != 0:
-            logging.warning(
-                f"\nWARNING: object {obj_id}  is weird! Skipping...\n"
-            )
-            continue
-
-        if np.sum(~np.isnan(obj_spectrum)) < 100:
-            logging.warning(
-                f"WARNING: object {obj_id} has invalid data..."
+            var_spaxels = None
+            if my_cube.var_hdu is not None:
+                var_spaxels = my_cube.var_hdu.data[:, mask]
+            obj_spectrum, obj_spectrum_var = get_spectrum(
+                flux_spaxels=my_cube.spec_hdu.data[:, mask],
+                var_spaxels=var_spaxels,
+                weights=weights
             )
 
-        if anulus_mask is not None:
-            # TODO: fix here!
-            # Here we suppose that background vaies very slowly within object
-            # aperture. In this case we can copute the mean background and
-            # subtract it total contribution within the aperture.
-            bkg_spectrum = np.median(spec_hdu.data[:, mask], axis=0)
-            smoothed_bkg_spectrum = savgol_filter(bkg_spectrum, 51, 11)
-            obj_spectrum -= smoothed_bkg_spectrum*np.sum(mask)
+            obj_spectrum = obj_spectrum.filled(np.nan)
+            obj_spectrum_var = obj_spectrum_var.filled(np.nan)
 
-        if np.sum(~np.isnan(obj_spectrum)) == 0:
-            if args.debug:
+            if np.sum(
+                np.isnan(obj_spectrum_var[~np.isnan(obj_spectrum)])
+            ) != 0:
                 logging.warning(
-                    f"WARNING: object {obj_id} has no spectral data, "
-                    "skipping..."
+                    f"\nWARNING: object {obj_id}  is weird! Skipping...\n"
                 )
-            continue
+                continue
 
-        sn_spec = get_spectrum_snr(obj_spectrum, obj_spectrum_var)
-        sn_em = get_spectrum_snr_emission(obj_spectrum, obj_spectrum_var)
-
-        if (
-                (args.sn_threshold > 0) and
-                (max(sn_spec, sn_em) < args.sn_threshold)
-           ):
-
-            if args.debug:
+            if np.sum(~np.isnan(obj_spectrum)) < 100:
                 logging.warning(
-                    f"WARNING: object {obj_id} has SNR={sn_spec:.2f} < "
-                    f"{args.sn_threshold}, skipping..."
+                    f"WARNING: object {obj_id} has invalid data..."
                 )
-            continue
 
-        my_time = Time.now()
-        my_time.format = 'isot'
-
-        outname = f"spec_{obj_id}.fits"
-
-        apertures_info = [
-            x.to_string() for x in specex_apertures[obj_id]
-        ]
-
-        main_header = {
-            'CUBE': (basename_with_ext, "Spectral cube used for extraction"),
-            'RA': (obj_ra, "Ra of the center of the object"),
-            'DEC': (obj_dec, "Dec of the center of the object"),
-            'FRAME': (coord_frame, "Ra and Dec sky frame"),
-            'NPIX': (np.sum(mask), 'Number of pixels used for this spectra'),
-            'HISTORY': f'Extracted on {str(my_time)}',
-            'ID': obj_id,
-            'SN': (sn_spec, "SNR of the total spectrum"),
-            'SN_EMISS': (sn_em, "SNR due to emission lines only"),
-            'EXT_MODE': (mode, "Spex extraction mode"),
-            'EXT_APER': (
-                json.dumps(apertures_info),
-                "Apertures used in specex"
-            )
-        }
-
-        # Copy the spectral part of the WCS into the new FITS
-        spec_wcs_header = spectral_wcs.to_header()
-
-        hdul = get_spsingle_fits(
-            main_header, spec_wcs_header,
-            obj_spectrum, spec_hdu.header,
-            obj_spectrum_var, no_nans=args.no_nans
-        )
-
-        out_file_name = os.path.join(outdir, outname)
-        hdul.writeto(
-            out_file_name,
-            overwrite=True
-        )
-
-        # If we arrived here, then the object has a vail spectrum and can be
-        # saved. Let's also mark the object as valid and store its ID
-        out_specfiles.append(os.path.realpath(out_file_name))
-        source_ids.append(obj_id)
-        valid_sources_mask[i] = True
-
-        # Add also the extracted pixels to the extraction map
-        if args.check_images:
-            extracted_data += obj_extraction_mask
             if anulus_mask is not None:
-                extracted_data -= anulus_mask
+                # TODO: fix here!
+                # Here we suppose that background vaies very slowly within
+                # object aperture. In this case we can copute the mean
+                # background and subtract it total contribution within the
+                # aperture.
+                bkg_spectrum = np.median(
+                    my_cube.spec_hdu.data[:, mask], axis=0
+                )
+                smoothed_bkg_spectrum = savgol_filter(bkg_spectrum, 51, 11)
+                obj_spectrum -= smoothed_bkg_spectrum*np.sum(mask)
 
-    # Discard all invalid sources
-    sources = sources[valid_sources_mask]
-    source_ids = np.array(source_ids)
+            if np.sum(~np.isnan(obj_spectrum)) == 0:
+                if args.debug:
+                    logging.warning(
+                        f"WARNING: object {obj_id} has no spectral data, "
+                        "skipping..."
+                    )
+                continue
 
-    with open("spec_list_pandora_ez.txt", 'w') as f:
-        f.write(speclist2ez(out_specfiles))
+            sn_spec = get_spectrum_snr(obj_spectrum, obj_spectrum_var)
+            sn_em = get_spectrum_snr_emission(obj_spectrum, obj_spectrum_var)
 
-    if args.debug:
-        print(
-            f"\nExtracted {len(sources)} valid sources\n",
-            file=sys.stderr
-        )
+            if (
+                    (args.sn_threshold > 0) and
+                    (max(sn_spec, sn_em) < args.sn_threshold)
+               ):
 
-    if args.checkimg_outdir is not None:
-        check_images_outdir = args.checkimg_outdir
-    else:
-        check_images_outdir = os.path.join(outdir, 'checkimages')
+                if args.debug:
+                    logging.warning(
+                        f"WARNING: object {obj_id} has SNR={sn_spec:.2f} < "
+                        f"{args.sn_threshold}, skipping..."
+                    )
+                continue
 
-    if not os.path.isdir(check_images_outdir):
-        os.mkdir(check_images_outdir)
+            my_time = Time.now()
+            my_time.format = 'isot'
 
-    # NOTE: for some weird reason redrock hangs if any figure has been
-    #       created using matplotlib. Do all the plottings only after
-    #       redrock has finished!
-    if args.zbest:
-        rrspecex_options = [
-            '--zbest', args.zbest,
-            '--checkimg-outdir', check_images_outdir
-        ]
+            outname = f"spec_{obj_id}.fits"
 
-        if args.priors is not None:
-            rrspecex_options += ['--priors', args.priors]
+            apertures_info = [
+                x.to_string() for x in specex_apertures[obj_id]
+            ]
 
-        if args.nminima is not None:
-            rrspecex_options += ['--nminima', f'{args.nminima:d}']
+            main_header = {
+                'CUBE': (
+                    basename_with_ext, "Spectral cube used for extraction"
+                ),
+                'RA': (
+                    obj_ra, "Ra of the center of the object"
+                ),
+                'DEC': (
+                    obj_dec, "Dec of the center of the object"
+                ),
+                'FRAME': (
+                    coord_frame, "Ra and Dec sky frame"
+                ),
+                'NPIX': (
+                    np.sum(mask), 'Number of pixels used for this spectra'
+                ),
+                'HISTORY': f'Extracted on {str(my_time)}',
+                'ID': obj_id,
+                'SN': (
+                    sn_spec, "SNR of the total spectrum"
+                ),
+                'SN_EMISS': (
+                    sn_em, "SNR due to emission lines only"
+                ),
+                'EXT_MODE': (
+                    mode, "Spex extraction mode"
+                ),
+                'EXT_APER': (
+                    json.dumps(apertures_info),
+                    "Apertures used in specex"
+                )
+            }
 
-        if args.mp is not None:
-            rrspecex_options += ['--mp', f'{args.mp:d}']
+            # Copy the spectral part of the WCS into the new FITS
+            spec_wcs_header = spectral_wcs.to_header()
 
-        if args.templates is not None:
-            rrspecex_options += ['--templates', f'{args.templates}']
-
-        rrspecex_options += out_specfiles
-        targets, zfit, scandata = rrspecex(options=rrspecex_options)
-
-        if args.debug or not args.cutouts_image:
-            stacked_cube = stack(spec_hdu.data)
-
-        if args.debug:
-            fig = plt.figure(figsize=(10, 10))
-            ax = plt.subplot(projection=celestial_wcs)
-            logimg, cvmin, cvmax = get_log_img(stacked_cube)
-            ax.imshow(
-                logimg,
-                origin='lower',
-                vmin=cvmin,
-                vmax=cvmax,
-                cmap='jet'
+            hdul = get_spsingle_fits(
+                main_header, spec_wcs_header,
+                obj_spectrum, my_cube.spec_hdu.header,
+                obj_spectrum_var, no_nans=args.no_nans
             )
-            fig.savefig("stacked_cube.png")
-            plt.tight_layout()
-            plt.close(fig)
+
+            out_file_name = os.path.join(outdir, outname)
+            hdul.writeto(
+                out_file_name,
+                overwrite=True
+            )
+
+            # If we arrived here, then the object has a vail spectrum and can
+            # be saved. Let's also mark the object as valid and store its ID
+            out_specfiles.append(os.path.realpath(out_file_name))
+            source_ids.append(obj_id)
+            valid_sources_mask[i] = True
+
+            # Add also the extracted pixels to the extraction map
+            if args.check_images:
+                extracted_data += obj_extraction_mask
+                if anulus_mask is not None:
+                    extracted_data -= anulus_mask
+
+        # Discard all invalid sources
+        sources = sources[valid_sources_mask]
+        source_ids = np.array(source_ids)
+
+        with open("spec_list_pandora_ez.txt", 'w') as f:
+            f.write(speclist2ez(out_specfiles))
 
         if args.debug:
-            plot_templates = get_templates(templates=args.templates)
+            print(
+                f"\nExtracted {len(sources)} valid sources\n",
+                file=sys.stderr
+            )
+
+        if args.checkimg_outdir is not None:
+            check_images_outdir = args.checkimg_outdir
         else:
-            plot_templates = None
+            check_images_outdir = os.path.join(outdir, 'checkimages')
 
-        print("", file=sys.stderr)
+        if not os.path.isdir(check_images_outdir):
+            os.mkdir(check_images_outdir)
 
-        """
-        for i, target in enumerate(targets):
-            progress = (i + 1) / len(targets)
-            sys.stderr.write(
-                f"\rAnalyzing residuals {get_pbar(progress)} {progress:.2%}\r"
-            )
-            sys.stderr.flush()
-            obj = sources[source_ids == target.spec_id][0]
+        # NOTE: for some weird reason redrock hangs if any figure has been
+        #       created using matplotlib. Do all the plottings only after
+        #       redrock has finished!
+        if args.zbest:
+            rrspecex_options = [
+                '--zbest', args.zbest,
+                '--checkimg-outdir', check_images_outdir
+            ]
 
-            # residuals = get_residuals(target, zfit, plot_templates)
-        """
+            if args.priors is not None:
+                rrspecex_options += ['--priors', args.priors]
 
-        # Creating directory to save Chi-2 plots
-        if args.debug:
-            x2_plots_out_dir = os.path.join(
-                check_images_outdir,
-                "X2_plots"
-            )
-            if not os.path.isdir(x2_plots_out_dir):
-                os.mkdir(x2_plots_out_dir)
+            if args.nminima is not None:
+                rrspecex_options += ['--nminima', f'{args.nminima:d}']
 
-        for i, target in enumerate(targets):
-            progress = (i + 1) / len(targets)
-            sys.stderr.write(
-                f"\rGenerating previews {get_pbar(progress)} {progress:.2%}\r"
-            )
-            sys.stderr.flush()
+            if args.mp is not None:
+                rrspecex_options += ['--mp', f'{args.mp:d}']
 
-            fig, axs = plot_zfit_check(
-                target,
-                zfit,
-                plot_template=plot_templates,
-                wavelengt_units=spec_hdu.header['CUNIT3'],
-                flux_units=spec_hdu.header['BUNIT'],
-            )
+            if args.templates is not None:
+                rrspecex_options += ['--templates', f'{args.templates}']
 
-            figname = f'spectrum_{target.spec_id}.png'
-            figname = os.path.join(check_images_outdir, figname)
-            fig.savefig(figname, dpi=150)
-            plt.close(fig)
+            rrspecex_options += out_specfiles
+            targets, zfit, scandata = rrspecex(options=rrspecex_options)
+
+            if args.debug or not args.cutouts_image:
+                stacked_cube = stack(my_cube.spec_hdu.data)
 
             if args.debug:
-                figname = f'scandata_{target.spec_id}.png'
-                figname = os.path.join(x2_plots_out_dir, figname)
-                fig, axs = plot_scandata(target, scandata)
+                fig = plt.figure(figsize=(10, 10))
+                ax = plt.subplot(projection=celestial_wcs)
+                logimg, cvmin, cvmax = get_log_img(stacked_cube)
+                ax.imshow(
+                    logimg,
+                    origin='lower',
+                    vmin=cvmin,
+                    vmax=cvmax,
+                    cmap='jet'
+                )
+                fig.savefig("stacked_cube.png")
+                plt.tight_layout()
+                plt.close(fig)
+
+            if args.debug:
+                plot_templates = get_templates(templates=args.templates)
+            else:
+                plot_templates = None
+
+            print("", file=sys.stderr)
+
+            # Creating directory to save Chi-2 plots
+            if args.debug:
+                x2_plots_out_dir = os.path.join(
+                    check_images_outdir,
+                    "X2_plots"
+                )
+                if not os.path.isdir(x2_plots_out_dir):
+                    os.mkdir(x2_plots_out_dir)
+
+            for i, target in enumerate(targets):
+                progress = (i + 1) / len(targets)
+                sys.stderr.write(
+                    "\rGenerating previews "
+                    f"{get_pbar(progress)} {progress:.2%}\r"
+                )
+                sys.stderr.flush()
+
+                fig, axs = plot_zfit_check(
+                    target,
+                    zfit,
+                    plot_template=plot_templates,
+                    wavelengt_units=my_cube.spec_hdu.header['CUNIT3'],
+                    flux_units=my_cube.spec_hdu.header['BUNIT'],
+                )
+
+                figname = f'spectrum_{target.spec_id}.png'
+                figname = os.path.join(check_images_outdir, figname)
                 fig.savefig(figname, dpi=150)
                 plt.close(fig)
 
-    if args.check_images:
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        ax.imshow(extracted_data, origin='lower')
-        fig.savefig("sext_extraction_map.png", dpi=150)
-        plt.close(fig)
+                if args.debug:
+                    figname = f'scandata_{target.spec_id}.png'
+                    figname = os.path.join(x2_plots_out_dir, figname)
+                    fig, axs = plot_scandata(target, scandata)
+                    fig.savefig(figname, dpi=150)
+                    plt.close(fig)
+
+        if args.check_images:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+            ax.imshow(extracted_data, origin='lower')
+            fig.savefig("sext_extraction_map.png", dpi=150)
+            plt.close(fig)
 
 
 if __name__ == '__main__':

@@ -11,8 +11,11 @@ Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import os
 import re
 import sys
+import shutil
+import logging
 import argparse
 import warnings
+from numbers import Number
 from typing import Optional, Union, Callable
 
 import numpy as np
@@ -27,7 +30,15 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata.utils import Cutout2D
 
 from .utils import get_pc_transform_params, rotate_data, get_pbar
+from .utils import HAS_REGION, parse_regionfile
+from .exceptions import get_ipython_embedder
 
+try:
+    from regions import Regions
+except Exception:
+    HAS_REGION = False
+else:
+    HAS_REGION = True
 
 KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
 KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
@@ -36,6 +47,242 @@ KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq', 'nan_mask']
 KNOWN_WAVE_EXT_NAMES = ['wave', 'wavelenght', 'lambda', 'lam']
 KNOWN_RCURVE_EXT_NAMES = ['r', 'reso', 'resolution', 'rcurve', 'wd']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
+
+
+class SpectraCube():
+    """Class to handle datacubes."""
+
+    def __init__(self):
+        self.filename = None
+        self.hdul = None
+        self.spec_hdu = None
+        self.var_hdu = None
+        self.var_hdu = None
+        self.mask_hdu = None
+        self.wd_hdu = None
+        self.spec_wcs = None
+        self.var_wcs = None
+        self.wd_wcs = None
+
+    def __del__(self):
+        """
+        Do cleanup when this object is deleted.
+
+        Returns
+        -------
+        None.
+
+        """
+        self.close()
+
+    def __enter__(self):
+        """
+        Enter the context manager.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+        return self
+
+    def __exit__(self, *args):
+        """
+        Exit the contex manager.
+
+        Parameters
+        ----------
+        *args : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
+        self.close()
+
+    def close(self):
+        """
+        Clean up on closing.
+
+        Returns
+        -------
+        None.
+
+        """
+        if self.hdul is not None:
+            self.hdul.close()
+
+    def getSpecWCS(self):
+        """
+        Get the WCS of the spectrum datacube.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+        if self.spec_wcs is None:
+            self.spec_wcs = WCS(self.spec_hdu.header)
+        return self.spec_wcs
+
+    def getVarWCS(self):
+        """
+        Get the WCS of the variance datacube.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+        """
+        if self.var_wcs is None:
+            self.var_wcs = WCS(self.var_hdu.header)
+            if not (self.var_wcs.has_celestial and self.var_wcs.has_spectral):
+                return self.getSpecWCS()
+        return self.var_wcs
+
+    def getWdWCS(self):
+        """
+        Get the WCS of the variance datacube.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+        """
+        if self.wd_wcs is None:
+            self.wd_wcs = WCS(self.wd_hdu.header)
+            if not (self.wd_wcs.has_celestial and self.wd_wcs.has_spectral):
+                return self.getSpecWCS()
+        return self.wd_wcs
+
+    def getSpatialSizePixels(self):
+        """
+        Return spatial dimensions in pixels.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
+        if self.spec_hdu is None:
+            return [None, None]
+        else:
+            return self.spec_hdu.data.shape[1:]
+
+    @classmethod
+    def open(cls, filename: str,
+             spec_hdu_index: Optional[Union[int, str]] = None,
+             var_hdu_index: Optional[Union[int, str]] = None,
+             mask_hdu_index: Optional[Union[int, str]] = None,
+             wd_hdu_index: Optional[Union[int, str]] = None,
+             mode: Optional[str] = None):
+        """
+        Open a datacube from a FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            The file path.
+        spec_hdu_index : Optional[Union[int, str]], optional
+            The index or name of the HDU containing the spectrum.
+            The default is None.
+        var_hdu_index : Optional[Union[int, str]], optional
+            The index or name of the HDU containing the variance.
+            The default is None.
+        mask_hdu_index : Optional[Union[int, str]], optional
+            The index or name of the HDU containing the nans maks.
+            The default is None.
+        wd_hdu_index : Optional[Union[int, str]], optional
+            The index or name of the HDU containing the R matrix.
+            The default is None.
+        mode : Optional[str], optional
+            The mode passed to astropy.io.fits.open
+        Returns
+        -------
+        SpectraCube.
+
+        """
+        new_cube = cls()
+        new_cube.filename = filename
+        new_cube.hdul = fits.open(filename)
+
+        new_cube.spec_hdu = get_hdu(
+            new_cube.hdul,
+            hdu_index=spec_hdu_index,
+            valid_names=KNOWN_SPEC_EXT_NAMES,
+            msg_err_notfound=(
+                "ERROR: Cannot determine which HDU contains spectral "
+                "data, try to specify it manually!"
+            ),
+            msg_index_error="ERROR: Cannot open HDU {} to read specra!"
+        )
+
+        new_cube.var_hdu = get_hdu(
+            new_cube.hdul,
+            hdu_index=var_hdu_index,
+            valid_names=KNOWN_VARIANCE_EXT_NAMES,
+            msg_err_notfound=(
+                "WARNING: Cannot determine which HDU contains the "
+                "variance data, try to specify it manually!"
+            ),
+            msg_index_error="WARNING: Cannot open HDU {} to read the "
+                            "variance!",
+            exit_on_errors=False
+        )
+
+        new_cube.mask_hdu = get_hdu(
+            new_cube.hdul,
+            hdu_index=mask_hdu_index,
+            valid_names=KNOWN_MASK_EXT_NAMES,
+            msg_err_notfound=(
+                "WARNING: Cannot determine which HDU contains the "
+                "mask data, try to specify it manually!"
+            ),
+            msg_index_error="WARNING: Cannot open HDU {} to read the "
+                            "mask!",
+            exit_on_errors=False
+        )
+
+        new_cube.wd_hdu = get_hdu(
+            new_cube.hdul,
+            hdu_index=wd_hdu_index,
+            valid_names=KNOWN_MASK_EXT_NAMES,
+            msg_err_notfound=(
+                "WARNING: Cannot determine which HDU contains the "
+                "R data, try to specify it manually!"
+            ),
+            msg_index_error="WARNING: Cannot open HDU {} to read the "
+                            "R matrix data!",
+            exit_on_errors=False
+        )
+        return new_cube
+
+    def write(self, filename: str, **kwargs):
+        """
+        Write the datacube if a FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            The path of the output file.
+        kwargs : dict
+            Optional arguments passed to astropy.io.fits.HDUList.writeto.
+            For example it can be {'overwrite': True}.
+
+        Returns
+        -------
+        bool
+            True if the write operation was succesfull.
+
+        """
+        if self.hdul is None:
+            return False
+        self.hdul.writeto(filename, **kwargs)
 
 
 def __simple_report_callback(k, total):
@@ -90,14 +337,22 @@ def __cutout_argshandler(options=None):
         help='Specify the RA and DEC of the center of a single cutout. '
         'Both RA and DEC can be specified with units in a format compatible '
         'with astropy.units (eg. -c 10arcsec,5arcsec). If no no unit is '
-        'specified, then the quantity is assumed to be in arcseconds.'
+        'specified, then the quantity is assumed to be in pixels.'
     )
     parser.add_argument(
-        '--sizes', '-s', metavar='HEIGHT,WIDTH', type=str, default=None,
-        help='Specify the RA and DEC of the center of a single cutout.'
+        '--size', '-s', metavar='WIDTH[,HEIGHT]', type=str, default=None,
+        help='Specify the HEIGHT and WIDTH of a single cutout. If HEIGHT is '
+        'not specified then it is assumed to be equal to WIDTH. '
         'Both HEIGHT and WIDTH can be specified with units in a format '
         'compatible with astropy.units (eg. -s 10arcsec,5arcsec).  If no no '
-        'unit is specified, then the quantity is assumed to be in arcseconds.'
+        'unit is specified, then the quantity is assumed to be in pixels.'
+    )
+    parser.add_argument(
+        '--angle', '-t', metavar='ANGLE', type=str, default=0,
+        help='Specify the rotation angle arounf the center of a single cutout.'
+        '%(metavar)s can be specified with units in a format '
+        'compatible with astropy.units (eg. -s 10arcsec,5arcsec).  If no no '
+        'unit is specified, then the quantity is assumed to be in degrees.'
     )
     parser.add_argument(
         '--wave-range', '-w', metavar='MIN_W,MAX_W', type=str, default=None,
@@ -131,10 +386,10 @@ def __cutout_argshandler(options=None):
         sys.exit(1)
 
     if args.regionfile is None:
-        if (args.center is None) or (args.sizes is None):
+        if (args.center is None) or (args.size is None):
             print(
                 "If --regionfile is not specified then both --center and "
-                "--sizes must be provided."
+                "--size must be provided."
             )
             sys.exit(1)
     elif not os.path.isfile(args.regionfile):
@@ -170,7 +425,7 @@ def __smoothing_argshandler(options=None):
         help='The spectral cube (or image) from which to extract a cutout.'
     )
     parser.add_argument(
-        '--spatial-sigma', metavar='SIGMA', type=float, default=1.0,
+        '--spatial-sigma', metavar='SIGMA', type=str, default=1.0,
         help='Set the sigma for the spatial gaussian kernel. If %(metavar)s '
         'is 0 then no spatial smoothing is applied. If not specified the '
         'default value %(metavar)s=%(default)f is used.'
@@ -190,7 +445,7 @@ def __smoothing_argshandler(options=None):
         'The default value is %(metavar)s=%(default)d.'
     )
     parser.add_argument(
-        '--wave-sigma', metavar='SIGMA', type=float, default=0,
+        '--wave-sigma', metavar='SIGMA', type=str, default=0,
         help='Set the sigma for the spectral gaussian kernel. If %(metavar)s '
         'is 0 then no spectral smoothing is applied. If not specified the '
         'default value %(metavar)s=%(default)f is used.'
@@ -229,6 +484,12 @@ def __smoothing_argshandler(options=None):
         '--verbose', action='store_true', default=False,
         help="Print verbose outout."
     )
+
+    parser.add_argument(
+        '--debug', action='store_true', default=False,
+        help="Start an IPython console for debugging."
+    )
+
     args = None
     if options is None:
         args = parser.parse_args()
@@ -249,138 +510,6 @@ def __smoothing_argshandler(options=None):
         sys.exit(1)
 
     return args
-
-
-def parse_regionfile(regionfile: str, key_ra: str = 'RA', key_dec: str = 'DEC',
-                     key_a: str = 'A_WORLD', key_b: str = 'B_WORLD',
-                     key_theta: str = 'THETA_WORLD', key_wmin: str = 'WMIN',
-                     key_wmax: str = 'WMAX'):
-    """
-    Parse a regionfile and return an asrtopy Table with sources information.
-
-    Note that the only supported shape are 'circle', 'ellipse' and 'box',
-    other shapes in the region file will be ignored.
-
-    Parameters
-    ----------
-    regionfile : str
-        Path of the regionfile.
-    key_ra : str, optional
-        Name of the column that will contain RA of the objects.
-        The default value is 'RA'.
-    key_dec : str, optional
-        Name of the column that will contain DEC of the objects
-        The default value is 'DEC'.
-    key_a : str, optional
-        Name of the column that will contain the semi major axis.
-        The default value is 'A_WORLD'.
-    key_b : str, optional
-        Name of the column that will contain the semi minor axis.
-        The default value is 'B_WORLD'.
-    key_theta : str, optional
-        Name of the column that will contain angle between the major axis and
-        the principa axis of the image.
-        The default value is 'THETA_WORLD'.
-    key_wmin : str, optional
-        Name of the column that will contain minimum value of the wavelength
-        range. The default value is 'WMIN'.
-    key_wmax : str, optional
-        Name of the column that will contain maximum value of the wavelength
-        range. The default value is 'WMAX'.
-
-    Returns
-    -------
-    sources : astropy.table.Table
-        The table containing the sources.
-
-    """
-    def degstr2mas(degstr, degsep='°', minsep="'", secsep='"'):
-        deg_sep = degstr.find(degsep)
-        min_sep = degstr.find(minsep)
-        sec_sep = degstr.find(secsep)
-
-        degs = float(degstr[:deg_sep]) if deg_sep >= 0 else 0
-        mins = float(degstr[deg_sep+1:min_sep]) if min_sep >= 0 else 0
-        secs = float(degstr[min_sep+1:sec_sep]) if sec_sep >= 0 else 0
-
-        return (secs + 60*mins + 3600*degs) * units.arcsec
-
-    with open(regionfile, 'r') as f:
-        regions = f.read().splitlines()
-
-    myt = Table(
-        names=[
-            key_ra, key_dec, key_a, key_b, key_theta, key_wmin, key_wmax
-        ],
-        dtype=[
-            'float32', 'float32', 'float32',
-            'float32', 'float32', 'float32', 'float32'
-        ],
-        units=[
-            units.deg, units.deg, units.arcsec,
-            units.arcsec, units.deg, units.angstrom, units.angstrom
-        ]
-    )
-
-    for j, reg in enumerate(regions):
-        reg = reg.replace(' ', '').lower().split('(')
-        if len(reg) < 2:
-            continue
-
-        regtype = reg[0]
-        regdata = reg[1].split('#')
-        regparams = regdata[0][:-1].split(',')
-        try:
-            regcomments = regdata[1]
-            t_start = regcomments.find('text={') + 6
-            if t_start < 0:
-                wave_range_data = ['0angstrom', '0angstrom']
-            else:
-                t_end = regcomments.find('}', t_start)
-                wave_range_data = regcomments[t_start:t_end].split(',')
-
-        except IndexError:
-            wave_range_data = ['0angstrom', '0angstrom']
-
-        obj_w_min = units.Quantity(wave_range_data[0])
-        if not obj_w_min.unit.to_string():
-            obj_w_min = obj_w_min * units.angstrom
-
-        obj_w_max = units.Quantity(wave_range_data[1])
-        if not obj_w_max.unit.to_string():
-            obj_w_max = obj_w_max * units.angstrom
-
-        obj_ra = units.Quantity(regparams[0], units.deg)
-        obj_dec = units.Quantity(regparams[1], units.deg)
-
-        if regtype == "circle":
-            obj_a = degstr2mas(regparams[2])
-            obj_b = obj_a
-            obj_theta = units.Quantity(0, units.deg)
-        elif regtype == "ellipse":
-            obj_a = degstr2mas(regparams[2])
-            obj_b = degstr2mas(regparams[3])
-            obj_theta = units.Quantity(regparams[4], units.deg)
-        elif regtype == "box":
-            obj_a = degstr2mas(regparams[2]) / 2
-            obj_b = degstr2mas(regparams[3]) / 2
-            obj_theta = units.Quantity(regparams[4], units.deg)
-        else:
-            print(
-                f"WARNING: '{regtype}' region type not supported yet!",
-                file=sys.stderr
-            )
-            continue
-
-        myt.add_row(
-            (
-                obj_ra.to(units.deg), obj_dec.to(units.deg),
-                obj_a.to(units.arcsec), obj_b.to(units.arcsec),
-                obj_theta.to(units.deg),
-                obj_w_min.to(units.angstrom), obj_w_max.to(units.angstrom)
-            )
-        )
-    return myt
 
 
 def get_gray_cutout(data: np.ndarray,
@@ -1056,8 +1185,9 @@ def self_correlate(data: np.ndarray,
 
 
 def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
-                spatial_sigma: Optional[float] = 1.0,
-                wave_sigma: Optional[float] = 0.0,
+                spatial_sigma: Optional[Union[float, units.Quantity]] = 1.0,
+                wave_sigma: Optional[Union[float, units.Quantity]] = 0.0,
+                cube_wcs : Optional[WCS] = None,
                 report_callback: Optional[Callable] = None) -> np.ndarray:
     """
     Smooth a datacube spatially and/or along the spectral axis.
@@ -1097,7 +1227,49 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
 
     smoothed_arr = data.copy()
 
-    if wave_sigma > 0:
+    if not isinstance(wave_sigma, Number):
+        if cube_wcs is None:
+            raise ValueError(
+                "cube_wcs is needed when using dimensional quantities "
+                "for wave_sigma"
+            )
+        elif not cube_wcs.has_spectral:
+            raise ValueError(
+                "Datacube WCS has no spectral axis!"
+            )
+        else:
+            # Determine the equivalent sigma in pixel space
+            p0 = cube_wcs.spectral.pixel_to_world(0).to(units.angstrom)
+            wave_sigma = cube_wcs.spectral.world_to_pixel(p0 + wave_sigma)
+    do_wave_smoohting = wave_sigma > 0
+
+    if isinstance(spatial_sigma, Number):
+        dp_spatial_smoothing = spatial_sigma > 0
+    else:
+        if cube_wcs is None:
+            raise ValueError(
+                "cube_wcs is needed when using dimensional quantities "
+                "for spatial_sigma"
+            )
+        elif not cube_wcs.has_celestial:
+            raise ValueError(
+                "Datacube WCS has no celestial axes!"
+            )
+        else:
+            # Determine the equivalent sigma in pixel space
+            p0 = cube_wcs.celestial.pixel_to_world(0, 0)
+            try:
+                d_ra = spatial_sigma[0]
+                d_dec = spatial_sigma[1]
+            except (TypeError, IndexError):
+                d_ra = spatial_sigma
+                d_dec = spatial_sigma
+            p1 = p0.spherical_offsets_by(d_ra, d_dec)
+            spatial_sigma = cube_wcs.celestial.world_to_pixel(p1)
+            dp_spatial_smoothing = (spatial_sigma[0] > 0)
+            dp_spatial_smoothing |= (spatial_sigma[1] > 0)
+
+    if do_wave_smoohting:
         for h in range(smoothed_arr.shape[1]):
             if report_callback is not None:
                 report_callback(h, smoothed_arr.shape[1])
@@ -1112,7 +1284,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
     if report_callback is not None:
         print("")
 
-    if spatial_sigma > 0:
+    if dp_spatial_smoothing:
         for k, data_slice in enumerate(smoothed_arr):
             if report_callback is not None:
                 report_callback(k + 1, smoothed_arr.shape[0])
@@ -1135,6 +1307,8 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
         if report_callback is not None:
             print("")
         smoothed_mask = smoothed_mask.astype('int8')
+    else:
+        smoothed_mask = None
 
     return smoothed_arr, smoothed_mask
 
@@ -1160,77 +1334,76 @@ def smoothing_main(options=None):
     else:
         report_callback = None
 
+    try:
+        wave_sigma = float(args.wave_sigma)
+    except ValueError:
+        wave_sigma = units.Quantity(args.wave_sigma)
+
+    try:
+        spatial_sigma = float(args.spatial_sigma)
+    except ValueError:
+        spatial_sigma_list = args.spatial_sigma.split(',')
+        if len(spatial_sigma_list) > 1:
+            spatial_sigma = [
+                units.Quantity(spatial_sigma_list[0]),
+                units.Quantity(spatial_sigma_list[1])
+            ]
+        else:
+            spatial_sigma = units.Quantity(spatial_sigma_list[0])
+
     for target_data_file in args.input_fits_files:
         fits_base_name = os.path.basename(target_data_file)
         fits_base_name = os.path.splitext(fits_base_name)[0]
+        out_fname = f"{fits_base_name}_smoothed.fits"
+
         if args.verbose:
             print(f"\n[{fits_base_name}]")
 
-        with fits.open(target_data_file, mode='readonly') as hdul:
-            spec_hdu = get_hdu(
-                hdul,
-                hdu_index=args.spec_hdu,
-                valid_names=KNOWN_SPEC_EXT_NAMES,
-                msg_err_notfound=(
-                    "ERROR: Cannot determine which HDU contains spectral "
-                    "data, try to specify it manually!"
-                ),
-                msg_index_error="ERROR: Cannot open HDU {} to read specra!"
-            )
+        shutil.copy(target_data_file, out_fname)
 
-            spec_wcs = WCS(spec_hdu.header)
+        with SpectraCube.open(target_data_file, mode='readonly') as my_cube:
 
-            var_hdu = get_hdu(
-                hdul,
-                hdu_index=args.var_hdu,
-                valid_names=KNOWN_VARIANCE_EXT_NAMES,
-                msg_err_notfound=(
-                    "WARNING: Cannot determine which HDU contains the "
-                    "variance data, try to specify it manually!"
-                ),
-                msg_index_error="WARNING: Cannot open HDU {} to read the "
-                                "variance!",
-                exit_on_errors=False
-            )
-
-            mask_hdu = get_hdu(
-                hdul,
-                hdu_index=args.mask_hdu,
-                valid_names=KNOWN_MASK_EXT_NAMES,
-                msg_err_notfound=(
-                    "WARNING: Cannot determine which HDU contains the "
-                    "mask data, try to specify it manually!"
-                ),
-                msg_index_error="WARNING: Cannot open HDU {} to read the "
-                                "mask!",
-                exit_on_errors=False
-            )
-
-            if mask_hdu is not None:
-                data_mask = mask_hdu.data
+            data_mask = None
+            if my_cube.mask_hdu is not None:
+                data_mask = my_cube.mask_hdu.data
 
             if args.verbose:
                 print(">>> applying smoothing...")
-                print(f"  - spatial_sigma: {args.spatial_sigma}")
-                print(f"  - wave_sigma: {args.wave_sigma}")
+                print(f"  - spatial_sigma: {spatial_sigma}")
+                print(f"  - wave_sigma: {wave_sigma}")
 
             smoothed_spec, smoothed_mask = smooth_cube(
-                data=spec_hdu.data,
+                data=my_cube.spec_hdu.data,
                 data_mask=data_mask,
-                spatial_sigma=args.spatial_sigma,
-                wave_sigma=args.wave_sigma,
+                spatial_sigma=spatial_sigma,
+                wave_sigma=wave_sigma,
+                cube_wcs=my_cube.getSpecWCS(),
                 report_callback=report_callback
             )
+            my_cube.spec_hdu.data = smoothed_spec
 
-            spec_hdu.data = smoothed_spec
-            if mask_hdu is not None:
-                mask_hdu.data = smoothed_mask
+            if my_cube.var_hdu is not None:
+                smoothed_var, _ = smooth_cube(
+                    data=my_cube.var_hdu.data,
+                    spatial_sigma=spatial_sigma,
+                    wave_sigma=wave_sigma,
+                    cube_wcs=my_cube.getVarWCS(),
+                    report_callback=report_callback
+                )
+                my_cube.var_hdu.data = smoothed_var
 
-            out_fname = f"{fits_base_name}_smoothed.fits"
+            if my_cube.mask_hdu is not None:
+                my_cube.mask_hdu.data = smoothed_mask
+
+            if args.debug:
+                embedder = get_ipython_embedder()
+                if embedder is not None:
+                    embedder()
+
             if args.verbose:
-                print("  - saving to {out_fname}...")
+                print(f"  - saving to {out_fname}...")
 
-            hdul.writeto(
+            my_cube.write(
                 out_fname,
                 overwrite=True
             )
@@ -1307,11 +1480,49 @@ def cutout_main(options=None):
 
     args = __cutout_argshandler(options)
 
+    cutout_list = []
     if args.regionfile is not None:
-        myt = parse_regionfile(args.regionfile)
+        if HAS_REGION:
+            myt, _ = parse_regionfile(
+                args.regionfile,  key_ra='RA', key_dec='DEC'
+            )
+        else:
+            logging.error("Astropy Regions is needed to handle regionfiles!")
+            sys.exit(1)
+    else:
+        ra_dec = args.center.split(',')
+
+        try:
+            ra = float(ra_dec[0])
+            dec = float(ra_dec[1])
+            center = (ra, dec)
+        except ValueError:
+            ra = units.Quantity(ra_dec[0])
+            dec = units.Quantity(ra_dec[1])
+            center = SkyCoord(ra, dec)
+
+        size_list = []
+        for size_j in args.size.split(','):
+            try:
+                size = float(size_j)
+            except ValueError:
+                size = units.Quantity(size_j)
+            size_list.append(size)
+        if len(size_list) == 1:
+            sizes = (size_list[0], size_list[0])
+        else:
+            sizes = (size_list[1], size_list[0])
+
+        try:
+            angle = float(args.angle) * units.deg
+        except ValueError:
+            angle = units.Quantity(args.angle)
+
+        cutout_list.append((center, sizes, angle))
 
     if args.verbose:
-        print(myt)
+        for j, (center, sizes, angle) in enumerate(cutout_list):
+            print(f'  - Cutout {j}: {center} {sizes} {angle}')
 
     target_data_file = args.input_fits[0]
 
@@ -1335,133 +1546,134 @@ def cutout_main(options=None):
         report_callback = None
 
     with fits.open(target_data_file) as hdul:
-        for j, cutout_info in enumerate(myt):
+        for j, (cut_center, cut_size, cut_angle) in enumerate(cutout_list):
             cutout_name = f"cutout_{fits_base_name}_{j:04}.fits"
-            cc_ra = cutout_info['RA'] * units.deg
-            cc_dec = cutout_info['DEC'] * units.deg
-
-            cutout_sizes = (
-                2 * cutout_info['B_WORLD'] * units.arcsec,
-                2 * cutout_info['A_WORLD'] * units.arcsec,
-            )
-
-            angle_world = cutout_info['THETA_WORLD'] * units.deg
 
             if data_structure['type'] == 'cube':
+                with SpectraCube.open(
+                    target_data_file,
+                    spec_hdu_index=data_structure['data-ext'][0],
+                    mode='readonly'
+                ) as my_cube:
 
-                flux_hdu = hdul[data_structure['data-ext'][0]]
-                flux_data = flux_hdu.data
-                flux_wcs = WCS(flux_hdu.header)
-                center_sky_coord = SkyCoord(
-                    cc_ra, cc_dec,
-                    frame=wcs_to_celestial_frame(flux_wcs)
-                )
-
-                var_hdu = get_hdu(
-                    hdul,
-                    valid_names=KNOWN_VARIANCE_EXT_NAMES,
-                    msg_err_notfound="WARNING: Cannot determine which "
-                                     "HDU contains the variance data. ",
-                    exit_on_errors=False
-                )
-
-                mask_hdu = get_hdu(
-                    hdul,
-                    valid_names=KNOWN_MASK_EXT_NAMES,
-                    msg_err_notfound="WARNING: Cannot determine which "
-                                     "HDU contains the mask data.",
-                    exit_on_errors=False
-                )
-
-                if args.verbose:
-                    print(
-                        "\nComputing flux cutouts...",
-                        file=sys.stderr
-                    )
-                flux_cutout = get_cube_cutout(
-                    flux_data,
-                    center=center_sky_coord,
-                    size=cutout_sizes,
-                    angle=angle_world,
-                    data_wcs=flux_wcs,
-                    report_callback=report_callback
-                )
-
-                # Convert specral axis to angtrom units
-                flux_header = updated_wcs_cutout_header(
-                    flux_hdu.header,
-                    flux_cutout['wcs'].to_header()
-                )
-
-                cutout_hdul = [
-                    fits.PrimaryHDU(),
-                    fits.ImageHDU(
-                        data=flux_cutout['data'],
-                        header=flux_header,
-                        name=flux_hdu.name
-                    ),
-                ]
-
-                if var_hdu is not None:
                     if args.verbose:
                         print(
-                            "\nComputing variance cutouts...",
+                            "\nComputing flux cutouts...",
                             file=sys.stderr
                         )
-                    var_wcs = WCS(var_hdu.header)
-                    var_cutout = get_cube_cutout(
-                        var_hdu.data,
-                        center=center_sky_coord,
-                        size=cutout_sizes,
-                        angle=angle_world,
-                        data_wcs=var_wcs,
+                    flux_cutout = get_cube_cutout(
+                        my_cube.spec_hdu.data,
+                        center=cut_center,
+                        size=cut_size,
+                        angle=cut_angle,
+                        data_wcs=my_cube.getSpecWCS(),
                         report_callback=report_callback
                     )
 
-                    var_header = updated_wcs_cutout_header(
-                        var_hdu.header,
-                        var_cutout['wcs'].to_header()
+                    # Convert specral axis to angtrom units
+                    flux_header = updated_wcs_cutout_header(
+                        my_cube.spec_hdu.header,
+                        flux_cutout['wcs'].to_header()
                     )
 
-                    cutout_hdul.append(
+                    cutout_hdul = [
+                        fits.PrimaryHDU(),
                         fits.ImageHDU(
-                            data=var_cutout['data'],
-                            header=var_header,
-                            name=var_hdu.name
+                            data=flux_cutout['data'],
+                            header=flux_header,
+                            name=my_cube.spec_hdu.name
                         ),
-                    )
+                    ]
 
-                if mask_hdu is not None:
-                    if args.verbose:
-                        print(
-                            "\nComputing data mask cutouts...",
-                            file=sys.stderr
+                    if my_cube.var_hdu is not None:
+                        if args.verbose:
+                            print(
+                                "\nComputing variance cutouts...",
+                                file=sys.stderr
+                            )
+
+                        var_cutout = get_cube_cutout(
+                            my_cube.var_hdu.data,
+                            center=cut_center,
+                            size=cut_size,
+                            angle=cut_angle,
+                            data_wcs=my_cube.getVarWCS(),
+                            report_callback=report_callback
                         )
-                    mask_wcs = WCS(mask_hdu.header)
-                    mask_cutout = get_cube_cutout(
-                        mask_hdu.data,
-                        center=center_sky_coord,
-                        size=cutout_sizes,
-                        angle=angle_world,
-                        data_wcs=mask_wcs,
-                        report_callback=report_callback
-                    )
 
-                    mask_header = updated_wcs_cutout_header(
-                        mask_hdu.header,
-                        mask_cutout['wcs'].to_header()
-                    )
+                        var_header = updated_wcs_cutout_header(
+                            my_cube.var_hdu.header,
+                            var_cutout['wcs'].to_header()
+                        )
 
-                    cutout_hdul.append(
-                        fits.ImageHDU(
-                            data=mask_cutout['data'],
-                            header=mask_header,
-                            name=mask_hdu.name
-                        ),
-                    )
+                        cutout_hdul.append(
+                            fits.ImageHDU(
+                                data=var_cutout['data'],
+                                header=var_header,
+                                name=my_cube.var_hdu.name
+                            ),
+                        )
 
-                cutout_hdul = fits.HDUList(cutout_hdul)
-                cutout_hdul.writeto(cutout_name, overwrite=True)
+                    if my_cube.mask_hdu is not None:
+                        if args.verbose:
+                            print(
+                                "\nComputing data mask cutouts...",
+                                file=sys.stderr
+                            )
+
+                        mask_cutout = get_cube_cutout(
+                            my_cube.mask_hdu.data,
+                            center=cut_center,
+                            size=cut_size,
+                            angle=cut_angle,
+                            data_wcs=my_cube.getMaskWCS(),
+                            report_callback=report_callback
+                        )
+
+                        mask_header = updated_wcs_cutout_header(
+                            my_cube.mask_hdu.header,
+                            mask_cutout['wcs'].to_header()
+                        )
+
+                        cutout_hdul.append(
+                            fits.ImageHDU(
+                                data=mask_cutout['data'],
+                                header=mask_header,
+                                name=my_cube.mask_hdu.name
+                            ),
+                        )
+
+                    if my_cube.wd_hdu is not None:
+                        if args.verbose:
+                            print(
+                                "\nComputing data R matrix cutouts...",
+                                file=sys.stderr
+                            )
+
+                        wd_cutout = get_cube_cutout(
+                            my_cube.wd_hdu.data,
+                            center=cut_center,
+                            size=cut_size,
+                            angle=cut_angle,
+                            data_wcs=my_cube.getWdWCS(),
+                            report_callback=report_callback
+                        )
+
+                        wd_header = updated_wcs_cutout_header(
+                            my_cube.wd_hdu.header,
+                            wd_cutout['wcs'].to_header()
+                        )
+
+                        cutout_hdul.append(
+                            fits.ImageHDU(
+                                data=wd_cutout['data'],
+                                header=wd_header,
+                                name=my_cube.wd_hdu.name
+                            ),
+                        )
+
+                    cutout_hdul = fits.HDUList(cutout_hdul)
+                    cutout_hdul.writeto(cutout_name, overwrite=True)
             elif data_structure['type'].endswith('-gray'):
                 if data_structure['type'].startswith('image-'):
                     gray_data = hdul[data_structure['data-ext'][0]].data
@@ -1471,16 +1683,12 @@ def cutout_main(options=None):
 
                 gray_hdu = hdul[data_structure['data-ext'][0]]
                 grey_wcs = WCS(gray_hdu.header)
-                center_sky_coord = SkyCoord(
-                    cc_ra, cc_dec,
-                    frame=wcs_to_celestial_frame(grey_wcs)
-                )
 
                 cutout = get_gray_cutout(
                     gray_data,
-                    center=center_sky_coord,
-                    size=cutout_sizes,
-                    angle=angle_world,
+                    center=cut_center,
+                    size=cut_size,
+                    angle=cut_angle,
                     data_wcs=grey_wcs
                 )
 
@@ -1501,14 +1709,12 @@ def cutout_main(options=None):
                 rgb_wcs = [
                     WCS(hdul[k].header) for k in data_structure['data-ext']
                 ]
-                center_sky_coord = SkyCoord(
-                    cc_ra, cc_dec,
-                    frame=wcs_to_celestial_frame(rgb_wcs[0])
-                )
+
                 cutout = get_rgb_cutout(
                     rgb_data,
-                    center=center_sky_coord,
-                    size=cutout_sizes,
+                    center=cut_center,
+                    size=cut_size,
+                    angle=cut_angle,
                     data_wcs=rgb_wcs
                 )
 

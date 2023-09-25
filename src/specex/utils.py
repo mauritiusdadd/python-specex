@@ -10,6 +10,7 @@ Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 import os
 import sys
 import tarfile
+import logging
 import platform
 import subprocess
 from typing import Optional
@@ -30,8 +31,16 @@ from astropy import wcs as apwcs
 from astropy import units as apu
 from astropy import coordinates
 from astropy import constants
+from astropy.table import Table
 
 from .lines import get_lines
+
+try:
+    from regions import Regions
+except Exception:
+    HAS_REGION = False
+else:
+    HAS_REGION = True
 
 
 _SDSS_SPECTRAL_TEMPLATES_PACKAGE = "http://classic.sdss.org/dr5/algorithms/spectemplates/spectemplatesDR2.tar.gz"
@@ -380,6 +389,73 @@ def get_sdss_template_data(sdss_template_file: str) -> dict:
         'wavelengths': t_wavelengths
     }
     return t_dict
+
+
+def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
+                     key_id='NUMBER', file_format='ds9'):
+    """
+    Parse a regionfile and return an asrtopy Table with sources information.
+
+    Note that the only supported shape are 'circle', 'ellipse' and 'box',
+    other shapes in the region file will be ignored. Note also that 'box'
+    is treated as the bounding box of an ellipse.
+
+    Parameters
+    ----------
+    regionfile : str
+        Path of the regionfile.
+    pixel_scale : float or None, optional
+        The pixel scale in mas/pixel used to compute the dimension of the
+        size of the objects. If None, height and width in the region file will
+        be considered already in pixel units.
+    key_ra : str, optional
+        Name of the column that will contain RA of the objects.
+        The default value is 'ALPHA_J2000'.
+    key_dec : str, optional
+        Name of the column that will contain DEC of the objects
+        The default value is 'DELTA_J2000'.
+    file_format : str, optional
+        Format of the input regionfile.
+        The default value is 'ds9'.
+
+    Returns
+    -------
+    sources : astropy.table.Table
+        The table containing the sources.
+    skyframe : None
+        Placeholder.
+
+    """
+    global HAS_REGION
+
+    if not HAS_REGION:
+        logging.error(
+            "astropy regions package is needed to handle regionfiles!"
+        )
+        return
+
+    myt = Table(
+        names=[key_id, key_ra, key_dec, 'region'],
+        units=[None, 'deg', 'deg', None],
+        dtype=[str, float, float, object]
+    )
+    for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
+        try:
+            reg_id = reg.meta['text']
+        except Exception:
+            reg_id = j
+
+        try:
+            center = reg.center
+        except AttributeError:
+            c_ra = np.mean([x.ra.to('deg').value for x in reg.vertices])
+            c_dec = np.mean([x.dec.to('deg').value for x in reg.vertices])
+            new_row = [reg_id, c_ra, c_dec, reg]
+        else:
+            new_row = [reg_id, center.ra, center.dec, reg]
+        myt.add_row(new_row)
+
+    return myt, None
 
 
 def get_aspect(ax):

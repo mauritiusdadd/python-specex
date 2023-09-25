@@ -13,19 +13,21 @@ import os
 import sys
 import unittest
 import warnings
+from urllib import request
 
 from astropy.io import fits
 from astropy.table import Table, join
 
-from specex.cube import cutout_main
+from specex.cube import cutout_main, smoothing_main
 from specex.stack import cube_stack
 from specex.sources import detect_from_cube
 from specex.zeropoints import main as zpinfo
 from specex.specex import specex
 from specex.plot import plot_spectra
+from specex.utils import get_pbar
 
 from test import make_synt_cube, get_hst_test_images, TEST_DATA_PATH
-from test import make_synt_specs
+from test import make_synt_specs, get_muse_test_cube
 
 
 try:
@@ -51,8 +53,10 @@ ellipse(182.6349624,39.4062180,2.500",1.500",217.21022)
 class MyTests(unittest.TestCase):
 
     test_hst_imgs = get_hst_test_images()
-    reg_file, cat_file, cube_file = make_synt_cube.main(overwrite=False)
+    cube_file = get_muse_test_cube()
     spec_files = make_synt_specs.main()
+    reg_file = os.path.join(TEST_DATA_PATH, 'test_regions.reg')
+    cat_file = os.path.join(TEST_DATA_PATH, 'test_sources.cat')
 
     def test_zeropoint_info(self):
         print(">>> Testing zeropoint_info...\n")
@@ -64,13 +68,23 @@ class MyTests(unittest.TestCase):
             return True
         zpinfo(self.test_hst_imgs)
 
-    def test_stack_cube(self):
+    def test_cube_stack(self):
         print(">>> Testing cube_stack...\n")
         print(self.cube_file)
         cube_stack_options = [
             self.cube_file
         ]
         cube_stack(cube_stack_options)
+
+    def test_cube_smoothing(self):
+        print(">>> Testing smoothing...\n")
+        smoohting_options = [
+            '--verbose',
+            '--spatial-sigma', '1',
+            '--wave-sigma', '1',
+            self.cube_file
+        ]
+        smoothing_main(smoohting_options)
 
     def test_grayscale_cutout(self):
         print(">>> Testing grayscale cutout...\n")
@@ -99,16 +113,10 @@ class MyTests(unittest.TestCase):
 
     def test_cube_cutout(self):
         print(">>> Testing cube cutout...\n")
-        regfile = os.path.join(
-            TEST_DATA_PATH, 'cutout_test_cube.reg'
-        )
-
-        with open(regfile, 'w') as f:
-            f.write(NICMOS_REGFILE_DATA)
 
         cutout_options = [
             '--verbose',
-            '--regionfile', regfile,
+            '--regionfile', self.reg_file,
             self.cube_file
         ]
         cutout_main(cutout_options)
@@ -117,7 +125,7 @@ class MyTests(unittest.TestCase):
         print(">>> Testing sources detection from datacube...\n")
         detect_from_cube([self.cube_file])
 
-    def test_specex_catalog_success(self):
+    def test_specex_catalog(self):
         print(">>> Testing specex catalog...\n")
         specex_options = [
             '--catalog', self.cat_file,
@@ -128,7 +136,7 @@ class MyTests(unittest.TestCase):
         ]
         specex(options=specex_options)
 
-    def test_specex_regionfile_success(self):
+    def test_specex_regionfile(self):
         print(">>> Testing specex regionfile...")
         specex_options = [
             '--regionfile', self.reg_file,
@@ -137,7 +145,7 @@ class MyTests(unittest.TestCase):
         ]
         specex(options=specex_options)
 
-    def test_plot_success(self):
+    def test_plot(self):
         print(">>> Testing specex-plot...")
 
         plot_options = [
@@ -148,6 +156,7 @@ class MyTests(unittest.TestCase):
 
         plot_spectra(options=plot_options)
 
+
 """
 # unittest seems to have some issues with redrock implementation...
 class TestRRSpex(unittest.TestCase):
@@ -155,7 +164,7 @@ class TestRRSpex(unittest.TestCase):
     @unittest.skipIf(not HAS_RR, "redrock not installed")
     def test_rrspecex_success(self):
         global HAS_RR
-        
+
         if not HAS_RR:
             return
 

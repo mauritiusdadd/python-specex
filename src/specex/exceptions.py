@@ -9,13 +9,45 @@ import sys
 
 try:
     from IPython.core import ultratb
+    from IPython import embed
 except Exception:
     HAS_IPYTHON = False
 else:
     HAS_IPYTHON = True
 
 
+def get_ipython_embedder():
+    """
+    Embed an IPython console, if IPython is installed.
+
+    Returns
+    -------
+    None.
+
+    """
+    if HAS_IPYTHON:
+        return embed
+
+
 def exception_handler(exception_type, value, traceback):
+    """
+    Start ipydb.
+
+    Parameters
+    ----------
+    exception_type : TYPE
+        DESCRIPTION.
+    value : TYPE
+        DESCRIPTION.
+    traceback : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
     global HAS_IPYTHON
 
     if HAS_IPYTHON:
