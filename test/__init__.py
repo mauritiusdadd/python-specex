@@ -33,6 +33,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
 import sys
+import time
 from urllib import request
 import pathlib
 
@@ -46,16 +47,39 @@ TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
 
 
 def downloadFiles(url_list: tuple, out_dir: str = TEST_DATA_PATH,
-                 use_cached: bool = True):
+                  use_cached: bool = True, report_interval=1):
+    """
+    Download a set of files with a progressbar.
+
+    Parameters
+    ----------
+    url_list : tuple
+        DESCRIPTION.
+    out_dir : str, optional
+        DESCRIPTION. The default is TEST_DATA_PATH.
+    use_cached : bool, optional
+        DESCRIPTION. The default is True.
+    report_interval : TYPE, optional
+        DESCRIPTION. The default is 1.
+
+    Returns
+    -------
+    outfile_list : TYPE
+        DESCRIPTION.
+
+    """
 
     def report_pbar(blocks_count, block_size, total_size):
-        downloaded_size = blocks_count * block_size
-        progress = downloaded_size / total_size
-        pbar = get_pbar(progress)
-        report_str = f"\r{pbar} {progress: 6.2%}  "
-        report_str += f"{downloaded_size}/{total_size} Bytes\r"
-        sys.stderr.write(report_str)
-        sys.stderr.flush()
+        if (time.perf_counter() - report_pbar.last_time) > report_interval:
+            report_pbar.last_time = time.perf_counter()
+            downloaded_size = blocks_count * block_size
+            progress = downloaded_size / total_size
+            pbar = get_pbar(progress)
+            report_str = f"\r{pbar} {progress: 6.2%}  "
+            report_str += f"{downloaded_size}/{total_size} Bytes\r"
+            sys.stderr.write(report_str)
+            sys.stderr.flush()
+    report_pbar.last_time = time.perf_counter()
 
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
@@ -89,7 +113,10 @@ def get_muse_test_cube(out_dir: str = TEST_DATA_PATH,
                        use_cached: bool = True):
     TEST_CUBE_URL = 'https://dataportal.eso.org/dataportal_new/file//ADP.2023-09-01T12:56:41.595'
     return downloadFiles(
-        [TEST_CUBE_URL,], out_dir=out_dir, use_cached=use_cached
+        [TEST_CUBE_URL,],
+        out_dir=out_dir,
+        use_cached=use_cached,
+        report_interval=10
     )[0]
 
 
@@ -121,4 +148,9 @@ def get_hst_test_images(out_dir: str = TEST_DATA_PATH,
         f'{HST_BASE_URL}/WFPC2u5780205r_c0fx.fits',
     ]
 
-    return downloadFiles(HST_TEST_FITS, out_dir=out_dir, use_cached=use_cached)
+    return downloadFiles(
+        HST_TEST_FITS,
+        out_dir=out_dir,
+        use_cached=use_cached,
+        report_interval=1
+    )

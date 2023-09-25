@@ -76,12 +76,22 @@ class MyTests(unittest.TestCase):
         ]
         cube_stack(cube_stack_options)
 
-    def test_cube_smoothing(self):
+    def test_cube_smoothing_phisical_units(self):
         print(">>> Testing smoothing...\n")
         smoohting_options = [
             '--verbose',
-            '--spatial-sigma', '1',
-            '--wave-sigma', '1',
+            '--spatial-sigma', '0.5arcsec,0.25arcsec',
+            '--wave-sigma', '1angstrom',
+            self.cube_file
+        ]
+        smoothing_main(smoohting_options)
+
+    def test_cube_smoothing_pixel_units(self):
+        print(">>> Testing smoothing...\n")
+        smoohting_options = [
+            '--verbose',
+            '--spatial-sigma', '3,2',
+            '--wave-sigma', '2',
             self.cube_file
         ]
         smoothing_main(smoohting_options)
@@ -112,6 +122,18 @@ class MyTests(unittest.TestCase):
                 break
 
     def test_cube_cutout(self):
+        print(">>> Testing cube cutout...\n")
+
+        cutout_options = [
+            '--verbose',
+            '--center', '16.3867deg,-24.6464deg',
+            '--size', '6arcsec,3arcsec',
+            '--angle', '45deg',
+            self.cube_file
+        ]
+        cutout_main(cutout_options)
+
+    def test_cube_cutout_regfile(self):
         print(">>> Testing cube cutout...\n")
 
         cutout_options = [

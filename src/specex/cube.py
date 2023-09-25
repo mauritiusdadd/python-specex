@@ -24,8 +24,6 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from astropy import units
 from astropy.io import fits
 from astropy.wcs import WCS
-from astropy.wcs.utils import wcs_to_celestial_frame
-from astropy.table import Table
 from astropy.coordinates import SkyCoord
 from astropy.nddata.utils import Cutout2D
 
@@ -33,12 +31,8 @@ from .utils import get_pc_transform_params, rotate_data, get_pbar
 from .utils import HAS_REGION, parse_regionfile
 from .exceptions import get_ipython_embedder
 
-try:
-    from regions import Regions
-except Exception:
-    HAS_REGION = False
-else:
-    HAS_REGION = True
+if HAS_REGION:
+    import regions
 
 KNOWN_SPEC_EXT_NAMES = ['spec', 'spectrum', 'flux', 'data', 'sci', 'science']
 KNOWN_VARIANCE_EXT_NAMES = ['stat', 'stats', 'var', 'variance', 'noise', 'err']
@@ -1489,6 +1483,39 @@ def cutout_main(options=None):
         else:
             logging.error("Astropy Regions is needed to handle regionfiles!")
             sys.exit(1)
+        for row in myt:
+            reg = row['region']
+
+            if isinstance(reg, regions.CircleSkyRegion):
+                center = reg.center
+                sizes = [reg.radius*2, reg.radius*2]
+                angle = 0
+            elif (
+                isinstance(reg, regions.EllipseSkyRegion) or
+                isinstance(reg, regions.RectangleSkyRegion)
+            ):
+                center = reg.center
+                sizes = [reg.height, reg.width]
+                angle = reg.angle
+            elif isinstance(reg, regions.EllipseAnnulusSkyRegion):
+                center = reg.center
+                sizes = [reg.outer_height, reg.outer_width]
+                angle = reg.angle
+            elif isinstance(reg, regions.PolygonSkyRegion):
+                center = SkyCoord(
+                    row['RA'],
+                    row['DEC'],
+                    unit='deg',
+                    frame=reg.vertices[0].frame
+                )
+                ra_list = [x.ra.to('deg').value for x in reg.vertices]
+                dec_list = [x.dec.to('deg').value for x in reg.vertices]
+
+                width = (np.max(ra_list) - np.min(ra_list)) * units.deg
+                height = (np.max(dec_list) - np.min(dec_list)) * units.deg
+                sizes = [height, width]
+
+            cutout_list.append((center, sizes, angle))
     else:
         ra_dec = args.center.split(',')
 

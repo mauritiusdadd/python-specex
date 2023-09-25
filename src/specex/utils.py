@@ -441,9 +441,9 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     )
     for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
         try:
-            reg_id = reg.meta['text']
+            reg_id = str(reg.meta['text'])
         except Exception:
-            reg_id = j
+            reg_id = str(j)
 
         try:
             center = reg.center
