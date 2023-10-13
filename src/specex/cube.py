@@ -97,6 +97,10 @@ class SpectraCube():
         """
         self.close()
 
+    def getBaseName(self):
+        bname = os.path.basename(self.filename)
+        return os.path.splitext(bname)[0]
+
     def close(self):
         """
         Clean up on closing.

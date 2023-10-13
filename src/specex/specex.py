@@ -1414,6 +1414,15 @@ def specex(options=None):
                     fig.savefig(figname, dpi=150)
                     plt.close(fig)
 
+        specex_map = fits.PrimaryHDU(
+            data=extracted_data,
+            header=celestial_wcs.to_header()
+        )
+        specex_map.writeto(
+            f"{my_cube.getBaseName()}_extmap.fits",
+            overwrite=True
+        )
+
         if args.check_images:
             fig, ax = plt.subplots(1, 1, figsize=(10, 10))
             ax.imshow(extracted_data, origin='lower')

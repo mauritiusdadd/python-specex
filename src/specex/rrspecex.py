@@ -16,6 +16,7 @@ import sys
 import traceback
 import argparse
 from glob import glob
+from packaging import version
 
 import numpy as np
 from scipy import sparse
@@ -28,6 +29,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 
 try:
+    import redrock
     from redrock.utils import elapsed, get_mp
     from redrock.targets import Spectrum, Target, DistTargetsCopy
     from redrock.templates import load_dist_templates, find_templates, Template
@@ -54,7 +56,7 @@ from .cube import (
 )
 
 MUSE_RESOLUTION_ANG = 2.51
-
+RR_GPU_MIN_VER = "16.0"
 
 def get_templates(template_types=[], filepath=False, templates=None):
     """
@@ -446,6 +448,12 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
+        "--gpu", action="store_true", default=False,
+        help="Use GPU computing acceleration (requires redrock >= "
+        f"{RR_GPU_MIN_VER})."
+    )
+
+    parser.add_argument(
         "--priors", type=str, default=None, required=False,
         help="optional redshift prior file"
     )
@@ -660,9 +668,12 @@ def rrspecex(options=None, comm=None):
             # gpu_mode=True
         )
 
+        opt_zfind_args = {}
+        if version.parse(redrock.__version__) >= version.parse(RR_GPU_MIN_VER):
+            opt_zfind_args['use_gpu'] = True
+
         # Compute the redshifts, including both the coarse scan and the
         # refinement.  This function only returns data on the rank 0 process.
-
         start = elapsed(None, "", comm=comm)
         scandata, zfit = zfind(
             dtargets,
@@ -671,7 +682,8 @@ def rrspecex(options=None, comm=None):
             nminima=args.nminima,
             archetypes=args.archetypes,
             priors=args.priors,
-            chi2_scan=args.chi2_scan
+            chi2_scan=args.chi2_scan,
+            **opt_zfind_args
         )
 
         _ = elapsed(start, "Computing redshifts took", comm=comm)
