@@ -975,8 +975,7 @@ def specex(options=None):
             indexing='ij'
         )
 
-        if args.check_images:
-            extracted_data = np.zeros((img_height, img_width))
+        extracted_data = np.zeros((img_height, img_width))
 
         # Chech if there is a footprint mask in the cube
         if my_cube.mask_hdu is not None:
@@ -1306,10 +1305,9 @@ def specex(options=None):
             valid_sources_mask[i] = True
 
             # Add also the extracted pixels to the extraction map
-            if args.check_images:
-                extracted_data += obj_extraction_mask
-                if anulus_mask is not None:
-                    extracted_data -= anulus_mask
+            extracted_data += obj_extraction_mask
+            if anulus_mask is not None:
+                extracted_data -= anulus_mask
 
         # Discard all invalid sources
         sources = sources[valid_sources_mask]

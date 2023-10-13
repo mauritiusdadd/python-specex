@@ -56,7 +56,7 @@ from .cube import (
 )
 
 MUSE_RESOLUTION_ANG = 2.51
-RR_GPU_MIN_VER = "16.0"
+RR_GPU_MIN_VER = "0.16.0"
 
 def get_templates(template_types=[], filepath=False, templates=None):
     """
