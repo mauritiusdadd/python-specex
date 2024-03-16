@@ -3,7 +3,7 @@ SPECEX - SPECtra EXtractor.
 
 Extract spectra from spectral data cubes and find their redshift.
 
-Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -31,19 +31,21 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
-import importlib.metadata
-from pkgutil import extend_path
-
-from . import specex
-from . import utils
-from . import plot
+# from pkgutil import extend_path
 
 try:
-    from . import rrspecex
+    from specex import rrspecex
 except Exception:
     HAS_RR = False
 else:
     HAS_RR = rrspecex.HAS_REDROCK
 
-__version__ = importlib.metadata.version("specex")
-__path__ = extend_path(__path__, __name__)
+# __path__ = extend_path(__path__, __name__)
+
+try:
+    from specex._version import version as __version__  # type: ignore
+    from specex._version import version_tuple  # type: ignore
+except ImportError:
+    __version__ = "unknown version"
+    version_tuple = (0, 0, "unknown version")
+

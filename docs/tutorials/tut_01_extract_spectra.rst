@@ -31,7 +31,7 @@ Now we can run, for example, *SExtractor* [:ref:`4<references_01>`] to identify 
 
     sex ADP.2023-09-01T12_56_41.595_data.fits -c sex.conf
 
-a catalog file named :ref:`*sources.cat*<sex_cat_file>` is created that contains the value of the parameter specified in the configuration for each source identified. The following figure shows the position of the sources overlayed on the whitelight image of the cube.
+a catalog file named :ref:`*sources.cat*<sex_cat_file>` is created that contains the value of the parameter specified in the configuration for each source identified. The following figure shows the position of the sources overlaid on the whitelight image of the cube.
 
 
 .. image:: pics/test_cube_sources.png
@@ -42,7 +42,7 @@ a catalog file named :ref:`*sources.cat*<sex_cat_file>` is created that contains
 Run specex with a catalog file
 ------------------------------
 
-Specex can extract spectra from the datacube using the positions from a catalog. The catalog file is specified using the parameter ``--catalog`` and, optionally, its format can be set using ``--cat-format``. Spectra can be extracted using different strategies that are be set using the parameter ``--mode``. The simplest mode uses a circular aperture of fixed diamerer that can be set using the parameter ``--aperture-size``. For example, to extract the spectra using a fixed aperture of 0.8" of diamerer we can use the command
+Specex can extract spectra from the datacube using the positions from a catalog. The catalog file is specified using the parameter ``--catalog`` and, optionally, its format can be set using ``--cat-format``. Spectra can be extracted using different strategies that are be set using the parameter ``--mode``. The simplest mode uses a circular aperture of fixed diamerer that can be set using the parameter ``--aperture-size``. For example, to extract the spectra using a fixed aperture of 0.8" of diameter we can use the command
 
 .. code-block:: bash
 
@@ -64,7 +64,17 @@ At the end of the extraction, a file named *spec_list_pandora_ez.txt* is created
   :width: 75%
   :alt: The spectra extraction map.
 
-We can also apply a spatial weighting using the parameter ``--weighting``, for example to get light-weighted spectra we can use the command
+Spatial weighting by light
+--------------------------
+
+We can also apply a spatial weighting using the parameter ``--weighting`` followed by the method you want to use. Currently the following methods are supported:
+
+- none: no light weighting is applied (the default)
+- whitelight: use the pseudo-whitelight image obtained by staking the datacube along the spectra axis
+- log-whitelight: like whitelight, but a logarithmic scale is applied to the image
+- <image url>: use an external grayscale image as weightmap. The image must wither have the same spatial dimensions of the datacube or must have a valid WCS so it can be rescaled to the datacube footprint. For the latter case, the python package reproject [:ref:`8<references_01>`] is required.
+
+For example, to get light-weighted spectra using the cube whitelight image we can use the command
 
 .. code-block:: bash
 
@@ -82,7 +92,7 @@ Run specex with a regionfile
 
   Region file handling is supported only if *Atropy-Regions* [:ref:`6<references_01>`] is installed
 
-Specex also supports region files as input intstead of catalogs. The input region file can be specified using ``--regionfile`` and, in the case it is not automatically identified, its format can be set using ``--cat-format``. For example, suppose we have a region file named :ref:`test_regions.reg<src_regionfile>` created with *SAO DS9* [:ref:`7<references_01>`], like shown in this figure
+Specex also supports region files as input instead of catalogs. The input region file can be specified using ``--regionfile`` and, in the case it is not automatically identified, its format can be set using ``--cat-format``. For example, suppose we have a region file named :ref:`test_regions.reg<src_regionfile>` created with *SAO DS9* [:ref:`7<references_01>`], like shown in this figure
 
 .. image:: pics/test_cube_region.png
   :width: 75%
@@ -332,4 +342,5 @@ References
 #. `Pandora EZ <http://pandora.lambrate.inaf.it/docs/ez/quick-guide.html>`_
 #. `Astropy Regions <https://astropy-regions.readthedocs.io/en/stable/index.html>`_
 #. `SAO DS9 <https://sites.google.com/cfa.harvard.edu/saoimageds9>`_
+#. `Reproject <https://reproject.readthedocs.io/en/stable>`_
 

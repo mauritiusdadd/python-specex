@@ -1,6 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+write_to = "src/specex/_version.py"
 
 [project]
 name = "specex"
@@ -42,8 +46,9 @@ dependencies = [
 [project.optional-dependencies]
 animations = ["imageio"]
 regions = ["regions"]
+advanced = ["reproject"]
 redrock = ["numba", "sqlalchemy", "healpy", "requests", "fitsio", "photutils", "h5py"]
-all = ["specex[animations,regions,redrock]"]
+all = ["specex[animations,regions,redrock,advanced]"]
 test = ["coverage"]
 
 [project.urls]
@@ -51,7 +56,7 @@ documentation = "https://python-specex.readthedocs.io/en/latest"
 repository = "https://github.com/mauritiusdadd/python-specex"
 
 [project.scripts]
-specex = "specex.specex:specex"
+specex = "specex.cubex:specex"
 rrspecex = "specex.rrspecex:rrspecex"
 specex-zeropointinfo = "specex.zeropoints:main"
 specex-cubestack = "specex.stack:cube_stack"

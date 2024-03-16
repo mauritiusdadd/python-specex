@@ -19,7 +19,7 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.utils.exceptions import AstropyWarning
 from astropy import units
 
-from . import TEST_DATA_PATH
+from test import TEST_DATA_PATH
 from specex.utils import get_sdss_spectral_templates, get_sdss_template_data
 
 

@@ -14,7 +14,7 @@ import tarfile
 import logging
 import platform
 import subprocess
-from typing import Optional
+from typing import Optional, Union, NoReturn
 from urllib import request
 
 import numpy as np
@@ -34,7 +34,7 @@ from astropy import coordinates
 from astropy import constants
 from astropy.table import Table
 
-from .lines import get_lines
+from specex.lines import get_lines
 
 try:
     from regions import Regions
@@ -43,6 +43,22 @@ except Exception:
 else:
     HAS_REGION = True
 
+try:
+    import reproject
+except Exception:
+    HAS_REPROJECT = False
+    def do_reprojectdef(img_hdu, cube_hdu):
+        raise NotImplementedError()
+else:
+    HAS_REPROJECT = True
+
+    def do_reproject(img_hdu, sp_cube):
+        return reproject.reproject_exact(
+            img_hdu,
+            sp_cube.getSpecWCS().celestial,
+            sp_cube.spec_hdu.data.shape[1:],
+            parallel=True,
+        )
 
 _SDSS_SPECTRAL_TEMPLATES_PACKAGE = "http://classic.sdss.org/dr5/algorithms/spectemplates/spectemplatesDR2.tar.gz"
 
@@ -1580,7 +1596,12 @@ def get_mask_intervals(mask):
     return regions
 
 
-def stack(data, wave_mask=None, quite=False):
+def stack(
+    data: np.ndarray,
+    wave_mask: Optional[np.ndarray] = None,
+    average: bool = False,
+    quite: bool = False
+) -> np.ndarray:
     """
     Stack the spectral cube along wavelength axis.
 
@@ -1588,8 +1609,8 @@ def stack(data, wave_mask=None, quite=False):
     ----------
     data : numpy.ndarray
         The spectral datacube.
-    wave_mask : 1D np.ndarray, optional
-        Optional wavelength mask. Wavelength corresponding to a False will not
+    wave_mask : np.ndarray, optional
+        1D wavelength mask. Wavelength corresponding to a False will not
         be used in the stacking. The default is None.
     quite : bool, optional
         Whether to avoid printing a progress bar or not.
@@ -1602,18 +1623,30 @@ def stack(data, wave_mask=None, quite=False):
 
     """
     img_height, img_width = data.shape[1], data.shape[2]
-    new_data = np.zeros((img_height, img_width))
-    for k, dat in enumerate(data):
+    new_data: np.ndarray = np.zeros((img_height, img_width), dtype=float)
+    new_count: np.ndarray = np.zeros((img_height, img_width), dtype=int)
+    dat: np.ndarray
+    for k in range(len(data)):
+        dat = data[k]
         if (not quite) and (k % 10 == 0):
             progress = (k + 1) / len(data)
-            sys.stderr.write(
+            sys.stdout.write(
                 f"\rstacking cube: {get_pbar(progress)} {progress:.2%}\r"
             )
-            sys.stderr.flush()
-        if wave_mask is None or wave_mask[k].any():
-            new_data = np.nansum(np.array([new_data, dat]), axis=0)
-    print("", file=sys.stderr)
-    return new_data
+            sys.stdout.flush()
+
+        if (wave_mask is None) or (wave_mask[k].any()):
+            valid_mask = np.isfinite(dat)
+            dat[~valid_mask] = 0.0
+            new_count[valid_mask] += 1
+            new_data += dat.astype(float)
+
+    stacked = new_data / new_count.astype(float)
+    if not average:
+        stacked *= len(data)
+
+    stacked[new_count == 0] = np.nan
+    return  stacked
 
 
 def nannmad(x, scale=1.48206, axis=None):

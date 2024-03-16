@@ -15,8 +15,8 @@ from scipy.signal import savgol_filter
 from astropy.utils.exceptions import AstropyWarning
 
 
-from . import TEST_DATA_PATH
-from . import make_synt_cube
+from test import TEST_DATA_PATH
+from test import make_synt_cube
 
 from specex.utils import get_sdss_spectral_templates, get_sdss_template_data
 

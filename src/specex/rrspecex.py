@@ -42,12 +42,12 @@ except (ModuleNotFoundError, Exception):
 else:
     HAS_REDROCK = True
 
-from .exceptions import exception_handler
-from .utils import (
+from specex.exceptions import exception_handler
+from specex.utils import (
     plot_zfit_check, plot_scandata, get_pbar
 )
 
-from .cube import (
+from specex.cube import (
     KNOWN_SPEC_EXT_NAMES,
     KNOWN_VARIANCE_EXT_NAMES,
     KNOWN_INVAR_EXT_NAMES,
@@ -469,7 +469,7 @@ def __argshandler(options=None):
     )
 
     parser.add_argument(
-        "--mp", type=int, default=0, required=False,
+        "--mp", type=int, default=1, required=False,
         help="if not using MPI, the number of multiprocessing processes to use"
         " (defaults to half of the hardware threads)"
     )

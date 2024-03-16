@@ -30,10 +30,10 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata import Cutout2D
 from astropy.visualization import quantity_support
 
-from .utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
-from .cube import get_hdu, get_rgb_cutout, get_gray_cutout
+from specex.utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
+from specex.cube import get_hdu, get_rgb_cutout, get_gray_cutout
 
-from .specex import load_specex_file
+from specex.cubex import load_specex_file
 
 try:
     import imageio

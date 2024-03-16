@@ -24,9 +24,9 @@ from astropy.convolution import Gaussian2DKernel, convolve
 
 from scipy.ndimage.morphology import grey_dilation  # , grey_erosion
 
-from .utils import get_pbar
-from .utils import get_spectrum_snr, get_spectrum_snr_emission
-from .cube import get_hdu
+from specex.utils import get_pbar
+from specex.utils import get_spectrum_snr, get_spectrum_snr_emission
+from specex.cube import get_hdu
 
 
 def __argshandler(options=None):

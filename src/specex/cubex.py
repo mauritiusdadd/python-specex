@@ -15,6 +15,8 @@ import json
 import argparse
 import logging
 
+from typing import Optional, Any, List, Union
+
 import numpy as np
 import multiprocessing
 
@@ -29,15 +31,16 @@ from astropy import units
 
 import matplotlib.pyplot as plt
 
-from .utils import plot_zfit_check, get_log_img
-from .utils import stack, plot_scandata
-from .utils import get_spectrum_snr, get_spectrum_snr_emission
-from .utils import HAS_REGION, parse_regionfile, simple_pbar_callback
-from .sources import get_spectrum
-from .cube import get_hdu, SpectraCube
-from .exceptions import exception_handler
+from specex.utils import (
+    plot_zfit_check, get_log_img, stack, plot_scandata,
+    get_spectrum_snr, get_spectrum_snr_emission, parse_regionfile,
+    HAS_REGION, HAS_REPROJECT, simple_pbar_callback, do_reproject
+)
+from specex.sources import get_spectrum
+from specex.cube import get_hdu, SpectralCube
+from specex.exceptions import exception_handler
 
-from .cube import (
+from specex.cube import (
     KNOWN_SPEC_EXT_NAMES,
     KNOWN_VARIANCE_EXT_NAMES,
     KNOWN_INVAR_EXT_NAMES,
@@ -46,7 +49,7 @@ from .cube import (
 )
 
 try:
-    from .rrspecex import rrspecex, get_templates
+    from specex.rrspecex import rrspecex, get_templates
 except Exception:
     HAS_RR = False
 else:
@@ -56,11 +59,12 @@ else:
 SPECTRA_WEIGHTING_MODES = {
     'none': 'no weighting',
     'whitelight': 'weighting using cube whitelight image',
-    '<file url>': 'weighting using an extrernal image',
+    'log-whitelight': 'weighting using cube whitelight image in log10 scale',
 }
 
-
-def __argshandler(options=None):
+if HAS_REPROJECT:
+    SPECTRA_WEIGHTING_MODES['<file url>'] = 'weighting using an external image'
+def __argshandler(options: Optional[List[str]] = None) -> Any:
     """
     Parse the arguments given by the user.
 
@@ -202,7 +206,11 @@ def __argshandler(options=None):
         + ';'.join([
             f"{mode_name} for {mode_desc}"
             for mode_name, mode_desc in SPECTRA_WEIGHTING_MODES.items()
-        ])
+        ]) +
+        ". Note that in order to use extrenal images as weightmap, the python "
+        "package 'reproject' is needed. (Is reproject installed: " +
+        "YES" if HAS_REPROJECT else "NO" +
+        ")."
     )
 
     parser.add_argument(
@@ -894,7 +902,7 @@ def specex(options=None):
 
     basename = os.path.splitext(basename_with_ext)[0]
 
-    with SpectraCube.open(args.input_cube[0]) as my_cube:
+    with SpectralCube.open(args.input_cube[0]) as my_cube:
         if args.debug:
             print(f"Flux HDU: {my_cube.spec_hdu.name}")
             if my_cube.var_hdu is not None:
@@ -907,17 +915,44 @@ def specex(options=None):
         spectral_wcs = my_cube.getSpecWCS().spectral
 
         # If weighting with an external image, read that
-        if args.weighting.lower() not in ['none', 'whitelight']:
+        valid_wl_modes = ['none', 'whitelight', 'log-whitelight']
+        weight_img: Union[None, np.ndarray] = None
+        if args.weighting.lower() not in valid_wl_modes:
             if not os.path.isfile(args.weighting):
                 logging.error(
                     f"weighting image does not exist '{args.weighting}' "
                 )
                 sys.exit(1)
-            # TODO: add external weight image handilng
-            weight_image = fits.getdata(args.weighting)
+            with fits.open(args.weighting) as hdul:
+                wimg_hdu = hdul[0]
+                wimg_shape = wimg_hdu.data.shape
 
-        # TODO: we assume here that the distorsion across the sky plane is
-        #       negligible, but it is very bold to assume this is always the case.
+                if len(wimg_shape) != 2:
+                    logging.error(
+                        "ERROR: only grayscale images are supported as "
+                        "weightmap!"
+                    )
+                    sys.exit(1)
+                elif HAS_REPROJECT:
+                    # Reproject the external weight image to the
+                    # datacube footprint
+                    weight_img, wimg_mask = do_reproject(
+                        wimg_hdu, my_cube
+                    )
+
+                    weight_img[wimg_mask == 0] = np.nan
+                elif wimg_shape != my_cube.spec_hdu.data.shape[1:]:
+                    logging.error(
+                        "The shape of the external weightmap image does "
+                        "not match the datacube and reproject is not "
+                        "installed! Use --help for more information."
+                    )
+                    sys.exit(1)
+                else:
+                    weight_img = wimg_hdu.data.copy()
+
+        # TODO: we assume here that the distortion across the sky plane is
+        #       negligible, but it is very bold assumption.
         #       A more general approach that takes into account also distortion
         #       in function of the position on the sky is needed.
         # Get the pixelscales in arcsec/pixel.
@@ -1169,17 +1204,33 @@ def specex(options=None):
                 weights = None
                 obj_extraction_mask[mask] = 1.0
             elif args.weighting.lower() == 'whitelight':
-                # summing selected spaxels along spectral alxis
+                # summing selected spaxels along spectral axis to get a
+                # whitelight weightmap
                 w_arr = np.ma.array(
                     my_cube.spec_hdu.data[:, mask],
-                    mask=np.isnan(my_cube.spec_hdu.data[:, mask]),
+                    mask=~np.isfinite(my_cube.spec_hdu.data[:, mask]),
                     dtype='float32'
                 )
-                weights = np.ma.sum(w_arr, axis=0)
-                weights /= np.ma.max(weights)
+                weights = np.ma.mean(w_arr, axis=0)
+                weights -= np.ma.min(weights)
+                weights /= np.ma.mean(weights)
                 obj_extraction_mask[mask] = weights
-            else:
-                raise NotImplementedError()
+            elif args.weighting.lower() == 'log-whitelight':
+                w_arr = np.ma.array(
+                    my_cube.spec_hdu.data[:, mask],
+                    mask=~np.isfinite(my_cube.spec_hdu.data[:, mask]),
+                    dtype='float32'
+                )
+                weights = np.ma.mean(w_arr, axis=0)
+                weights -= np.ma.min(weights)
+                weights = np.ma.log10(1 + weights)
+                weights /= np.ma.mean(weights)
+                obj_extraction_mask[mask] = weights
+            elif weight_img is not None:
+                weights = weight_img[mask]
+                weights -= np.ma.min(weights)
+                weights /= np.ma.mean(weights)
+                obj_extraction_mask[mask] = weights
 
             var_spaxels = None
             if my_cube.var_hdu is not None:

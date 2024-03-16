@@ -1,4 +1,5 @@
-# python-specex [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7808292.svg)](https://doi.org/10.5281/zenodo.7808292) [![Documentation Status](https://readthedocs.org/projects/python-specex/badge/?version=latest)](https://python-specex.readthedocs.io/en/latest/?badge=latest) [![Build Status](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml/badge.svg)](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml) [![Coverage Status](https://coveralls.io/repos/github/mauritiusdadd/python-specex/badge.svg?branch=main)](https://coveralls.io/github/mauritiusdadd/python-specex?branch=main)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7808292.svg)](https://doi.org/10.5281/zenodo.7808292) [![Documentation Status](https://readthedocs.org/projects/python-specex/badge/?version=latest)](https://python-specex.readthedocs.io/en/latest/?badge=latest) [![Build Status](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml/badge.svg)](https://github.com/mauritiusdadd/python-specex/actions/workflows/build-and-check.yml) [![Coverage Status](https://coveralls.io/repos/github/mauritiusdadd/python-specex/badge.svg?branch=main)](https://coveralls.io/github/mauritiusdadd/python-specex?branch=main)
+# python-specex
 
 Extract spectra from fits cubes
 
@@ -41,3 +42,25 @@ To build the documentation, install the requirements and run sphinx:
     $ sphinx-build -b html docs/ docs/_build/html
 
 The full documentation is also available here: [https://python-specex.readthedocs.io/en/latest/index.html]
+
+# ACKNOWLEDGMENTS
+
+If you used this software for your research, please consider to cite the following article
+
+https://doi.org/10.1051/0004-6361/202349060
+
+```
+@ARTICLE{DAddona2024,
+  title     = "The powerful lens galaxy cluster {PLCK} G287.0+32.9
+               ({$\vartheta$E} $\sim 43$ ′′)",
+  author    = "D'Addona, M and Mercurio, A and Rosati, P and Grillo, C and
+               Caminha, G and Acebron, A and Angora, G and Bergamini, P and
+               Bozza, V and Granata, G and Annunziatella, M and Gargiulo, A and
+               Gobat, R and Tozzi, P and Girardi, M and Lombardi, M and
+               Meneghetti, M and Schipani, P and Tortorelli, L and Vanzella, E",
+  journal   = "Astron. Astrophys.",
+  publisher = "EDP Sciences",
+  month     =  feb,
+  year      =  2024,
+}
+```

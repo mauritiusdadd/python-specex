@@ -77,8 +77,8 @@ def downloadFiles(url_list: tuple, out_dir: str = TEST_DATA_PATH,
             pbar = get_pbar(progress)
             report_str = f"\r{pbar} {progress: 6.2%}  "
             report_str += f"{downloaded_size}/{total_size} Bytes\r"
-            sys.stderr.write(report_str)
-            sys.stderr.flush()
+            sys.stdout.write(report_str)
+            sys.stdout.flush()
     report_pbar.last_time = time.perf_counter()
 
     if not os.path.isdir(out_dir):

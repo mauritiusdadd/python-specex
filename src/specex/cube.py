@@ -5,8 +5,9 @@ SPECEX - SPECtra EXtractor.
 
 This module provides utility functions to handle spectroscopic datacubes.
 
-Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+from __future__ import annotations
 
 import os
 import re
@@ -15,8 +16,9 @@ import shutil
 import logging
 import argparse
 import warnings
+
 from numbers import Number
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Tuple, List, Dict, Callable, Any
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
@@ -27,9 +29,9 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from astropy.nddata.utils import Cutout2D
 
-from .utils import get_pc_transform_params, rotate_data, get_pbar
-from .utils import HAS_REGION, parse_regionfile, simple_pbar_callback
-from .exceptions import get_ipython_embedder
+from specex.utils import get_pc_transform_params, rotate_data, get_pbar
+from specex.utils import HAS_REGION, parse_regionfile, simple_pbar_callback
+from specex.exceptions import get_ipython_embedder
 
 if HAS_REGION:
     import regions
@@ -43,22 +45,22 @@ KNOWN_RCURVE_EXT_NAMES = ['r', 'reso', 'resolution', 'rcurve', 'wd']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
 
 
-class SpectraCube():
+class SpectralCube:
     """Class to handle datacubes."""
 
-    def __init__(self):
-        self.filename = None
-        self.hdul = None
-        self.spec_hdu = None
-        self.var_hdu = None
-        self.var_hdu = None
-        self.mask_hdu = None
-        self.wd_hdu = None
-        self.spec_wcs = None
-        self.var_wcs = None
-        self.wd_wcs = None
+    def __init__(self) -> None:
+        self.filename: Union[str, None] = None
+        self.hdul: Union[fits.HDUList, None] = None
+        self.spec_hdu: Union[fits.ImageHDU, None] = None
+        self.var_hdu: Union[fits.ImageHDU, None] = None
+        self.var_hdu: Union[fits.ImageHDU, None] = None
+        self.mask_hdu: Union[fits.ImageHDU, None] = None
+        self.wd_hdu: Union[fits.ImageHDU, None] = None
+        self.spec_wcs: Union[WCS, None] = None
+        self.var_wcs: Union[WCS, None] = None
+        self.wd_wcs: Union[WCS, None] = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         """
         Do cleanup when this object is deleted.
 
@@ -69,7 +71,7 @@ class SpectraCube():
         """
         self.close()
 
-    def __enter__(self):
+    def __enter__(self) -> SpectralCube:
         """
         Enter the context manager.
 
@@ -81,7 +83,7 @@ class SpectraCube():
         """
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args) -> None:
         """
         Exit the contex manager.
 
@@ -101,7 +103,7 @@ class SpectraCube():
         bname = os.path.basename(self.filename)
         return os.path.splitext(bname)[0]
 
-    def close(self):
+    def close(self) -> None:
         """
         Clean up on closing.
 
@@ -113,28 +115,28 @@ class SpectraCube():
         if self.hdul is not None:
             self.hdul.close()
 
-    def getSpecWCS(self):
+    def getSpecWCS(self) -> WCS:
         """
         Get the WCS of the spectrum datacube.
 
         Returns
         -------
-        TYPE
-            DESCRIPTION.
+        wcs
+            The WCS of the spectral HDU.
 
         """
         if self.spec_wcs is None:
             self.spec_wcs = WCS(self.spec_hdu.header)
         return self.spec_wcs
 
-    def getVarWCS(self):
+    def getVarWCS(self) -> WCS:
         """
         Get the WCS of the variance datacube.
 
         Returns
         -------
-        TYPE
-            DESCRIPTION.
+        wcs
+            The WCS of the variance HDU.
         """
         if self.var_wcs is None:
             self.var_wcs = WCS(self.var_hdu.header)
@@ -142,14 +144,14 @@ class SpectraCube():
                 return self.getSpecWCS()
         return self.var_wcs
 
-    def getWdWCS(self):
+    def getWdWCS(self) -> WCS:
         """
         Get the WCS of the variance datacube.
 
         Returns
         -------
-        TYPE
-            DESCRIPTION.
+        wcs
+            The WCS of the resolution curve HDU.
         """
         if self.wd_wcs is None:
             self.wd_wcs = WCS(self.wd_hdu.header)
@@ -157,7 +159,9 @@ class SpectraCube():
                 return self.getSpecWCS()
         return self.wd_wcs
 
-    def getSpatialSizePixels(self):
+    def getSpatialSizePixels(
+        self
+    ) -> List[Union[None, int]]:
         """
         Return spatial dimensions in pixels.
 
@@ -178,7 +182,7 @@ class SpectraCube():
              var_hdu_index: Optional[Union[int, str]] = None,
              mask_hdu_index: Optional[Union[int, str]] = None,
              wd_hdu_index: Optional[Union[int, str]] = None,
-             mode: Optional[str] = None):
+             mode: Optional[str] = None) -> SpectralCube:
         """
         Open a datacube from a FITS file.
 
@@ -203,7 +207,7 @@ class SpectraCube():
 
         Returns
         -------
-        SpectraCube.
+        SpectralCube.
 
         """
         new_cube = cls()
@@ -271,7 +275,7 @@ class SpectraCube():
             The path of the output file.
         kwargs : dict
             Optional arguments passed to astropy.io.fits.HDUList.writeto.
-            For example it can be {'overwrite': True}.
+            For example, it can be {'overwrite': True}.
 
         Returns
         -------
@@ -505,11 +509,13 @@ def __smoothing_argshandler(options=None):
     return args
 
 
-def get_gray_cutout(data: np.ndarray,
-                    center: Union[SkyCoord, tuple, list],
-                    size: Union[tuple, list],
-                    angle: Optional[Union[float, units.Quantity]] = 0,
-                    data_wcs: Optional[WCS] = None) -> dict:
+def get_gray_cutout(
+    data: np.ndarray,
+    center: Union[SkyCoord, tuple, list],
+    size: Union[tuple, list],
+    angle: Optional[Union[float, units.Quantity]] = 0,
+    data_wcs: Optional[WCS] = None
+) -> Dict[str, Union[WCS, np.ndarray]]:
     """
     Get the cutout for a grayscale image.
 
@@ -576,12 +582,20 @@ def get_gray_cutout(data: np.ndarray,
     return cutout_dict
 
 
-def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
-                   center: Union[SkyCoord, tuple],
-                   size: Union[tuple, list],
-                   angle: Optional[Union[float, units.Quantity]] = 0,
-                   data_wcs: Optional[Union[WCS, list, tuple]] = None,
-                   resample_to_wcs: bool = False):
+def get_rgb_cutout(
+    data: Union[tuple, list, np.ndarray],
+    center: Union[SkyCoord, tuple],
+    size: Union[tuple, list],
+    angle: Optional[Union[float, units.Quantity]] = 0,
+    data_wcs: Optional[Union[WCS, list, tuple]] = None,
+    resample_to_wcs: bool = False
+) -> Dict[
+    str,
+    Union[
+        Tuple[WCS, WCS, WCS],
+        Tuple[np.ndarray, np.ndarray, np.ndarray]
+    ]
+]:
     """
     Get a cutout from a bigger RGB.
 
@@ -606,7 +620,7 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
         interpreted in degrees. The default is 0.
     data_wcs : astropy.wcs.WCS or None, optional
         A WCS associated with the image data. The default is None.
-    reample_to_wcs : bool, optional
+    resample_to_wcs : bool, optional
         If true reample the red, green and blue data to share the same WCS.
         In order to use this option, the WCSs for the input data must be
         provided, otherwise this option will be ignored and a warning message
@@ -698,13 +712,15 @@ def get_rgb_cutout(data: Union[tuple, list, np.ndarray],
     return cutout_dict
 
 
-def get_cube_cutout(data: np.ndarray,
-                    center: Union[SkyCoord, tuple, list],
-                    size: Union[tuple, list],
-                    angle: Optional[Union[float, units.Quantity]] = 0,
-                    wave_range: Optional[Union[tuple, list]] = None,
-                    data_wcs: Optional[WCS] = None,
-                    report_callback: Optional[Callable] = None):
+def get_cube_cutout(
+    data: np.ndarray,
+    center: Union[SkyCoord, tuple, list],
+    size: Union[tuple, list],
+    angle: Optional[Union[float, units.Quantity]] = 0,
+    wave_range: Optional[Union[tuple, list]] = None,
+    data_wcs: Optional[WCS] = None,
+    report_callback: Optional[Callable] = None
+) -> Dict[str, Union[WCS, np.ndarray]]:
     """
     Get a cutout of a spectral datacube.
 
@@ -723,7 +739,7 @@ def get_cube_cutout(data: np.ndarray,
         The first two values in the tuple are interpreted as the width and
         height of the cutout. Both adimensional values and angular quantities
         are accepted. Adimensional values are interpreted as pixels.
-        Angular values are converted to pixel values ignoring any non linear
+        Angular values are converted to pixel values ignoring any non-linear
         distorsion.
     angle : float or astropy.units.Quantity, optional
         The rotation angle of the cutout. If it is a float, then it is
@@ -735,7 +751,7 @@ def get_cube_cutout(data: np.ndarray,
     data_wcs : astropy.wcs.WCS or None, optional
         A WCS associated with the image data. The default is None..
     report_callback : Callable or None, optional
-        A callable that will be execute every time the cutout of a single
+        A callable that will be executed every time the cutout of a single
         slice of the cube is computed. Must accept in input two arguments:
 
           * the number of slice processed so far
@@ -743,7 +759,7 @@ def get_cube_cutout(data: np.ndarray,
 
     Returns
     -------
-    cutout_dict: dict
+    cutout_dict
         A dictionary containing the following key: value pairs:
             'data': np.ndarray
                 The cutout data.
@@ -829,7 +845,7 @@ def get_cube_cutout(data: np.ndarray,
     }
 
 
-def _get_fits_data_structure(fits_file):
+def _get_fits_data_structure(fits_file: str) -> Dict[str, Any]:
     data_structure = {
         'type': None,
         'data-ext': [],
@@ -1367,7 +1383,7 @@ def smoothing_main(options=None):
 
         shutil.copy(target_data_file, out_fname)
 
-        with SpectraCube.open(target_data_file, mode='readonly') as my_cube:
+        with SpectralCube.open(target_data_file, mode='readonly') as my_cube:
 
             data_mask = None
             if my_cube.mask_hdu is not None:
@@ -1589,7 +1605,7 @@ def cutout_main(options=None):
             cutout_name = f"cutout_{fits_base_name}_{j:04}.fits"
 
             if data_structure['type'] == 'cube':
-                with SpectraCube.open(
+                with SpectralCube.open(
                     target_data_file,
                     spec_hdu_index=data_structure['data-ext'][0],
                     mode='readonly'

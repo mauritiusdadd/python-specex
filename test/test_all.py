@@ -22,7 +22,7 @@ from specex.cube import cutout_main, smoothing_main
 from specex.stack import cube_stack
 from specex.sources import detect_from_cube
 from specex.zeropoints import main as zpinfo
-from specex.specex import specex
+from specex.cubex import specex
 from specex.plot import plot_spectra
 from specex.utils import get_pbar
 
@@ -72,7 +72,8 @@ class MyTests(unittest.TestCase):
         print(">>> Testing cube_stack...\n")
         print(self.cube_file)
         cube_stack_options = [
-            self.cube_file
+            self.cube_file,
+            '--var-hdu', 'STAT'
         ]
         cube_stack(cube_stack_options)
 
@@ -163,6 +164,37 @@ class MyTests(unittest.TestCase):
         specex_options = [
             '--regionfile', self.reg_file,
             '--mode', 'kron_ellipse',
+            '--no-nans', self.cube_file
+        ]
+        specex(options=specex_options)
+
+
+    def test_specex_regionfile_wlight(self):
+        print(">>> Testing specex regionfile (cube whitelight)...")
+        specex_options = [
+            '--regionfile', self.reg_file,
+            '--mode', 'kron_ellipse',
+            '--weighting', 'whitelight',
+            '--no-nans', self.cube_file
+        ]
+        specex(options=specex_options)
+
+    def test_specex_regionfile_log_wlight(self):
+        print(">>> Testing specex regionfile (cube log-whitelight)...")
+        specex_options = [
+            '--regionfile', self.reg_file,
+            '--mode', 'kron_ellipse',
+            '--weighting', 'log-whitelight',
+            '--no-nans', self.cube_file
+        ]
+        specex(options=specex_options)
+
+    def test_specex_regionfile_wimg(self):
+        print(">>> Testing specex regionfile (ext. image)...")
+        specex_options = [
+            '--regionfile', self.reg_file,
+            '--mode', 'kron_ellipse',
+            '--weighting', "ADP.2023-09-01T12:56:41_data.fits",
             '--no-nans', self.cube_file
         ]
         specex(options=specex_options)

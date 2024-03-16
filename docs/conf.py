@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../src'))
 # -- Project information -----------------------------------------------------
 
 project = 'python-specex'
-copyright = "2022-2023, Maurizio D'Addona <mauritiusdadd@gmail.com>"
+copyright = "2022-2024, Maurizio D'Addona <mauritiusdadd@gmail.com>"
 author = "Maurizio D'Addona"
 
 # The full version, including alpha/beta/rc tags
