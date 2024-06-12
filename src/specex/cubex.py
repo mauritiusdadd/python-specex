@@ -1097,7 +1097,7 @@ def specex(options=None):
             )
 
         for i, source in enumerate(sources[:n_objects]):
-            simple_pbar_callback(i, n_objects-1)
+            simple_pbar_callback(i + 1, n_objects)
 
             if key_id is not None:
                 obj_id = source[key_id]
@@ -1203,38 +1203,36 @@ def specex(options=None):
             if args.weighting.lower() == 'none':
                 weights = None
                 obj_extraction_mask[mask] = 1.0
-            elif args.weighting.lower() == 'whitelight':
-                # summing selected spaxels along spectral axis to get a
-                # whitelight weightmap
-                w_arr = np.ma.array(
-                    my_cube.spec_hdu.data[:, mask],
-                    mask=~np.isfinite(my_cube.spec_hdu.data[:, mask]),
-                    dtype='float32'
-                )
-                weights = np.ma.mean(w_arr, axis=0)
-                weights -= np.ma.min(weights)
-                weights /= np.ma.mean(weights)
-                obj_extraction_mask[mask] = weights
-            elif args.weighting.lower() == 'log-whitelight':
-                w_arr = np.ma.array(
-                    my_cube.spec_hdu.data[:, mask],
-                    mask=~np.isfinite(my_cube.spec_hdu.data[:, mask]),
-                    dtype='float32'
-                )
-                weights = np.ma.mean(w_arr, axis=0)
-                weights -= np.ma.min(weights)
-                weights = np.ma.log10(1 + weights)
-                weights /= np.ma.mean(weights)
-                obj_extraction_mask[mask] = weights
-            elif weight_img is not None:
-                weights = weight_img[mask]
-                weights -= np.ma.min(weights)
-                weights /= np.ma.mean(weights)
+            else:
+                if args.weighting.lower() == 'whitelight':
+                    # summing selected spaxels along spectral axis to get a
+                    # whitelight weightmap
+                    w_arr = np.ma.array(
+                        my_cube.spec_hdu.data[:, mask],
+                        mask=~np.isfinite(my_cube.spec_hdu.data[:, mask]),
+                        dtype='float32'
+                    )
+                    weights = np.ma.mean(w_arr, axis=0)
+                    weights -= np.ma.min(weights)
+                elif args.weighting.lower() == 'log-whitelight':
+                    w_arr = np.ma.array(
+                        my_cube.spec_hdu.data[:, mask],
+                        mask=~np.isfinite(my_cube.spec_hdu.data[:, mask]),
+                        dtype='float32'
+                    )
+                    weights = np.ma.mean(w_arr, axis=0)
+                    weights -= np.ma.min(weights)
+                    weights = np.ma.log10(1 + weights)
+                elif weight_img is not None:
+                    weights = weight_img[mask]
+                    weights -= np.ma.min(weights)
+
                 obj_extraction_mask[mask] = weights
 
             var_spaxels = None
             if my_cube.var_hdu is not None:
                 var_spaxels = my_cube.var_hdu.data[:, mask]
+
             obj_spectrum, obj_spectrum_var = get_spectrum(
                 flux_spaxels=my_cube.spec_hdu.data[:, mask],
                 var_spaxels=var_spaxels,

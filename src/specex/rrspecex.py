@@ -658,19 +658,20 @@ def rrspecex(options=None, comm=None):
             comm=comm
         )
 
+        opt_zfind_args = {}
+        opt_load_dist_templates_args = {}
+        if version.parse(redrock.__version__) >= version.parse(RR_GPU_MIN_VER):
+            opt_zfind_args['use_gpu'] = args.gpu
+            opt_load_dist_templates_args['use_gpu'] = args.gpu
+
         # Read the template data
         dtemplates = load_dist_templates(
             dwave,
             templates=args.templates,
             comm=comm,
             mp_procs=mpprocs,
-            # use_gpu=True,
-            # gpu_mode=True
+            **opt_load_dist_templates_args
         )
-
-        opt_zfind_args = {}
-        if version.parse(redrock.__version__) >= version.parse(RR_GPU_MIN_VER):
-            opt_zfind_args['use_gpu'] = True
 
         # Compute the redshifts, including both the coarse scan and the
         # refinement.  This function only returns data on the rank 0 process.
