@@ -55,6 +55,13 @@ except Exception:
 else:
     HAS_RR = True
 
+try:
+    from IPython.core import ultratb
+    from IPython import embed
+except Exception:
+    HAS_IPYTHON = False
+else:
+    HAS_IPYTHON = True
 
 SPECTRA_WEIGHTING_MODES = {
     'none': 'no weighting',

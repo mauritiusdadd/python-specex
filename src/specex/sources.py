@@ -481,43 +481,40 @@ def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
     spectrum_var :  1D numpy.ndarray
         The variance of the spectrum.
     """
-    if weights is None:
-        spatial_w = 1
-    else:
-        if not isinstance(var_spaxels, np.ma.MaskedArray):
-            spatial_w = np.ma.array(weights, mask=np.isnan(weights))
-        else:
-            spatial_w = weights
-        spatial_w /= np.ma.max(spatial_w)
-
     if var_spaxels is not None:
         if not isinstance(var_spaxels, np.ma.MaskedArray):
-            var_spaxels = np.ma.array(var_spaxels, mask=np.isnan(var_spaxels))
+            var_spaxels = np.ma.array(
+                var_spaxels, mask=~np.isfinite(var_spaxels)
+            )
 
         if var_spaxels.shape != flux_spaxels.shape:
             raise ValueError("Flux and variance have different shape!")
 
     if not isinstance(flux_spaxels, np.ma.MaskedArray):
-        flux_spaxels = np.ma.array(flux_spaxels, mask=np.isnan(flux_spaxels))
+        flux_spaxels = np.ma.array(
+            flux_spaxels, mask=~np.isfinite(flux_spaxels)
+        )
 
-    # Summing spaxels weighted by the variance on the spectral axis and by
-    # sum_weights on the spatial axis
+    if weights is None:
+        spatial_w = 1
+    else:
+        if not isinstance(var_spaxels, np.ma.MaskedArray):
+            spatial_w = np.ma.array(weights, mask=~np.isfinite(weights))
+        else:
+            spatial_w = weights
+        spatial_w /= np.ma.max(spatial_w)
 
+    # Summing spaxels weighted by spatial_w on the spatial axis
+
+    w_sum = np.ma.sum(spatial_w)
     spectrum = np.ma.sum(flux_spaxels * spatial_w, axis=-1)
-    spectrum /= np.ma.sum(spatial_w)
+    spectrum /= w_sum
 
     if var_spaxels is None:
         spectrum_var = np.ma.var(flux_spaxels * spatial_w, axis=-1)
     else:
         spectrum_var = np.ma.sum(var_spaxels * spatial_w, axis=-1)
-    spectrum_var /= np.ma.sum(spatial_w)
-
-    if average:
-        # To get the variance of the sum, we must divide by the number
-        # of spaxels we used
-        spectrum_var /= flux_spaxels.shape[-1]
-    else:
-        spectrum *= flux_spaxels.shape[-1]
+    spectrum_var /= w_sum
 
     return spectrum, spectrum_var
 
