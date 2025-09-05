@@ -553,8 +553,14 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
     for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
         try:
             reg_id = str(reg.meta['text'])
+            logging.debug(
+                f"found region with name {reg_id}"
+            )
         except Exception:
             reg_id = str(j)
+            logging.debug(
+                f"found region with index {reg_id}"
+            )
 
         try:
             center = reg.center

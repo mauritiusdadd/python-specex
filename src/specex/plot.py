@@ -412,6 +412,13 @@ def __plot_slice_argshandler(options=None):
     )
 
     parser.add_argument(
+        '--cutout-vlim', metavar='VMIN,VMAX', type=str, default=None,
+        help='Set the minimum and maximum values for the colormap of the '
+        'cutout animated cutout. If not specified, then vmin and vmax are '
+        'computed automatically by matplotlib backend.'
+    )
+
+    parser.add_argument(
         '--cutout-size', metavar='SIZE', type=str, default='10arcsec',
         help='Set the size of the cutout to %(metavar)s. This option '
         'supports units compatible with astropy (for example "1deg", '
@@ -454,7 +461,7 @@ def __plot_slice_argshandler(options=None):
 
     parser.add_argument(
         '--out-fps', metavar='FPS', type=int, default=5,
-        help='Set the output framerate to %(metaver)s. The default value is '
+        help='Set the output framerate to %(metavar)s. The default value is '
         '%(metavar)s=%(default)s'
     )
 
@@ -559,6 +566,14 @@ def plot_cube_slice_animation(options=None):
     else:
         cube_vmin = None
         cube_vmax = None
+
+    if args.cutout_vlim is not None:
+        cutout_vlim = [float(x) for x in args.cutout_vlim.split(',')]
+        cutout_vmin = np.min(cutout_vlim)
+        cutout_vmax = np.max(cutout_vlim)
+    else:
+        cutout_vmin = None
+        cutout_vmax = None
 
     if args.cutout is not None:
         try:
@@ -687,8 +702,12 @@ def plot_cube_slice_animation(options=None):
                     )
                     cutout = np.array(cutout_dict['data'])
                     cutout_wcs = cutout_dict['wcs']
-                cutout_vmin = np.nanmin(big_image['data'])
-                cutout_vmax = np.nanmax(big_image['data'])
+
+                if cutout_vmin is None:
+                    cutout_vmin = np.nanmin(big_image['data'])
+
+                if cutout_vmax is None:
+                    cutout_vmax = np.nanmax(big_image['data'])
             else:
                 cutout = None
                 cutout_wcs = None

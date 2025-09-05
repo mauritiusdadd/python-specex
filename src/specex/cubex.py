@@ -306,13 +306,24 @@ def __argshandler(options: Optional[List[str]] = None) -> Any:
     parser.add_argument(
         '--cat-skyframe', metavar='SKY_FRAME', type=str, default='icrs',
         help='Set the sky frame RA and DEC values of the input catalog. This '
-        'option is ignored if a region file is uesed for the extraction. '
+        'option is ignored if a region file is used for the extraction. '
         'The default value is %(metavar)s=%(default)s.'
     )
 
     parser.add_argument(
+        '--out-name', metavar='NAME', type=str, default=None,
+        help='Set the name format of the extracted spectra. If not specified '
+        'the default format spec_%d.fits is used (where %d is a '
+        'progressive number). Value from the columns of input zcat can be '
+        'specified using the parenthesis {COL_NAME}, similar to python '
+        'f-string. For example, in the format string spec_{RA}_{DEC}.fits '
+        'the {RA} and {DEC} will be replaced, for each object, to the '
+        'corresponding values in the input zcat.'
+    )
+
+    parser.add_argument(
         '--outdir', metavar='DIR', type=str, default=None,
-        help='Set the directory where extracted spectra will be outputed. '
+        help='Set the directory where extracted spectra will be output. '
         'If this parameter is not specified, then a new directory will be '
         'created based on the name of the input cube.'
     )
@@ -1300,7 +1311,17 @@ def specex(options=None):
             my_time = Time.now()
             my_time.format = 'isot'
 
-            outname = f"spec_{obj_id}.fits"
+            if args.out_name is None:
+                outname = f"spec_{obj_id}.fits"
+            else:
+                outname = args.out_name.replace('%d', obj_id)
+                try:
+                    outname = outname.format(**source)
+                except KeyError as exc:
+                    logging.error(
+                        f"ERROR: output name formatting error: {exc}"
+                    )
+
 
             apertures_info = [
                 x.to_string() for x in specex_apertures[obj_id]
