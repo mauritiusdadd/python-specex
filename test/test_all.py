@@ -251,17 +251,20 @@ if __name__ == '__main__':
     tests = MyTests()
     tests.test_zeropoint_info()
 
-    tests.test_stack_cube()
+    tests.test_cube_stack()
 
     tests.test_grayscale_cutout()
     tests.test_cube_cutout()
 
     tests.test_extract_sources()
 
-    tests.test_specex_catalog_success()
-    tests.test_specex_regionfile_success()
+    tests.test_specex_catalog()
+    tests.test_specex_regionfile()
+    tests.test_specex_regionfile_wlight()
+    tests.test_specex_regionfile_log_wlight()
+    tests.test_specex_regionfile_wimg()
 
-    tests.test_plot_success()
+    tests.test_plot()
 
     # if HAS_RR:
     #     test_06 = TestRRSpex()

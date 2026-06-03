@@ -33,86 +33,91 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
 import sys
-import time
+from typing import Optional
+from collections.abc import Iterable
 from urllib import request
 import pathlib
 
-from specex.utils import get_pbar
-
+from rich.progress import Progress
 from pkgutil import extend_path
 
 __path__ = extend_path(__path__, __name__)
 
 TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
 
+DOWNLOAD_HEADERS = {
+    "User-Agent": 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/56.0.2924.76 Safari/537.36',
+    "Upgrade-Insecure-Requests": "1",
+    "DNT": "1",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate"
+}
 
-def downloadFiles(url_list: tuple, out_dir: str = TEST_DATA_PATH,
-                  use_cached: bool = True, report_interval=1):
+def download_files(
+    url_list: Iterable[str],
+    out_dir: str = TEST_DATA_PATH,
+    use_cached: bool = True,
+    report_interval: int = 1
+) -> list[str]:
     """
     Download a set of files with a progressbar.
 
-    Parameters
-    ----------
-    url_list : tuple
-        DESCRIPTION.
-    out_dir : str, optional
-        DESCRIPTION. The default is TEST_DATA_PATH.
-    use_cached : bool, optional
-        DESCRIPTION. The default is True.
-    report_interval : TYPE, optional
-        DESCRIPTION. The default is 1.
-
-    Returns
-    -------
-    outfile_list : TYPE
-        DESCRIPTION.
-
+    :param url_list:
+    :param out_dir:
+    :param use_cached:
+    :param report_interval:
+    :return:
     """
-
-    def report_pbar(blocks_count, block_size, total_size):
-        if (time.perf_counter() - report_pbar.last_time) > report_interval:
-            report_pbar.last_time = time.perf_counter()
-            downloaded_size = blocks_count * block_size
-            progress = downloaded_size / total_size
-            pbar = get_pbar(progress)
-            report_str = f"\r{pbar} {progress: 6.2%}  "
-            report_str += f"{downloaded_size}/{total_size} Bytes\r"
-            sys.stdout.write(report_str)
-            sys.stdout.flush()
-    report_pbar.last_time = time.perf_counter()
-
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
 
     outfile_list = []
-    for target_url in url_list:
-        target_file = os.path.basename(target_url)
-        out_file = os.path.join(out_dir, target_file)
-        if not (use_cached and os.path.isfile(out_file)):
-            print(f"Downloading {target_file}...")
-            try:
-                package_out_file, headers = request.urlretrieve(
-                    target_url,
-                    out_file,
-                    reporthook=report_pbar
+    with Progress() as progress:
+        for target_url in url_list:
+            target_file = os.path.basename(target_url)
+            out_file = os.path.join(out_dir, target_file)
+            if not (use_cached and os.path.isfile(out_file)):
+                task_id = progress.add_task(
+                    f"[yellow]Downloading {target_file}...",
+                    total=1000
                 )
-            except Exception as exc:
-                print(
-                    f"An exception occurred while downloading {target_file}:",
-                    str(exc),
-                    file=sys.stderr
-                )
-                continue
-        else:
-            print(f"Using cached {target_file}...")
-        outfile_list.append(os.path.realpath(out_file))
+
+                def report_hook(
+                        block_num: int = 1,
+                        block_size: int = 1,
+                        total_size: Optional[int] = None) -> None:
+                    if total_size is not None:
+                        progress.update(task_id, total=total_size)
+
+                    progress.update(task_id, completed=block_num * block_size)
+
+                try:
+                    opener = request.build_opener()
+                    opener.addheaders = list(DOWNLOAD_HEADERS.items())
+                    request.install_opener(opener)
+                    package_out_file, headers = request.urlretrieve(
+                        target_url,
+                        out_file,
+                        reporthook=report_hook
+                    )
+                except Exception as exc:
+                    print(
+                        "An exception occurred while downloading "
+                        f"{target_file}: {str(exc)}",
+                        file=sys.stderr
+                    )
+                    continue
+            else:
+                print(f"Using cached {target_file}...")
+            outfile_list.append(os.path.realpath(out_file))
     return outfile_list
 
 
 def get_muse_test_cube(out_dir: str = TEST_DATA_PATH,
                        use_cached: bool = True):
     TEST_CUBE_URL = 'https://dataportal.eso.org/dataportal_new/file//ADP.2023-09-01T12:56:41.595'
-    return downloadFiles(
+    return download_files(
         [TEST_CUBE_URL,],
         out_dir=out_dir,
         use_cached=use_cached,
@@ -148,7 +153,7 @@ def get_hst_test_images(out_dir: str = TEST_DATA_PATH,
         f'{HST_BASE_URL}/WFPC2u5780205r_c0fx.fits',
     ]
 
-    return downloadFiles(
+    return download_files(
         HST_TEST_FITS,
         out_dir=out_dir,
         use_cached=use_cached,

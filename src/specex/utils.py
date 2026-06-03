@@ -7,6 +7,8 @@ This module provides utility functions used by other specex modules.
 
 Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+from __future__ import annotations
+
 import os
 import sys
 import time
@@ -20,6 +22,7 @@ from urllib import request
 import numpy as np
 
 import matplotlib.pyplot as plt
+from astropy.coordinates import SkyCoord
 from matplotlib.gridspec import GridSpec
 from matplotlib import patches
 import matplotlib.patheffects as PathEffects
@@ -37,7 +40,7 @@ from astropy.table import Table
 from specex.lines import get_lines
 
 try:
-    from regions import Regions
+    from regions import Regions, SkyRegion
 except Exception:
     HAS_REGION = False
 else:
@@ -502,8 +505,13 @@ def get_sdss_template_data(sdss_template_file: str) -> dict:
     return t_dict
 
 
-def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
-                     key_id='NUMBER', file_format='ds9'):
+def parse_regionfile(
+    regionfile: str | os.PathLike[str],
+    key_ra: str='ALPHA_J2000',
+    key_dec: str='DELTA_J2000',
+    key_id: str='NUMBER',
+    file_format: str='ds9'
+) -> Table | None:
     """
     Parse a regionfile and return an asrtopy Table with sources information.
 
@@ -541,13 +549,14 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
         logging.error(
             "astropy regions package is needed to handle regionfiles!"
         )
-        return
+        return None
 
     myt = Table(
         names=[key_id, key_ra, key_dec, 'region'],
         units=[None, 'deg', 'deg', None],
         dtype=[str, float, float, object]
     )
+
     for j, reg in enumerate(Regions.read(regionfile, format=file_format)):
         try:
             reg_id = str(reg.meta['text'])
@@ -559,18 +568,34 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
             logging.debug(
                 f"found region with index {reg_id}"
             )
+        if not isinstance(reg, SkyRegion):
+            print(
+                f"WRAING region {reg_id} is not a WCS region, skipping..."
+            )
+            continue
 
         try:
-            center = reg.center
+            center_icrs: SkyCoord = reg.center.transform_to('icrs')
         except AttributeError:
-            c_ra = np.mean([x.ra.to('deg').value for x in reg.vertices])
-            c_dec = np.mean([x.dec.to('deg').value for x in reg.vertices])
-            new_row = [reg_id, c_ra, c_dec, reg]
+            v_ra_list: list[float] = []
+            v_dec_list: list[float] = []
+            for v_pos in reg.vertices:
+                v_pos_icrs: SkyCoord = v_pos.transform_to('icrs')
+                v_ra_list.append(v_pos_icrs.ra.to('deg').value)
+                v_dec_list.append(v_pos_icrs.ra.to('deg').value)
+            new_row = [
+                reg_id, np.mean(v_ra_list), np.mean(v_dec_list), reg
+            ]
         else:
-            new_row = [reg_id, center.ra, center.dec, reg]
+            new_row = [
+                reg_id,
+                center_icrs.ra.to('deg').value,
+                center_icrs.dec.to('deg').value,
+                reg
+            ]
         myt.add_row(new_row)
 
-    return myt, None
+    return myt
 
 
 def get_aspect(ax):
@@ -1724,7 +1749,9 @@ def get_spectrum_snr(flux: np.ndarray,
     else:
         var = 1.0
 
-    smoothed_spec = savgol_filter(flux, smoothing_window, smoothing_order)
+    smoothed_spec = savgol_filter(
+        flux.filled(0), smoothing_window, smoothing_order
+    )
     smoothed_spec = np.ma.array(smoothed_spec, mask=np.isnan(smoothed_spec))
 
     # Subtract the smoothed spectrum to the spectrum itself to get a

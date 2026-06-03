@@ -11,7 +11,7 @@ name = "specex"
 dynamic = ["version"]
 description = "Extract spectra from fits cubes"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {file = "LICENSE"}
 keywords = ["spectroscopy", "spectra", "spectrum", "spectral cubes"]
 authors = [
@@ -41,6 +41,9 @@ dependencies = [
     "scipy",
     "astropy",
     "matplotlib",
+    "regions>=0.11",
+    "reproject==0.19.0",
+    "rich>=15.0.0",
 ]
 
 [project.optional-dependencies]

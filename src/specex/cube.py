@@ -49,15 +49,15 @@ class SpectralCube:
     """Class to handle datacubes."""
 
     def __init__(self) -> None:
-        self.filename: Union[str, None] = None
-        self.hdul: Union[fits.HDUList, None] = None
-        self.spec_hdu: Union[fits.ImageHDU, None] = None
-        self.var_hdu: Union[fits.ImageHDU, None] = None
-        self.mask_hdu: Union[fits.ImageHDU, None] = None
-        self.wd_hdu: Union[fits.ImageHDU, None] = None
-        self.spec_wcs: Union[WCS, None] = None
-        self.var_wcs: Union[WCS, None] = None
-        self.wd_wcs: Union[WCS, None] = None
+        self.filename: str | None = None
+        self.hdul: fits.HDUList | None = None
+        self.spec_hdu: fits.ImageHDU | None = None
+        self.var_hdu: fits.ImageHDU | None = None
+        self.mask_hdu: fits.ImageHDU | None = None
+        self.wd_hdu: fits.ImageHDU | None = None
+        self.spec_wcs: WCS | None = None
+        self.var_wcs: WCS | None = None
+        self.wd_wcs: WCS | None = None
 
     def __del__(self) -> None:
         """
@@ -176,7 +176,7 @@ class SpectralCube:
             return self.spec_hdu.data.shape[1:]
 
     @classmethod
-    def open(cls, filename: str,
+    def open(cls, filename: str | os.PathLike[str],
              spec_hdu_index: Optional[Union[int, str]] = None,
              var_hdu_index: Optional[Union[int, str]] = None,
              mask_hdu_index: Optional[Union[int, str]] = None,
@@ -1504,12 +1504,19 @@ def cutout_main(options=None):
     cutout_list = []
     if args.regionfile is not None:
         if HAS_REGION:
-            myt, _ = parse_regionfile(
+            myt = parse_regionfile(
                 args.regionfile,  key_ra='RA', key_dec='DEC'
             )
         else:
-            logging.error("Astropy Regions is needed to handle regionfiles!")
+            logging.error("Astropy Regions is needed to handle region files!")
             sys.exit(1)
+
+        if myt is None:
+            logging.error(
+                "The input region file does not contain any valid sky region!"
+            )
+            sys.exit(1)
+
         for row in myt:
             reg = row['region']
 

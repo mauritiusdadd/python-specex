@@ -7,9 +7,15 @@ This module provides functions to stack spectral cubes.
 
 Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
 """
+from __future__ import annotations
+
 import os
+import sys
+import logging
 import argparse
-from typing import Union
+from pathlib import Path
+from typing import Optional
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 from astropy.wcs import WCS
@@ -20,8 +26,18 @@ from specex.utils import stack
 from specex.cube import get_hdu
 
 
-def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
-                   dpi=150, wave_ranges=None):
+def stack_and_plot(
+        hdu: fits.ImageHDU | fits.PrimaryHDU,
+        basename: str,
+        suffix: str="",
+        is_mask: bool=False,
+        override_wcs: Optional[WCS]=None,
+        dpi: int=150,
+        wave_ranges: Optional[
+            Iterable[Iterable[float | int] | np.ndarray] | np.ndarray
+        ]=None,
+        outdir: Optional[str | os.PathLike[str]] = None
+) -> tuple[np.ndarray, WCS] | None:
     """
     Stack and plot a spectral datacube.
 
@@ -30,7 +46,7 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
 
     Parameters
     ----------
-    ext : astropy.io.fits.ImageHDU
+    hdu : astropy.io.fits.ImageHDU
         The fits exension containing the datacube.
     basename : str
         The name of the output images.
@@ -45,10 +61,11 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
         The default is None.
     dpi : int, optional
         The resolution of the output PNG file. The default is 150.
-    wave_range : TYPE, optional
+    wave_ranges : TYPE, optional
         The optional wavelength range to use, if None all the available
         wavelenghts are used. The default is None.
-
+    outdir: str | os.PathLike[str], optional
+        The output directory. Default value is None
     Returns
     -------
     new_data : numpy.ndarray
@@ -57,18 +74,26 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
         The WCS of the stacked image.
 
     """
-    if ext.data is None:
+    if outdir is None:
+        outdir = Path('.')
+    else:
+        outdir = Path(outdir)
+
+    if hdu.data is None:
+        logging.error(
+            "The target HDU does not contain any data!"
+        )
         return None
 
-    img_wcs = WCS(ext.header)
+    img_wcs = WCS(hdu.header)
 
-    wave_mask: Union[np.ndarray, None]
+    wave_mask: np.ndarray | None
     if wave_ranges is None:
         wave_mask = None
     elif img_wcs.has_spectral:
-        wave_mask = np.zeros(ext.data.shape[0], dtype=bool)
+        wave_mask = np.zeros(hdu.data.shape[0], dtype=bool)
         for wave_range in wave_ranges:
-            wave_index = np.arange(ext.data.shape[0])
+            wave_index = np.arange(hdu.data.shape[0])
             wave_angstrom = img_wcs.spectral.pixel_to_world(wave_index)
             wave_angstrom = wave_angstrom.Angstrom
             mask = wave_angstrom >= np.nanmin(wave_range)
@@ -76,13 +101,13 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
             wave_mask |= mask
 
 
-    img_height, img_width = ext.data.shape[1], ext.data.shape[2]
+    img_height, img_width = hdu.data.shape[1], hdu.data.shape[2]
     img_figsize = (
         img_width / dpi,
         img_height / dpi
     )
 
-    new_data = stack(ext.data, wave_mask=wave_mask)
+    new_data = stack(hdu.data, wave_mask=wave_mask)
 
     if is_mask:
         new_data = ~(new_data == new_data.max()) * 1.0
@@ -95,7 +120,7 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
     )
 
     ax.imshow(new_data, vmin=np.min(levels), vmax=np.max(levels))
-    out_name_png = f"{basename}_{suffix}.png"
+    out_name_png = outdir / f"{basename}_{suffix}.png"
     fig.savefig(out_name_png, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
@@ -103,9 +128,11 @@ def stack_and_plot(ext, basename, suffix="", is_mask=False, override_wcs=None,
         new_header = override_wcs.celestial.to_header()
     else:
         new_header = img_wcs.celestial.to_header()
-    out_name_fits = f"{basename}_{suffix}.fits"
-    hdu = fits.PrimaryHDU(data=new_data, header=new_header)
-    hdu.writeto(out_name_fits, overwrite=True)
+    out_name_fits = outdir / f"{basename}_{suffix}.fits"
+    out_hdu: fits.PrimaryHDU = fits.PrimaryHDU(
+        data=new_data, header=new_header
+    )
+    out_hdu.writeto(out_name_fits, overwrite=True)
     return new_data, img_wcs
 
 
@@ -121,7 +148,7 @@ def __argshandler(options=None):
     """
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument(
-        'input_cube', metavar='SPEC_CUBE', type=str, nargs=1,
+        'input_cube', metavar='SPEC_CUBE', type=str,
         help='The spectral cube in fits format from which spectra will be '
         'extracted.'
     )
@@ -179,7 +206,7 @@ def __argshandler(options=None):
     return args
 
 
-def cube_stack(options=None):
+def cube_stack(options: Optional[Sequence[str]]=None):
     """
     Run the main program of this module.
 
@@ -190,38 +217,36 @@ def cube_stack(options=None):
     """
     args = __argshandler(options)
 
-    input_file = args.input_cube[0]
+    input_file: Path = Path(args.input_cube)
 
-    basename = os.path.basename(args.input_cube[0])
-    basename = os.path.splitext(basename)[0]
-
-    if args.outdir is not None:
-        basename = os.path.join(args.outdir, basename)
+    if args.outdir is None:
+        outdir: Path | None = None
+    else:
+        outdir = Path(args.outdir)
 
     with fits.open(input_file) as hdul:
-
         try:
-            spec_hdu_index = int(args.spec_hdu)
+            spec_hdu_index: int | None = int(args.spec_hdu)
         except ValueError:
             spec_hdu_index = args.spec_hdu
         else:
-            if spec_hdu_index < 0:
+            if spec_hdu_index and spec_hdu_index < 0:
                 spec_hdu_index = None
 
         try:
-            var_hdu_index = int(args.var_hdu)
+            var_hdu_index: int | None  = int(args.var_hdu)
         except ValueError:
             var_hdu_index = args.var_hdu
         else:
-            if var_hdu_index < 0:
+            if var_hdu_index and var_hdu_index < 0:
                 var_hdu_index = None
 
         try:
-            mask_hdu_index = int(args.mask_hdu)
+            mask_hdu_index: int | None  = int(args.mask_hdu)
         except ValueError:
             mask_hdu_index = args.mask_hdu
         else:
-            if mask_hdu_index < 0:
+            if mask_hdu_index and mask_hdu_index < 0:
                 mask_hdu_index = None
 
         spec_hdu = get_hdu(
@@ -241,13 +266,18 @@ def cube_stack(options=None):
         else:
             wave_ranges = None
 
-        dat, dat_wcs = stack_and_plot(
+        res = stack_and_plot(
             spec_hdu,
-            basename,
+            input_file.stem,
             'data',
             wave_ranges=wave_ranges,
-            dpi=args.dpi
+            dpi=args.dpi,
+            outdir=outdir
         )
+        if res is None:
+            sys.exit(1)
+
+        dat, dat_wcs = res
 
         if var_hdu_index is not None:
             var_hdu = get_hdu(
@@ -263,11 +293,12 @@ def cube_stack(options=None):
 
             var, var_wcs = stack_and_plot(
                 var_hdu,
-                basename,
+                input_file.stem,
                 'variance',
                 override_wcs=dat_wcs,
                 wave_ranges=wave_ranges,
-                dpi=args.dpi
+                dpi=args.dpi,
+                outdir=outdir
             )
 
         if mask_hdu_index is not None:
@@ -283,12 +314,13 @@ def cube_stack(options=None):
 
             mask, mask_wcs = stack_and_plot(
                 mask_hdu,
-                basename,
+                input_file.stem,
                 'mask',
                 is_mask=True,
                 override_wcs=dat_wcs,
                 wave_ranges=wave_ranges,
-                dpi=args.dpi
+                dpi=args.dpi,
+                outdir=outdir
             )
 
 
