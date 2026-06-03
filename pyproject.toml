@@ -8,7 +8,7 @@ write_to = "src/specex/_version.py"
 
 [project]
 name = "specex"
-version = "0.7.13"
+dynamic = ["version"]
 description = "Extract spectra from fits cubes"
 readme = "README.md"
 requires-python = ">=3.10"
