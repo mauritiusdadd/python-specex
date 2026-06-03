@@ -53,7 +53,6 @@ class SpectralCube:
         self.hdul: Union[fits.HDUList, None] = None
         self.spec_hdu: Union[fits.ImageHDU, None] = None
         self.var_hdu: Union[fits.ImageHDU, None] = None
-        self.var_hdu: Union[fits.ImageHDU, None] = None
         self.mask_hdu: Union[fits.ImageHDU, None] = None
         self.wd_hdu: Union[fits.ImageHDU, None] = None
         self.spec_wcs: Union[WCS, None] = None

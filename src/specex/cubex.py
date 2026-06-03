@@ -313,7 +313,7 @@ def __argshandler(options: Optional[List[str]] = None) -> Any:
     parser.add_argument(
         '--out-name', metavar='NAME', type=str, default=None,
         help='Set the name format of the extracted spectra. If not specified '
-        'the default format spec_%d.fits is used (where %d is a '
+        'the default format spec_%%d.fits is used (where %%d is a '
         'progressive number). Value from the columns of input zcat can be '
         'specified using the parenthesis {COL_NAME}, similar to python '
         'f-string. For example, in the format string spec_{RA}_{DEC}.fits '
@@ -1321,7 +1321,6 @@ def specex(options=None):
                     logging.error(
                         f"ERROR: output name formatting error: {exc}"
                     )
-
 
             apertures_info = [
                 x.to_string() for x in specex_apertures[obj_id]
