@@ -551,9 +551,6 @@ def rrspecex(options=None, comm=None):
         A dictionary containing the redshift scanning information for each
         target
     """
-    global HAS_REDROCK
-    global HAS_IPYTHON
-
     global_start = elapsed(None, "", comm=comm)
     comm_size = 1
     comm_rank = 0

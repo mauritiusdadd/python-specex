@@ -1,0 +1,52 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Testing
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: "Set up Python ${{ matrix.python-version }}"
+      uses: actions/setup-python@v6
+      with:
+        python-version: "${{ matrix.python-version }}"
+    - name: Cache test data
+      id: cache-test
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-test-data
+      with:
+        path: |
+          ./test/data
+        key: ${{ runner.os }}-build-${{ env.cache-name }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.cache-name }}
+          ${{ runner.os }}-build-
+          ${{ runner.os }}-
+    - name: Install program and dependencies
+      run: |
+        python -c "import sys; print(sys.version)"
+        pip install pytest coverage rich
+        pip install .[all,test]
+        chmod +x redrock_venv_setup.sh && ./redrock_venv_setup.sh --noenv
+    - name: Running tests
+      run: |
+        $(which python) -m coverage run -m pytest -s test/test_all.py
+    - name: Coveralls
+      uses: coverallsapp/github-action@v2

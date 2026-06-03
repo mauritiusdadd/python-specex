@@ -75,7 +75,6 @@ def exception_handler(exception_type, value, traceback):
         DESCRIPTION.
 
     """
-    global HAS_IPYTHON
 
     if HAS_IPYTHON:
         traceback_formatter = ultratb.FormattedTB(

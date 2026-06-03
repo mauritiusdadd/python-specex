@@ -537,8 +537,6 @@ def parse_regionfile(regionfile, key_ra='ALPHA_J2000', key_dec='DELTA_J2000',
         Placeholder.
 
     """
-    global HAS_REGION
-
     if not HAS_REGION:
         logging.error(
             "astropy regions package is needed to handle regionfiles!"

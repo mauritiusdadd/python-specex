@@ -376,8 +376,6 @@ def __plot_slice_argshandler(options=None):
         A Namespace containing the parsed arguments. For more information see
         the python documentation of the argparse module.
     """
-    global FFMPEG_EXC
-
     parser = argparse.ArgumentParser(
         description='Plot spectra extracted with specex.'
     )
@@ -531,9 +529,6 @@ def plot_cube_slice_animation(options=None):
     None.
 
     """
-    global HAS_IMAGEIO
-    global FFMPEG_EXC
-
     if not HAS_IMAGEIO:
         if FFMPEG_EXC is None:
             print(
@@ -557,7 +552,7 @@ def plot_cube_slice_animation(options=None):
     ffmpeg_exec = args.ffmpeg_exec
 
     if args.ffmpeg:
-        HAS_IMAGEIO = False
+        use_imageio = False
 
     if args.cube_vlim is not None:
         cube_vlim = [float(x) for x in args.cube_vlim.split(',')]
@@ -871,7 +866,7 @@ def plot_cube_slice_animation(options=None):
 
     bkg = fig.canvas.copy_from_bbox(fig.bbox)
 
-    if HAS_IMAGEIO:
+    if use_imageio:
         writer = imageio.get_writer(
             args.outname,
             mode='I',
@@ -916,10 +911,10 @@ def plot_cube_slice_animation(options=None):
                 bbox_inches='tight',
                 dpi=args.out_dpi
             )
-            if HAS_IMAGEIO:
+            if use_imageio:
                 writer.append_data(imageio.v3.imread(figname % j))
 
-        if HAS_IMAGEIO:
+        if use_imageio:
             writer.close()
         else:
             print("Encoding with FFMPEG...")

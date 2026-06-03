@@ -861,7 +861,6 @@ def specex(options=None):
     None.
 
     """
-    global HAS_IPYTHON
 
     # Get user input from argument parsers helper
     args = __argshandler(options)
