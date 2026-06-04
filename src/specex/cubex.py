@@ -874,9 +874,12 @@ def specex(options: Optional[list[str]] = None) -> None:
 
     # Get user input from argument parsers helper
     args = __argshandler(options)
+    logging.basicConfig()
 
-    if args.debug and HAS_IPYTHON:
-        sys.excepthook = exception_handler
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        if HAS_IPYTHON:
+            sys.excepthook = exception_handler
 
     # Working mode
     mode = None
@@ -926,7 +929,7 @@ def specex(options: Optional[list[str]] = None) -> None:
             regionfile_path,
             key_ra=args.key_ra,
             key_dec=args.key_dec,
-            key_id=args.key_id,
+            key_id='ID' if args.key_id is None else args.key_id,
             file_format=args.cat_format,
         )
         coord_frame = 'icrs'
@@ -938,6 +941,26 @@ def specex(options: Optional[list[str]] = None) -> None:
             "You must provide at least an input catalog or a region file!",
         )
         sys.exit(1)
+
+    # Try to identify the column with object IDs
+    if args.key_id is None:
+        valid_id_keys = [
+            f"{i}{j}"
+            for i in ['', 'OBJ', 'OBJ_', 'TARGET', 'TARGET_']
+            for j in ['ID', 'NUMBER', 'UID', 'UUID']
+        ]
+
+        for key in valid_id_keys:
+            if key.lower() in sources.colnames:
+                key_id = key.lower()
+                break
+            elif key.upper() in sources.colnames:
+                key_id = key.upper()
+                break
+        else:
+            key_id = None
+    else:
+        key_id = args.key_id
 
     cube_path: Path = Path(args.input_cube)
     if not cube_path.is_file(follow_symlinks=True):
@@ -1096,26 +1119,6 @@ def specex(options: Optional[list[str]] = None) -> None:
         n_objects = len(sources)
         if args.nspectra:
             n_objects = int(args.nspectra)
-
-        # Try to identify the column with object IDs
-        if args.key_id is None:
-            valid_id_keys = [
-                f"{i}{j}"
-                for i in ['', 'OBJ', 'OBJ_', 'TARGET', 'TARGET_']
-                for j in ['ID', 'NUMBER', 'UID', 'UUID']
-            ]
-
-            for key in valid_id_keys:
-                if key.lower() in sources.colnames:
-                    key_id = key.lower()
-                    break
-                elif key.upper() in sources.colnames:
-                    key_id = key.upper()
-                    break
-            else:
-                key_id = None
-        else:
-            key_id = args.key_id
 
         out_specfiles = []
         specex_apertures = {}  # these values are in physical units (arcsecs)

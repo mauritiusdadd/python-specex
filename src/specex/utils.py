@@ -568,8 +568,9 @@ def parse_regionfile(
             logging.debug(
                 f"found region with index {reg_id}"
             )
+
         if not isinstance(reg, SkyRegion):
-            print(
+            logging.warning(
                 f"WRAING region {reg_id} is not a WCS region, skipping..."
             )
             continue
