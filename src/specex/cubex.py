@@ -1360,7 +1360,7 @@ def specex(options: Optional[list[str]] = None) -> None:
 
             main_header = {
                 'CUBE': (
-                    basename_with_ext, "Spectral cube used for extraction"
+                    cube_path.name, "Spectral cube used for extraction"
                 ),
                 'RA': (
                     obj_ra, "Ra of the center of the object"
