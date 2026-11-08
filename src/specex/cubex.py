@@ -494,36 +494,38 @@ def get_spsingle_fits(
     obj_spectrum_var=None,
     no_nans=False,
     cutout_data=None,
-    cutout_wcs=None
+    cutout_wcs=None,
+    wavelengths=None
 ):
     """
-    Generate a fits containing the spectral data.
+    Generate a FITS file containing the spectral data conforming to the IVOA
+    Spectrum Data Model (v1.2).
 
     Parameters
     ----------
     main_header : dict
-        Dictionary containing the base information of the spectrum extraction.
-        The keys of the dictionaries are the names of the fits CARDS that will
-        be written, while the values can be either strings or tuples in the
-        form of (cadr value, card comment).
+        Dictionary containing metadata on the spectrum extraction.
     spec_wcs_header : astropy.io.fits.Header object
-        Header containing the WCS information of the spectrum.
+        Header containing WCS information of the spectrum.
     obj_spectrum : numpy.ndarray
-        The actual spectral data.
+        The extracted flux spectrum.
     spec_hdu_header : astropy.io.fits.Header object
-        Header of the HDU of the original cube containing the spectral data.
-    obj_spectrum_var : numpy.ndarray (default=None)
+        Header of the HDU containing the original cube spectral data.
+    obj_spectrum_var : numpy.ndarray, optional
         The variance of the spectral data.
     no_nans : bool, optional
-        If true, nan values in the spectrum are replaced by a linear
-        interpolation. In this case an additional extension is added to the
-        fits file, containing a mask for identifying the previously bax pixels.
+        If True, NaN values are replaced with zeros or interpolated data.
+    cutout_data : numpy.ndarray, optional
+        2D image cutout array.
+    cutout_wcs : astropy.wcs.WCS, optional
+        WCS associated with the cutout image.
+    wavelengths : numpy.ndarray, optional
+        Wavelength grid corresponding to the spectrum pixels.
 
     Returns
     -------
     hdul : astropy.io.fits.HDUList object
-        The fits HDUL containing the extracted spectra.
-
+        The FITS HDUList containing the VO-compliant spectrum.
     """
     my_time = Time.now()
     my_time.format = 'isot'
@@ -534,9 +536,12 @@ def get_spsingle_fits(
     if isinstance(obj_spectrum_var, np.ma.MaskedArray):
         obj_spectrum_var = obj_spectrum_var.filled(np.nan)
 
-    # The primary hdu contains no data but a header with information on
-    # how the spectrum was extracted
+    # Primary HDU contains IVOA global metadata
     main_hdu = fits.PrimaryHDU()
+    main_hdu.header['VOCLASS'] = ('SPECTRUM 1.2', 'IVOA Spectrum Data Model')
+    main_hdu.header['VOPUB'] = ('IVOA', 'VO standard publication')
+    main_hdu.header['CREATOR'] = (f'specex {sp_ver}', 'Software creating the dataset')
+
     for key, val in main_header.items():
         try:
             main_hdu.header[key] = val
@@ -546,61 +551,76 @@ def get_spsingle_fits(
                 file=sys.stderr
             )
 
-    spec_header = fits.Header()
-    if 'BUNIT' in spec_hdu_header:
-        spec_header['BUNIT'] = spec_hdu_header['BUNIT']
-    if 'OBJECT' in spec_hdu_header:
-        spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
-    if 'CUNIT3' in spec_hdu_header:
-        spec_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
-    if 'CTYPE3' in spec_hdu_header:
-        spec_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
-    if 'CRPIX3' in spec_hdu_header:
-        spec_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
-    if 'CRVAL3' in spec_hdu_header:
-        spec_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
-    cdelt3 = spec_hdu_header.get('CD3_3', spec_hdu_header.get('CDELT3', 1.0))
-    spec_header["CDELT1"] = cdelt3
+    flux_unit = spec_hdu_header.get('BUNIT', 'adu')
+    wave_unit = spec_hdu_header.get('CUNIT3', spec_hdu_header.get('CUNIT1', 'Angstrom'))
 
     nanmask = np.isnan(obj_spectrum)
-
     if no_nans:
-        obj_spectrum[nanmask] = 0
+        obj_spectrum[nanmask] = 0.0
         if obj_spectrum_var is not None:
             obj_spectrum_var[nanmask] = np.nanmax(obj_spectrum_var) * 100.0
 
-    hdu_list = [
-        main_hdu,
-        fits.ImageHDU(
-            data=obj_spectrum,
-            header=spec_header,
-            name='SPECTRUM'
+    # Compute wavelength grid if not provided
+    if wavelengths is None:
+        try:
+            sp_wcs = wcs.WCS(spec_wcs_header)
+            pixel = np.arange(len(obj_spectrum))
+            wavelengths = sp_wcs.pixel_to_world(pixel).value
+        except Exception:
+            crpix3 = spec_hdu_header.get('CRPIX3', 1.0)
+            crval3 = spec_hdu_header.get('CRVAL3', 1.0)
+            cdelt3 = spec_hdu_header.get('CD3_3', spec_hdu_header.get('CDELT3', 1.0))
+            pixel = np.arange(len(obj_spectrum))
+            wavelengths = crval3 + (pixel - (crpix3 - 1)) * cdelt3
+
+    # Build binary table according to IVOA Spectrum DM
+    cols = [
+        fits.Column(
+            name='WAVELENGTH',
+            format='1D',
+            unit=wave_unit,
+            array=wavelengths.astype('float64')
+        ),
+        fits.Column(
+            name='FLUX',
+            format='1E',
+            unit=flux_unit,
+            array=obj_spectrum.astype('float32')
         )
     ]
 
     if obj_spectrum_var is not None:
-        var_header = fits.Header()
-        if 'BUNIT' in spec_hdu_header:
-            var_header['BUNIT'] = spec_hdu_header['BUNIT']
-        if 'OBJECT' in spec_hdu_header:
-            var_header["OBJECT"] = spec_hdu_header["OBJECT"]
-        if 'CUNIT3' in spec_hdu_header:
-            var_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
-        if 'CTYPE3' in spec_hdu_header:
-            var_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
-        if 'CRPIX3' in spec_hdu_header:
-            var_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
-        if 'CRVAL3' in spec_hdu_header:
-            var_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
-        var_header["CDELT1"] = cdelt3
-        hdu_list.append(
-            fits.ImageHDU(
-                data=obj_spectrum_var,
-                header=var_header,
-                name='VARIANCE'
+        stat_err = np.sqrt(np.maximum(obj_spectrum_var, 0))
+        cols.append(
+            fits.Column(
+                name='ERR',
+                format='1E',
+                unit=flux_unit,
+                array=stat_err.astype('float32')
             )
         )
 
+    quality = nanmask.astype('int16')
+    cols.append(
+        fits.Column(
+            name='QUALITY',
+            format='1I',
+            array=quality
+        )
+    )
+
+    tbl_hdu = fits.BinTableHDU.from_columns(cols, name='SPECTRUM')
+    tbl_hdu.header['UCD1'] = ('em.wl', 'Wavelength UCD')
+    tbl_hdu.header['UCD2'] = ('phot.flux.density;em.wl', 'Flux density UCD')
+    if obj_spectrum_var is not None:
+        tbl_hdu.header['UCD3'] = ('stat.error;phot.flux.density;em.wl', 'Flux error UCD')
+        tbl_hdu.header['UCD4'] = ('meta.code.qual', 'Quality flag UCD')
+    else:
+        tbl_hdu.header['UCD3'] = ('meta.code.qual', 'Quality flag UCD')
+
+    hdu_list = [main_hdu, tbl_hdu]
+
+    # Keep a NAN_MASK ImageHDU for backward compatibility
     hdu_list.append(
         fits.ImageHDU(
             data=nanmask.astype('uint8'),
@@ -744,11 +764,70 @@ def load_specex_file(
 
         smoothing_window_size = 4*smoothing + 1
 
-        if spec_hdu is None:
+        # Check whether spec_hdu is a BinTableHDU (IVOA Spectrum DM) or ImageHDU
+        if spec_hdu is not None and isinstance(spec_hdu, fits.BinTableHDU):
+            tbl_data = spec_hdu.data
+            col_names_upper = [c.name.upper() for c in spec_hdu.columns]
+
+            # Find wavelength column
+            for wl_cand in ['WAVELENGTH', 'WAVE', 'LAMBDA', 'SPECTRAL']:
+                if wl_cand in col_names_upper:
+                    col_name = spec_hdu.columns[col_names_upper.index(wl_cand)].name
+                    lam = tbl_data[col_name].astype('float64')
+                    wavelength_units = spec_hdu.columns[col_names_upper.index(wl_cand)].unit
+                    break
+            else:
+                lam = None
+                wavelength_units = None
+
+            # Find flux column
+            for fl_cand in ['FLUX', 'DATA', 'SCI']:
+                if fl_cand in col_names_upper:
+                    col_name = spec_hdu.columns[col_names_upper.index(fl_cand)].name
+                    flux = tbl_data[col_name].copy()
+                    flux_units = spec_hdu.columns[col_names_upper.index(fl_cand)].unit
+                    break
+            else:
+                flux = None
+                flux_units = None
+
+            if flux is not None and smoothing > 0:
+                flux = savgol_filter(flux, smoothing_window_size, 3)
+            if flux is not None:
+                flux = flux.astype('float32')
+
+            # Find variance / err column
+            if 'VARIANCE' in col_names_upper:
+                col_name = spec_hdu.columns[col_names_upper.index('VARIANCE')].name
+                var = tbl_data[col_name].copy()
+            elif 'ERR' in col_names_upper or 'STAT_ERR' in col_names_upper:
+                cand = 'ERR' if 'ERR' in col_names_upper else 'STAT_ERR'
+                col_name = spec_hdu.columns[col_names_upper.index(cand)].name
+                err = tbl_data[col_name].copy()
+                var = err ** 2
+            else:
+                var = None
+
+            if var is not None and smoothing > 0:
+                var = savgol_filter(var, smoothing_window_size, 3)
+            if var is not None:
+                var = var.astype('float32')
+
+            # Find quality / nan mask column
+            if 'QUALITY' in col_names_upper:
+                col_name = spec_hdu.columns[col_names_upper.index('QUALITY')].name
+                flux_nan_mask = tbl_data[col_name] != 0
+            elif mask_hdu is not None:
+                flux_nan_mask = mask_hdu.data.astype(bool)
+            else:
+                flux_nan_mask = np.isnan(flux) if flux is not None else None
+
+        elif spec_hdu is None:
             flux = None
             flux_units = None
             lam = None
             wavelength_units = None
+            var = None
         else:
             flux = spec_hdu.data.copy()
             spec_wcs = wcs.WCS(spec_hdu.header)
@@ -782,26 +861,26 @@ def load_specex_file(
             except KeyError:
                 wavelength_units = None
 
-        if mask_hdu is None:
-            flux_nan_mask = None
-        else:
-            flux_nan_mask = mask_hdu.data.astype(bool)
-            if flux is not None:
-                flux_nan_mask |= np.isnan(flux)
-
-        if var_hdu is None:
-            if ivar_hdu is None:
-                var = None
+            if mask_hdu is None:
+                flux_nan_mask = None
             else:
-                var = 1 / ivar_hdu.data.copy()
+                flux_nan_mask = mask_hdu.data.astype(bool)
+                if flux is not None:
+                    flux_nan_mask |= np.isnan(flux)
+
+            if var_hdu is None:
+                if ivar_hdu is None:
+                    var = None
+                else:
+                    var = 1 / ivar_hdu.data.copy()
+                    if smoothing > 0:
+                        var = savgol_filter(var, smoothing_window_size, 3)
+                    var = var.astype('float32')
+            else:
+                var = var_hdu.data.copy()
                 if smoothing > 0:
                     var = savgol_filter(var, smoothing_window_size, 3)
                 var = var.astype('float32')
-        else:
-            var = var_hdu.data.copy()
-            if smoothing > 0:
-                var = savgol_filter(var, smoothing_window_size, 3)
-            var = var.astype('float32')
 
         if wd_hdu is None:
             wd = None
@@ -1003,6 +1082,14 @@ def specex(options: Optional[list[str]] = None) -> None:
         # Get spectral and celstial WCS from the cube
         celestial_wcs = my_cube.getSpecWCS().celestial
         spectral_wcs = my_cube.getSpecWCS().spectral
+        cube_spectral_pixels = np.arange(my_cube.spec_hdu.data.shape[0])
+        try:
+            cube_wavelengths = spectral_wcs.pixel_to_world(cube_spectral_pixels).value
+        except Exception:
+            crpix3 = my_cube.spec_hdu.header.get('CRPIX3', 1.0)
+            crval3 = my_cube.spec_hdu.header.get('CRVAL3', 1.0)
+            cdelt3 = my_cube.spec_hdu.header.get('CD3_3', my_cube.spec_hdu.header.get('CDELT3', 1.0))
+            cube_wavelengths = crval3 + (cube_spectral_pixels - (crpix3 - 1)) * cdelt3
 
         # If weighting with an external image, read that
         valid_wl_modes = ['none', 'whitelight', 'log-whitelight']
@@ -1448,7 +1535,8 @@ def specex(options: Optional[list[str]] = None) -> None:
                 obj_spectrum, my_cube.spec_hdu.header,
                 obj_spectrum_var, no_nans=args.no_nans,
                 cutout_data=obj_cutout_dict['data'] if obj_cutout_dict else None,
-                cutout_wcs=obj_cutout_dict['wcs'] if obj_cutout_dict else None
+                cutout_wcs=obj_cutout_dict['wcs'] if obj_cutout_dict else None,
+                wavelengths=cube_wavelengths
             )
 
             out_file_name = os.path.join(outdir, outname)
