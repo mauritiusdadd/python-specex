@@ -5,18 +5,26 @@ SPEX - SPectra EXtractor.
 
 Extract spectra from spectral data cubes.
 
-Copyright (C) 2022  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 from __future__ import absolute_import, division, print_function
 
 import os
 import sys
 import unittest
-import warnings
-from urllib import request
-
-from astropy.io import fits
-from astropy.table import Table, join
 
 from specex.cube import cutout_main, smoothing_main
 from specex.stack import cube_stack
@@ -24,21 +32,9 @@ from specex.sources import detect_from_cube
 from specex.zeropoints import main as zpinfo
 from specex.cubex import specex
 from specex.plot import plot_spectra
-from specex.utils import get_pbar
 
-from test import make_synt_cube, get_hst_test_images, TEST_DATA_PATH
+from test import get_hst_test_images, TEST_DATA_PATH
 from test import make_synt_specs, get_muse_test_cube
-
-
-try:
-    from specex.rrspecex import rrspecex
-except ImportError:
-    HAS_RR = False
-else:
-    HAS_RR = True
-
-
-Z_FTOL = 0.01
 
 
 NICMOS_REGFILE_DATA = """
@@ -211,42 +207,6 @@ class MyTests(unittest.TestCase):
         plot_spectra(options=plot_options)
 
 
-"""
-# unittest seems to have some issues with redrock implementation...
-class TestRRSpex(unittest.TestCase):
-
-    @unittest.skipIf(not HAS_RR, "redrock not installed")
-    def test_rrspecex_success(self):
-        global HAS_RR
-
-        if not HAS_RR:
-            return
-
-        test_files = make_synt_specs.main()
-
-        true_z_table = Table(
-            names=['SPECID', 'TRUE_Z'],
-            dtype=['U10', 'float32']
-        )
-
-        for file in test_files:
-            header = fits.getheader(file, ext=0)
-            true_z_table.add_row([header['ID'], header['OBJ_Z']])
-
-        options = ['--quite', ] + test_files
-        targets, zbest, scandata = rrspecex(options=options)
-
-        zbest = join(true_z_table, zbest, keys=['SPECID'])
-        print(zbest)
-
-        for i, obj in enumerate(zbest):
-            delta_z = abs(obj['TRUE_Z'] - obj['Z'])/(1 + obj['TRUE_Z'])
-            if delta_z >= Z_FTOL:
-                warnings.warn(
-                    f"OBJ {i}: computed redshift outside f01 limit!",
-                )
-"""
-
 if __name__ == '__main__':
     tests = MyTests()
     tests.test_zeropoint_info()
@@ -265,7 +225,3 @@ if __name__ == '__main__':
     tests.test_specex_regionfile_wimg()
 
     tests.test_plot()
-
-    # if HAS_RR:
-    #     test_06 = TestRRSpex()
-    #     test_06.test_rrspecex_success()

@@ -5,7 +5,20 @@ SPECEX - SPECtra EXtractor.
 
 This module provides utility functions used by other specex modules.
 
-Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 from __future__ import annotations
 
@@ -16,7 +29,7 @@ import tarfile
 import logging
 import platform
 import subprocess
-from typing import Optional, Union, NoReturn
+from typing import Optional
 from urllib import request
 
 import numpy as np
@@ -27,7 +40,6 @@ from matplotlib.gridspec import GridSpec
 from matplotlib import patches
 import matplotlib.patheffects as PathEffects
 
-from scipy.signal import savgol_filter
 from scipy.ndimage import rotate
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
@@ -36,6 +48,7 @@ from astropy import units as apu
 from astropy import coordinates
 from astropy import constants
 from astropy.table import Table
+from astropy.convolution import convolve, Box1DKernel
 
 from specex.lines import get_lines
 
@@ -50,7 +63,7 @@ try:
     import reproject
 except Exception:
     HAS_REPROJECT = False
-    def do_reprojectdef(img_hdu, cube_hdu):
+    def do_reproject(img_hdu, cube_hdu):
         raise NotImplementedError()
 else:
     HAS_REPROJECT = True
@@ -583,7 +596,7 @@ def parse_regionfile(
             for v_pos in reg.vertices:
                 v_pos_icrs: SkyCoord = v_pos.transform_to('icrs')
                 v_ra_list.append(v_pos_icrs.ra.to('deg').value)
-                v_dec_list.append(v_pos_icrs.ra.to('deg').value)
+                v_dec_list.append(v_pos_icrs.dec.to('deg').value)
             new_row = [
                 reg_id, np.mean(v_ra_list), np.mean(v_dec_list), reg
             ]
@@ -776,17 +789,17 @@ def log_rebin(wave, spec_list, oversample=1, flux_conserving=False):
         borders = np.linspace(*lim, wave.shape[0] + 1)
     else:
         lim = 1.5*wave[[0, -1]] - 0.5*wave[[1, -2]]
-        borders = np.hstack([lim[0], (wave[1:] + wave[:-1])/2, wave[1]])
+        borders = np.hstack([lim[0], (wave[1:] + wave[:-1])/2, lim[1]])
         dlam = np.diff(borders)
 
     ln_lim = np.log(lim)
-    c_km_h = constants.c.to(apu.km / apu.h).value
+    c_km_s = constants.c.to(apu.km / apu.s).value
 
     m = int(wave.shape[0] * oversample)
-    velscale = c_km_h * np.diff(ln_lim) / m
+    velscale = c_km_s * np.diff(ln_lim) / m
     velscale = velscale.item()
 
-    new_borders = np.exp(ln_lim[0] + velscale / c_km_h * np.arange(m + 1))
+    new_borders = np.exp(ln_lim[0] + velscale / c_km_s * np.arange(m + 1))
 
     if wave.shape[0] == 2:
         k = ((new_borders - lim[0])/dlam)
@@ -814,51 +827,6 @@ def log_rebin(wave, spec_list, oversample=1, flux_conserving=False):
     ln_lam = 0.5*np.log(new_borders[1:]*new_borders[:-1])
 
     return rebinned_spec_list, ln_lam, velscale
-
-
-def plot_scandata(target, scandata):
-    """
-    Plot debugging information about zchi2.
-
-    Parameters
-    ----------
-    target : redrock.Target
-        The target object.
-    scandata : dict
-        The full scandata as returned by redrock.
-
-    Returns
-    -------
-    fig : matplotlib.pyplot.Figure
-        The figure of the plot.
-    ax : TYPE
-        The main axis of the plot.
-
-    """
-    try:
-        obj_data = scandata[target.id]
-    except KeyError:
-        return
-
-    template_types = list(obj_data.keys())
-
-    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-
-    for template_type in template_types:
-        ax.plot(
-            obj_data[template_type]['redshifts'],
-            obj_data[template_type]['zchi2'],
-            label=f"{template_type}"
-        )
-    ax.set_yscale('log')
-    ax.set_xscale('log')
-    ax.set_xlim(left=0.1)
-    ax.set_title(f'{target.id}')
-    ax.set_xlabel("redshift")
-    ax.set_ylabel("Chi2")
-    ax.legend()
-    plt.tight_layout()
-    return fig, ax
 
 
 def get_ellipse_skypoints(center: coordinates.SkyCoord,
@@ -1194,7 +1162,7 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         line is plotted and restframe option is ignored. The default is None.
     smoothing : int or None, optional
         If an integer greater than zero is passed to this parameter, then the
-        value is used as the window size of scipy.filter.savgol_filter used to
+        value is used as the size of an astropy.convolution.Box1DKernel used to
         smooth the flux of the spectum. If this value is 0 or None then no
         smoothing is performed. The default is None.
     wavelengt_units : str, optional
@@ -1236,6 +1204,13 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
             var_max = np.nanmax(variance)
         else:
             var_max = 1
+
+    if nan_mask is not None:
+        flux_valid = flux[~nan_mask]
+    else:
+        flux_valid = flux
+    flux_min = np.nanmin(flux_valid) if len(flux_valid) > 0 else 0.0
+    flux_max = np.nanmax(flux_valid) if len(flux_valid) > 0 else 1.0
 
     w_min = 1.0e5
     w_max = 0.0
@@ -1286,9 +1261,9 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
     else:
         fig = axs[0].figure
 
-    # If variance data are present, then make two plots on the left of the
+    # If variance data is present, then make two plots on the left of the
     # figure. The top one is for the spectrum and the bottom one is for the
-    # variance. Otherwise just make a bigger plot on the left only for the
+    # variance. Otherwise, just make a bigger plot on the left only for the
     # spectrum.
     if variance is not None:
         if axs is None:
@@ -1325,6 +1300,8 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
 
     ax0.set_ylabel(y_label)
     ax0.set_xlim(w_min, w_max)
+    y_lower = min(0.0, float(flux_min) * 1.05) if flux_min < 0 else 0.0
+    ax0.set_ylim(y_lower, float(flux_max) * 1.05)
 
     # Plot a cutout
     if cutout is not None:
@@ -1432,7 +1409,9 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
         )
     else:
         window_size = 4*smoothing + 1
-        smoothed_flux = savgol_filter(flux, window_size, 3)
+
+        box_kernel = Box1DKernel(window_size)
+        smoothed_flux = convolve(flux, box_kernel)
         ax0.plot(
             wavelengths, flux,
             ls='-',
@@ -1490,104 +1469,6 @@ def plot_spectrum(wavelengths, flux, variance=None, nan_mask=None,
             tbl.scale(1, 1.5)
 
     return fig, [ax0, ax1, ax2, ax3]
-
-
-def plot_zfit_check(target, zbest, plot_template=None, restframe=False,
-                    wavelengt_units='Angstrom', flux_units=''):
-    """
-    Plot the check images for the fitted targets.
-
-    This function will plot the spectra of the target object along with the
-    spectra of the best matching tamplate and some other info.
-
-    Parameters
-    ----------
-    target : redrock.targets.Target object
-        A targets used in redshift estimation process.
-    zfit : astropy.table.Table
-        A table containing the reshift and other info of the input targets.
-    plot_template : list of redrock.templates or None, optional
-        If not None, plot the best matching tamplate.
-    rest_frame : bool, optional
-        Whether to plot the spectrum at restrframe.
-    wave_units : str, optional
-        The units of the wavelength grid. The default value id 'Angstrom'
-    flux_units : str, optional
-        The units of the spectum. The default value is ''.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-        The Figure object containing the plot.
-    axs : 2-tuple of matplotlib.axes._subplots.AxesSubplot and/or None
-        List of AxesSubplot. If no cutout was passed in input, the list will
-        contain only the axes of the plot of the spectrum, otherwise two axes
-        will be in the list: the first axes containing the plot of the spectrum
-        and the second axes containing the cutout of the object.
-
-    """
-    flux_units = flux_units.replace('**', '^')
-
-    t_best_data = zbest[zbest['SPECID'] == target.spec_id][0]
-
-    info_dict = {
-        'ID': f"{target.spec_id}",
-        'Z': f"z: {t_best_data['Z']:.4f} ± {t_best_data['ZERR']:.2e}\n",
-        'Template': f"{t_best_data['SPECTYPE']} {t_best_data['SUBTYPE']}",
-        'SNR': f"{t_best_data['SN']:.2f}\n",
-        'SNR (EM)': f"{t_best_data['SN_EMISS']:.2f}\n",
-        'ZWARN': f"{t_best_data['ZWARN']}"
-    }
-
-    lam = target.spectra[0].wave.copy()
-
-    fig, axs = plot_spectrum(
-        lam,
-        target.spectra[0].flux,
-        cutout=None,
-        redshift=t_best_data['Z'],
-        restframe=restframe,
-        wavelengt_units=wavelengt_units,
-        flux_units=flux_units,
-        extra_info=info_dict
-    )
-
-    best_template = None
-    if plot_template:
-        for t in plot_template:
-            if (
-                t.template_type == t_best_data['SPECTYPE'] and
-                t.sub_type == t_best_data['SUBTYPE']
-            ):
-                best_template = t
-                break
-
-        if best_template:
-            try:
-                coeffs = t_best_data['COEFF'][:best_template.nbasis]
-                template_flux = best_template.eval(
-                    coeffs,
-                    lam,
-                    0 if restframe else t_best_data['Z'],
-                )
-
-                axs[0].plot(
-                    lam, template_flux,
-                    ls='-',
-                    lw=1,
-                    alpha=0.7,
-                    c='red',
-                    label=f'best template [{best_template.full_type}]'
-                )
-            except AssertionError:
-                print(
-                    f"Template warning for object {target.spec_id}\n"
-                    f"  nbasis: {best_template.nbasis}\n"
-                    f"  coeffs: {len(coeffs)}",
-                    file=sys.stderr
-                )
-
-    return fig, axs
 
 
 def get_mask_intervals(mask):
@@ -1655,6 +1536,7 @@ def stack(
     img_height, img_width = data.shape[1], data.shape[2]
     new_data: np.ndarray = np.zeros((img_height, img_width), dtype=float)
     new_count: np.ndarray = np.zeros((img_height, img_width), dtype=int)
+    n_slices_used = 0
     dat: np.ndarray
     for k in range(len(data)):
         dat = data[k]
@@ -1666,17 +1548,18 @@ def stack(
             sys.stdout.flush()
 
         if (wave_mask is None) or (wave_mask[k].any()):
+            n_slices_used += 1
             valid_mask = np.isfinite(dat)
-            dat[~valid_mask] = 0.0
             new_count[valid_mask] += 1
-            new_data += dat.astype(float)
+            new_data[valid_mask] += dat[valid_mask].astype(float)
 
-    stacked = new_data / new_count.astype(float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        stacked = new_data / new_count.astype(float)
     if not average:
-        stacked *= len(data)
+        stacked *= n_slices_used
 
     stacked[new_count == 0] = np.nan
-    return  stacked
+    return stacked
 
 
 def nannmad(x, scale=1.48206, axis=None):
@@ -1709,10 +1592,11 @@ def nannmad(x, scale=1.48206, axis=None):
     return scale*mad
 
 
-def get_spectrum_snr(flux: np.ndarray,
-                     var: Optional[np.ndarray] = None,
-                     smoothing_window: Optional[int] = 51,
-                     smoothing_order: Optional[int] = 11):
+def get_spectrum_snr(
+    flux: np.ndarray,
+    var: Optional[np.ndarray] = None,
+    smoothing_window: Optional[int] = 51
+) -> float:
     """
     Compute the SRN of a spectrum.
 
@@ -1750,9 +1634,9 @@ def get_spectrum_snr(flux: np.ndarray,
     else:
         var = 1.0
 
-    smoothed_spec = savgol_filter(
-        flux.filled(0), smoothing_window, smoothing_order
-    )
+    box_kernel = Box1DKernel(smoothing_window)
+    smoothed_spec = convolve(flux, box_kernel)
+
     smoothed_spec = np.ma.array(smoothed_spec, mask=np.isnan(smoothed_spec))
 
     # Subtract the smoothed spectrum to the spectrum itself to get a
@@ -1760,7 +1644,12 @@ def get_spectrum_snr(flux: np.ndarray,
     noise_spec = flux - smoothed_spec
 
     # Get the median value of the spectrum, weighted by the variance
-    obj_mean_spec = np.ma.sum(smoothed_spec / var) / np.ma.sum(1 / var)
+    valid_var = (var > 0) & np.isfinite(var) & np.isfinite(smoothed_spec)
+    if np.any(valid_var):
+        w = 1.0 / var[valid_var]
+        obj_mean_spec = np.sum(smoothed_spec[valid_var] * w) / np.sum(w)
+    else:
+        obj_mean_spec = np.nanmean(smoothed_spec)
 
     # Get the mean Signal to Noise ratio
     sn_spec = obj_mean_spec / nannmad(noise_spec)
@@ -1773,7 +1662,11 @@ def get_spectrum_snr(flux: np.ndarray,
     return sn_spec
 
 
-def get_spectrum_snr_emission(flux, var=None, bin_size=150):
+def get_spectrum_snr_emission(
+    flux: np.ndarray,
+    var: Optional[np.ndarray] = None,
+    bin_size: int = 150
+) -> float:
     """
     Compute the SRN of a spectrum considering emission lines only.
 
@@ -1797,10 +1690,11 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=150):
     flux = flux.copy()
     flux[flux < 0] = 0
 
-    # If we have the variace, we can use it to weight the flux
+    # If we have the variance, we can use standard deviation to weight the flux
     if var is not None:
-        var = var.copy()
-        flux = flux / var
+        std = np.sqrt(np.maximum(var, 0))
+        valid_std = (std > 0) & np.isfinite(std)
+        flux = np.where(valid_std, flux / std, 0.0)
 
     optimal_width = flux.shape[0] - flux.shape[0] % bin_size
     flux = flux[:optimal_width]
@@ -1822,7 +1716,12 @@ def get_spectrum_snr_emission(flux, var=None, bin_size=150):
     # difference will be greater than one
     sub_diff = np.ma.max(sub_spec, axis=1) - np.ma.median(sub_spec, axis=1)
 
-    s_em = sub_diff / 3.0*np.ma.median(sub_diff) - 1
+    med_diff = np.ma.median(sub_diff)
+    denom = 3.0 * med_diff
+    if denom > 0:
+        s_em = (sub_diff / denom) - 1
+    else:
+        s_em = sub_diff - 1
     noise_em = nannmad(sub_diff)
 
     sn_spec = np.ma.max(s_em / noise_em)

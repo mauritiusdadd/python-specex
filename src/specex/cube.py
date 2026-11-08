@@ -6,6 +6,19 @@ SPECEX - SPECtra EXtractor.
 This module provides utility functions to handle spectroscopic datacubes.
 
 Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 from __future__ import annotations
 
@@ -16,21 +29,29 @@ import shutil
 import logging
 import argparse
 import warnings
+from pathlib import Path
 
-from numbers import Number
-from typing import Optional, Union, Tuple, List, Dict, Callable, Any
+from typing import Optional, Any
+from collections.abc import Sequence, Iterable, Callable
 
 import numpy as np
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
+
+from rich.progress import Progress
+
+from astropy.units import Quantity
 
 from astropy import units
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from astropy.nddata.utils import Cutout2D
+from astropy.convolution import (
+    convolve, Gaussian1DKernel, Gaussian2DKernel,
+    Box1DKernel, Box2DKernel, Tophat2DKernel,
+)
 
-from specex.utils import get_pc_transform_params, rotate_data, get_pbar
-from specex.utils import HAS_REGION, parse_regionfile, simple_pbar_callback
+from specex.utils import get_pc_transform_params, rotate_data
+from specex.utils import HAS_REGION, parse_regionfile
 from specex.exceptions import get_ipython_embedder
 
 if HAS_REGION:
@@ -49,7 +70,7 @@ class SpectralCube:
     """Class to handle datacubes."""
 
     def __init__(self) -> None:
-        self.filename: str | None = None
+        self.filename: Path | None = None
         self.hdul: fits.HDUList | None = None
         self.spec_hdu: fits.ImageHDU | None = None
         self.var_hdu: fits.ImageHDU | None = None
@@ -57,6 +78,7 @@ class SpectralCube:
         self.wd_hdu: fits.ImageHDU | None = None
         self.spec_wcs: WCS | None = None
         self.var_wcs: WCS | None = None
+        self.mask_wcs: WCS | None = None
         self.wd_wcs: WCS | None = None
 
     def __del__(self) -> None:
@@ -98,10 +120,6 @@ class SpectralCube:
         """
         self.close()
 
-    def getBaseName(self):
-        bname = os.path.basename(self.filename)
-        return os.path.splitext(bname)[0]
-
     def close(self) -> None:
         """
         Clean up on closing.
@@ -114,7 +132,7 @@ class SpectralCube:
         if self.hdul is not None:
             self.hdul.close()
 
-    def getSpecWCS(self) -> WCS:
+    def getSpecWCS(self) -> WCS | None:
         """
         Get the WCS of the spectrum datacube.
 
@@ -124,11 +142,11 @@ class SpectralCube:
             The WCS of the spectral HDU.
 
         """
-        if self.spec_wcs is None:
+        if (self.spec_wcs is None) and (self.spec_hdu is not None):
             self.spec_wcs = WCS(self.spec_hdu.header)
         return self.spec_wcs
 
-    def getVarWCS(self) -> WCS:
+    def getVarWCS(self) -> WCS | None:
         """
         Get the WCS of the variance datacube.
 
@@ -137,13 +155,28 @@ class SpectralCube:
         wcs
             The WCS of the variance HDU.
         """
-        if self.var_wcs is None:
+        if (self.var_wcs is None) and (self.var_hdu is not None):
             self.var_wcs = WCS(self.var_hdu.header)
             if not (self.var_wcs.has_celestial and self.var_wcs.has_spectral):
                 return self.getSpecWCS()
         return self.var_wcs
 
-    def getWdWCS(self) -> WCS:
+    def getMaskWCS(self) -> WCS | None:
+        """
+        Get the WCS of the mask datacube.
+
+        Returns
+        -------
+        wcs
+            The WCS of the mask HDU.
+        """
+        if (self.mask_wcs is None) and (self.mask_hdu is not None):
+            self.mask_wcs = WCS(self.mask_hdu.header)
+            if not (self.mask_wcs.has_celestial and self.mask_wcs.has_spectral):
+                return self.getSpecWCS()
+        return self.mask_wcs
+
+    def getWdWCS(self) -> WCS | None:
         """
         Get the WCS of the variance datacube.
 
@@ -152,7 +185,7 @@ class SpectralCube:
         wcs
             The WCS of the resolution curve HDU.
         """
-        if self.wd_wcs is None:
+        if (self.wd_wcs is None) and (self.wd_hdu is not None):
             self.wd_wcs = WCS(self.wd_hdu.header)
             if not (self.wd_wcs.has_celestial and self.wd_wcs.has_spectral):
                 return self.getSpecWCS()
@@ -160,7 +193,7 @@ class SpectralCube:
 
     def getSpatialSizePixels(
         self
-    ) -> List[Union[None, int]]:
+    ) -> list[None | int]:
         """
         Return spatial dimensions in pixels.
 
@@ -177,10 +210,10 @@ class SpectralCube:
 
     @classmethod
     def open(cls, filename: str | os.PathLike[str],
-             spec_hdu_index: Optional[Union[int, str]] = None,
-             var_hdu_index: Optional[Union[int, str]] = None,
-             mask_hdu_index: Optional[Union[int, str]] = None,
-             wd_hdu_index: Optional[Union[int, str]] = None,
+             spec_hdu_index: Optional[int | str] = None,
+             var_hdu_index: Optional[int | str] = None,
+             mask_hdu_index: Optional[int | str] = None,
+             wd_hdu_index: Optional[int | str] = None,
              mode: Optional[str] = None) -> SpectralCube:
         """
         Open a datacube from a FITS file.
@@ -189,16 +222,16 @@ class SpectralCube:
         ----------
         filename : str
             The file path.
-        spec_hdu_index : Optional[Union[int, str]], optional
+        spec_hdu_index : Optional[int | str], optional
             The index or name of the HDU containing the spectrum.
             The default is None.
-        var_hdu_index : Optional[Union[int, str]], optional
+        var_hdu_index : Optional[int | str], optional
             The index or name of the HDU containing the variance.
             The default is None.
-        mask_hdu_index : Optional[Union[int, str]], optional
+        mask_hdu_index : Optional[int | str], optional
             The index or name of the HDU containing the nans maks.
             The default is None.
-        wd_hdu_index : Optional[Union[int, str]], optional
+        wd_hdu_index : Optional[int | str], optional
             The index or name of the HDU containing the R matrix.
             The default is None.
         mode : Optional[str], optional
@@ -210,8 +243,11 @@ class SpectralCube:
 
         """
         new_cube = cls()
-        new_cube.filename = filename
-        new_cube.hdul = fits.open(filename)
+        new_cube.filename = Path(filename)
+        open_kwargs = {}
+        if mode is not None:
+            open_kwargs['mode'] = mode
+        new_cube.hdul = fits.open(filename, **open_kwargs)
 
         new_cube.spec_hdu = get_hdu(
             new_cube.hdul,
@@ -253,7 +289,7 @@ class SpectralCube:
         new_cube.wd_hdu = get_hdu(
             new_cube.hdul,
             hdu_index=wd_hdu_index,
-            valid_names=KNOWN_MASK_EXT_NAMES,
+            valid_names=KNOWN_RCURVE_EXT_NAMES,
             msg_err_notfound=(
                 "WARNING: Cannot determine which HDU contains the "
                 "R data, try to specify it manually!"
@@ -264,7 +300,12 @@ class SpectralCube:
         )
         return new_cube
 
-    def write(self, filename: str, **kwargs):
+    def write(
+        self, filename: str,
+        output_verify: str = "exception",
+        overwrite: bool = False,
+        checksum: bool = False
+    ) -> None:
         """
         Write the datacube if a FITS file.
 
@@ -278,16 +319,23 @@ class SpectralCube:
 
         Returns
         -------
-        bool
-            True if the write operation was succesfull.
+        None
 
         """
         if self.hdul is None:
-            return False
-        self.hdul.writeto(filename, **kwargs)
+            return
+
+        self.hdul.writeto(
+            filename,
+            output_verify=output_verify,
+            overwrite=overwrite,
+            checksum=checksum
+        )
 
 
-def __cutout_argshandler(options=None):
+def __cutout_argshandler(
+    options: Optional[Sequence[str]] = None
+) -> argparse.Namespace:
     """
     Parse the arguments given by the user.
 
@@ -309,7 +357,7 @@ def __cutout_argshandler(options=None):
     )
 
     parser.add_argument(
-        'input_fits', metavar='INPUT_FIST', type=str, nargs=1,
+        'input_fits', metavar='INPUT_FIST', type=str,
         help='The spectral cube (or image) from which to extract a cutout.'
     )
     parser.add_argument(
@@ -370,32 +418,11 @@ def __cutout_argshandler(options=None):
         '--verbose', action='store_true', default=False,
         help="Print verbose outout."
     )
-    args = None
-    if options is None:
-        args = parser.parse_args()
-    else:
-        args = parser.parse_args(options)
-
-    inp_fits_file = args.input_fits[0]
-    if (inp_fits_file is not None) and (not os.path.isfile(inp_fits_file)):
-        print(f"The file {inp_fits_file} does not exist!")
-        sys.exit(1)
-
-    if args.regionfile is None:
-        if (args.center is None) or (args.size is None):
-            print(
-                "If --regionfile is not specified then both --center and "
-                "--size must be provided."
-            )
-            sys.exit(1)
-    elif not os.path.isfile(args.regionfile):
-        print("The file input regionfile does not exist!")
-        sys.exit(1)
-
+    args = parser.parse_args(options)
     return args
 
 
-def __smoothing_argshandler(options=None):
+def __smoothing_args_handler(options: Optional[Sequence[str]]=None):
     """
     Parse the arguments given by the user.
 
@@ -421,10 +448,15 @@ def __smoothing_argshandler(options=None):
         help='The spectral cube (or image) from which to extract a cutout.'
     )
     parser.add_argument(
-        '--spatial-sigma', metavar='SIGMA', type=str, default=1.0,
-        help='Set the sigma for the spatial gaussian kernel. If %(metavar)s '
+        '--spatial-smooth', metavar='SIGMA', type=str, default=None,
+        help='Set the size of the spatial gaussian kernel. If %(metavar)s '
         'is 0 then no spatial smoothing is applied. If not specified the '
-        'default value %(metavar)s=%(default)f is used.'
+        'default value %(metavar)s=0 is used.'
+    )
+    parser.add_argument(
+        '--spatial-kernel', metavar="KERNEL", type=str, default="gaussian",
+        help="Set the kernel to use for spatial smoothing. In can be: gaussian"
+        ", top-hat, or box. The default value is %(default)s."
     )
     parser.add_argument(
         '--spatial-supersample', metavar='ZOOM_FACTOR', type=int, default=0,
@@ -438,13 +470,25 @@ def __smoothing_argshandler(options=None):
         help='Set the wavelength supersampling factor. If %(metavar)s <= 1 '
         'then no supersampling is applied. %(metavar)s=2 means that the output'
         'cube will have a doubled spectral resolution, and so on. '
-        'The default value is %(metavar)s=%(default)d.'
+        'The default value is %(metavar)s=%(default)s.'
     )
     parser.add_argument(
-        '--wave-sigma', metavar='SIGMA', type=str, default=0,
-        help='Set the sigma for the spectral gaussian kernel. If %(metavar)s '
-        'is 0 then no spectral smoothing is applied. If not specified the '
-        'default value %(metavar)s=%(default)f is used.'
+        '--wave-smooth', metavar='SIGMA', type=str, default=None,
+        help='Set the size of the spectral gaussian kernel. If %(metavar)s '
+        'is 0 then no spectral smoothing is applied. If not specified, the '
+        'default value %(metavar)s=0 is used.'
+    )
+    parser.add_argument(
+        '--wave-kernel', metavar="KERNEL", type=str, default="gaussian",
+        help="Set the kernel used for spectral smoothing. In can be: gaussian"
+             " or box. The default value is %(default)s."
+    )
+    parser.add_argument(
+        '--linemap', metavar='WINDOW_SIZE', type=int, default=None,
+        help='Perform a running mean along the spectral axis, with a window '
+        'of %(metavar)s pixels. If %(metavar)s is 0 then no the running mean '
+        'is not applied. If not specified, the default value %(metavar)s=0 '
+        'is used.'
     )
     parser.add_argument(
         '--info-hdu', metavar='INFO_HDU', type=int, default=0,
@@ -486,22 +530,22 @@ def __smoothing_argshandler(options=None):
         help="Start an IPython console for debugging."
     )
 
-    args = None
-    if options is None:
-        args = parser.parse_args()
-    else:
-        args = parser.parse_args(options)
+    args = parser.parse_args(options)
 
     for inp_fits_file in args.input_fits_files:
         if (inp_fits_file is not None) and (not os.path.isfile(inp_fits_file)):
             print(f"The file {inp_fits_file} does not exist!")
             sys.exit(1)
 
-    if (args.spatial_sigma == 0) and (args.wave_sigma == 0):
+    if (
+            (args.spatial_smooth is None) and
+            (args.wave_smooth is None) and
+            (args.linemap  is None)
+    ):
         print(
-            "Spatial smoothing and spectral smooting cannot be both disabled, "
-            "please set at least one the options --wave-sigma or "
-            "--spatial-sigma."
+            "Spatial smoothing and spectral smoothing cannot be both disabled,"
+            " please set at least one the options --wave-sigma or --linemap or"
+            " --spatial-sigma."
         )
         sys.exit(1)
 
@@ -510,11 +554,11 @@ def __smoothing_argshandler(options=None):
 
 def get_gray_cutout(
     data: np.ndarray,
-    center: Union[SkyCoord, tuple, list],
-    size: Union[tuple, list],
-    angle: Optional[Union[float, units.Quantity]] = 0,
+    center: SkyCoord | Iterable,
+    size: tuple[float | int, float | int] | list[float | int] | units.Quantity,
+    angle: float | int | units.Quantity = 0,
     data_wcs: Optional[WCS] = None
-) -> Dict[str, Union[WCS, np.ndarray]]:
+) -> dict[str, WCS | np.ndarray]:
     """
     Get the cutout for a grayscale image.
 
@@ -582,18 +626,15 @@ def get_gray_cutout(
 
 
 def get_rgb_cutout(
-    data: Union[tuple, list, np.ndarray],
-    center: Union[SkyCoord, tuple],
-    size: Union[tuple, list],
-    angle: Optional[Union[float, units.Quantity]] = 0,
-    data_wcs: Optional[Union[WCS, list, tuple]] = None,
+    data: tuple | list | np.ndarray,
+    center: SkyCoord | tuple,
+    size: tuple[float | int, float | int] | list[float | int] | units.Quantity,
+    angle: float| int | units.Quantity = 0,
+    data_wcs: Optional[WCS] = None,
     resample_to_wcs: bool = False
-) -> Dict[
+) -> dict[
     str,
-    Union[
-        Tuple[WCS, WCS, WCS],
-        Tuple[np.ndarray, np.ndarray, np.ndarray]
-    ]
+    tuple[WCS, WCS, WCS] | tuple[np.ndarray, np.ndarray, np.ndarray]
 ]:
     """
     Get a cutout from a bigger RGB.
@@ -649,7 +690,7 @@ def get_rgb_cutout(
         data_r = data[..., 0]
         data_g = data[..., 1]
         data_b = data[..., 2]
-    elif isinstance(data, Union[tuple, list]):
+    elif isinstance(data, tuple | list):
         if len(data) != 3:
             raise ValueError(
                 "'data' parameter only accepts list or tuple containing "
@@ -659,18 +700,19 @@ def get_rgb_cutout(
             raise ValueError(
                 "All elements of the input tupel or list must be 2D arrays."
             )
+
+        data_wcs_r = None
+        data_wcs_g = None
+        data_wcs_b = None
+
         if data_wcs is None:
             if resample_to_wcs:
                 warnings.warn(
                     "reample_to_wcs is set to True but no WCS info is provided"
                 )
-                resample_to_wcs = False
             resample_to_wcs = False
-            data_wcs_r = None
-            data_wcs_g = None
-            data_wcs_b = None
         else:
-            if not isinstance(data_wcs, Union[tuple, list]):
+            if not isinstance(data, tuple | list):
                 raise ValueError(
                     "When 'data' is a list or a tuple, also data_wcs must be a"
                     "a list or a tuple of WCSs."
@@ -713,13 +755,13 @@ def get_rgb_cutout(
 
 def get_cube_cutout(
     data: np.ndarray,
-    center: Union[SkyCoord, tuple, list],
-    size: Union[tuple, list],
-    angle: Optional[Union[float, units.Quantity]] = 0,
-    wave_range: Optional[Union[tuple, list]] = None,
+    center: SkyCoord | tuple,
+    size: tuple[float | int, float | int] | list[float | int] | units.Quantity,
+    angle: float | int | units.Quantity = 0,
+    wave_range: Optional[tuple | list] = None,
     data_wcs: Optional[WCS] = None,
-    report_callback: Optional[Callable] = None
-) -> Dict[str, Union[WCS, np.ndarray]]:
+    progress: Optional[Progress] = None
+) -> dict[str, WCS | np.ndarray]:
     """
     Get a cutout of a spectral datacube.
 
@@ -749,12 +791,6 @@ def get_cube_cutout(
         If it is None, the whole wavelength range is used. The default is None.
     data_wcs : astropy.wcs.WCS or None, optional
         A WCS associated with the image data. The default is None..
-    report_callback : Callable or None, optional
-        A callable that will be executed every time the cutout of a single
-        slice of the cube is computed. Must accept in input two arguments:
-
-          * the number of slice processed so far
-          * the total number of slices.
 
     Returns
     -------
@@ -769,13 +805,13 @@ def get_cube_cutout(
     if len(data.shape) != 3:
         raise ValueError("Unsupported datacube shape {data.shape}.")
 
-    if not isinstance(size, Union[list, tuple]):
+    if not isinstance(size, list | tuple):
         raise ValueError(
             "'size' must be a list or a tuple of scalar values or angular "
             "quantities"
         )
     elif not all(
-        [isinstance(x, Union[int, float, units.Quantity]) for x in size]
+        [isinstance(x, float | int | units.Quantity) for x in size]
     ):
         raise ValueError(
             "'size' must be a list or a tuple of scalar values or angular "
@@ -784,7 +820,7 @@ def get_cube_cutout(
 
     d_a, d_b = size[:2]
 
-    if not isinstance(center, Union[SkyCoord, tuple, list]):
+    if not isinstance(center, SkyCoord | tuple | list):
         raise ValueError("'center' must be SkyCoord or tuple or list.")
 
     angle = units.Quantity(angle, units.deg)
@@ -792,7 +828,7 @@ def get_cube_cutout(
     if data_wcs is not None:
         if not isinstance(data_wcs, WCS):
             raise ValueError(
-                "'data_wcs' must be eihter None or a valid WCS object"
+                "'data_wcs' must be either None or a valid WCS object"
             )
 
         if not data_wcs.has_spectral:
@@ -806,7 +842,14 @@ def get_cube_cutout(
         celestial_wcs = None
         specex_wcs = None
 
-    cutout_data = []
+    cutout_data_list: list[np.ndarray] = []
+
+    if progress is not None:
+        task_id = progress.add_task(
+            description="Making cutout:",
+            total=data.shape[0]
+        )
+
     for k in range(data.shape[0]):
         cutout = get_gray_cutout(
             data=data[k],
@@ -815,12 +858,16 @@ def get_cube_cutout(
             angle=angle,
             data_wcs=celestial_wcs
         )
+        if progress is not None:
+            progress.update(task_id, completed=k)
 
-        cutout_data.append(cutout['data'])
-        if report_callback is not None:
-            report_callback(k, data.shape[0]-1)
+        cutout_data_list.append(cutout['data'])
 
-    cutout_data = np.array(cutout_data)
+    if progress is not None:
+        progress.update(task_id, completed=data.shape[0])
+        progress.remove_task(task_id)
+
+    cutout_data = np.array(cutout_data_list)
 
     if celestial_wcs is not None:
         wcs_header = cutout['wcs'].to_header()
@@ -844,15 +891,18 @@ def get_cube_cutout(
     }
 
 
-def _get_fits_data_structure(fits_file: str) -> Dict[str, Any]:
-    data_structure = {
+def _get_fits_data_structure(
+    fits_file: str | os.PathLike[str]
+) -> dict[str, Any]:
+    data_structure: dict[str, Any] = {
         'type': None,
         'data-ext': [],
         'variance-ext': [],
         'mask-ext': []
     }
+
     with fits.open(fits_file) as f:
-        # If there is only one extension, than it should contain the image data
+        # If there is only one extension, then it should contain the image data
         if len(f) == 1:
             data_ext = f[0]
             data_structure['data-ext'] = [0, ]
@@ -868,7 +918,7 @@ def _get_fits_data_structure(fits_file: str) -> Dict[str, Any]:
                     data_ext = ext
                     data_structure['data-ext'].append(k)
 
-            # If cannot determine which extensions cointain data,
+            # If cannot determine which extensions contain data,
             # then just use the second extension
             if not data_structure['data-ext']:
                 data_ext = f[1]
@@ -877,7 +927,7 @@ def _get_fits_data_structure(fits_file: str) -> Dict[str, Any]:
         data_shape = data_ext.data.shape
         if len(data_shape) == 2:
             # A 2D image, we should check other extensions to
-            # determine if its an RGB multi-extension file
+            # determine if it's an RGB multi-extension file
             for k, ext in enumerate(f):
                 if k in data_structure['data-ext']:
                     continue
@@ -977,7 +1027,7 @@ def get_hdu(hdl, valid_names, hdu_index=None, msg_err_notfound=None,
 
     """
     valid_hdu = None
-    if hdu_index is None:
+    if hdu_index is None or (isinstance(hdu_index, int) and hdu_index < 0):
         # Try to detect HDU containing spectral data
         for hdu in hdl:
             if hdu.name.lower() in valid_names:
@@ -999,16 +1049,50 @@ def get_hdu(hdl, valid_names, hdu_index=None, msg_err_notfound=None,
     return valid_hdu
 
 
-def cube_tiled_func(data, func, tile_size, *args, **kwargs):
-    data_shape = data.shape[-2:]
-    if isinstance(data, np.ma.MaskedArray):
-        result = np.ma.zeros(data_shape)
+def cube_tiled_func(
+    func: Callable,
+    tile_size: int,
+    data: np.ndarray,
+    weights: Optional[int | float | np.ndarray] = None,
+    flat_result: bool = False,
+    description: Optional[str] = None,
+    progress: Optional[Progress] = None,
+    *args, **kwargs
+):
+    if flat_result:
+        data_shape = data.shape[-2:]
     else:
-        result = np.zeros(data_shape)
+        data_shape = data.shape
+
+    if isinstance(data, np.ma.MaskedArray):
+        result = np.ma.zeros(data_shape, dtype=data.dtype)
+    else:
+        result = np.zeros(data_shape, dtype=data.dtype)
+
+    if progress is not None:
+        task_id = progress.add_task(
+            description=description if description else "",
+            total=data_shape[0]*data_shape[1]
+        )
+
     for j in np.arange(data_shape[0], step=tile_size):
         for k in np.arange(data_shape[1], step=tile_size):
-            tile = data[:, j:j+tile_size, k:k+tile_size]
-            # Skip empty tiles:
+            tile = data[..., j:j + tile_size, k:k + tile_size]
+
+            # skip empty tiles
+            if tile.size == 0:
+                continue
+
+            if weights is None:
+                tile_w: int | float | np.ndarray | None = None
+            elif isinstance(weights, int | float):
+                tile_w = np.ones_like(tile) * weights
+            else:
+                tile_w = weights[..., j:j + tile_size, k:k + tile_size]
+
+            if progress is not None:
+                progress.update(task_id, completed=j*data_shape[0] + k)
+
             if not np.isfinite(tile).any():
                 result[j:j+tile_size, k:k+tile_size] = np.nan
                 try:
@@ -1017,12 +1101,29 @@ def cube_tiled_func(data, func, tile_size, *args, **kwargs):
                     pass
                 continue
 
-            processed_tile = func(tile, *args, **kwargs).copy()
-            result[j:j+tile_size, k:k+tile_size] = processed_tile
-            try:
-                result[j:j+tile_size, k:k+tile_size].mask = processed_tile.mask
-            except AttributeError:
-                pass
+            processed_tile = func(tile, tile_w, *args, **kwargs).copy()
+
+            if flat_result:
+                result[j:j + tile_size, k:k + tile_size] = processed_tile
+                try:
+                    result[
+                        j:j + tile_size, k:k + tile_size
+                    ].mask = processed_tile.mask
+                except AttributeError:
+                    pass
+            else:
+                result[..., j:j + tile_size, k:k + tile_size] = processed_tile
+                try:
+                    result[
+                        ..., j:j + tile_size, k:k + tile_size
+                    ].mask = processed_tile.mask
+                except AttributeError:
+                    pass
+
+    print("DONE!!!")
+    if progress is not None:
+        progress.update(task_id, completed=data_shape[0]*data_shape[1])
+        progress.remove_task(task_id)
 
     return result
 
@@ -1051,15 +1152,53 @@ def correlate_spaxel(cube_data: np.ndarray,
         res = np.nansum(x * y, axis=0)
         return res / (np.nansum(x**2, axis=0) * np.nansum(y**2))
 
+def get_line_map(
+        data: np.ndarray,
+        window_size_pix: int = 5,
+        variance: Optional[np.ndarray] = None,
+        data_mask: Optional[np.ndarray] = None,
+        tile_size: int = 32,
+        progress: Optional[Progress] = None,
+) -> np.ndarray:
+    def _worker_func(x: np.ndarray, w: Optional[np.ndarray] = None):
+        if w is None:
+            w = np.ones_like(x)
+
+        return np.array([
+            np.nanmean(
+                x[j:j+window_size_pix] * w[j:j+window_size_pix],
+                axis=0
+            ) / np.nanmean(w[j:j+window_size_pix], axis=0)
+            for j in range(x.shape[0])
+        ])
+
+    weights = None
+    if variance is not None:
+        valid_var = (variance > 0) & np.isfinite(variance)
+        weights = np.zeros_like(variance, dtype=float)
+        weights[valid_var] = 1.0 / variance[valid_var]
+
+    line_map = cube_tiled_func(
+        _worker_func,
+        tile_size,
+        data,
+        weights,
+        flat_result=False,
+        description="Building line map",
+        progress=progress
+    )
+
+    return line_map
+
 
 def get_continuum_subtracted_slice(
         data: np.ndarray,
-        line_wave: Union[int, units.Quantity],
-        line_window: Union[int, units.Quantity] = 10 * units.angstrom,
-        continuum_window: Union[int, units.Quantity] = 10 * units.angstrom,
+        line_wave: int | units.Quantity,
+        line_window: int | units.Quantity = 10 * units.angstrom,
+        continuum_window: int | units.Quantity = 10 * units.angstrom,
         variance: Optional[np.ndarray] = None,
         data_mask: Optional[np.ndarray] = None,
-        cube_wcs: WCS = None
+        cube_wcs: Optional[WCS] = None
 ) -> np.ndarray:
     """
     Get a continuum subtracted image from a spectral datacube.
@@ -1068,11 +1207,11 @@ def get_continuum_subtracted_slice(
     ----------
     data : np.ndarray
         DESCRIPTION.
-    line_wave : Union[int, units.Quantity]
+    line_wave : int | units.Quantity
         DESCRIPTION.
-    line_window : Union[int, units.Quantity], optional
+    line_window : int | units.Quantity, optional
         DESCRIPTION. The default is 10 * units.angstrom.
-    continuum_window : Union[int, units.Quantity], optional
+    continuum_window : int | units.Quantity, optional
         DESCRIPTION. The default is 10 * units.angstrom.
     variance : Optional[np.ndarray], optional
         DESCRIPTION. The default is None.
@@ -1102,50 +1241,36 @@ def get_continuum_subtracted_slice(
                 "A valid WCS object must be provided when central_wave, "
                 "line_window and continuum_window are dimensional quantities."
             )
-        line_wave_pix = cube_wcs.spectral.world_to_pixel(line_window)
+        line_wave_pix = cube_wcs.spectral.world_to_pixel(line_wave)
 
-        line_window_pix_low = cube_wcs.spectral.world_to_pixel(
+        line_window_pix_low = int(np.round(cube_wcs.spectral.world_to_pixel(
             line_wave - line_window
-        )
+        )))
 
-        line_window_pix_high = cube_wcs.spectral.world_to_pixel(
+        line_window_pix_high = int(np.round(cube_wcs.spectral.world_to_pixel(
             line_wave + line_window
-        )
+        )))
 
     else:
-        line_wave_pix = line_window
+        line_wave_pix = line_wave
         line_window_pix_low = int(line_wave_pix - line_window)
         line_window_pix_high = int(line_wave_pix + line_window)
 
-        """
-        continuum_window_pix_low = int(
-            line_window_pix_low - continuum_window/2
-        )
-        continuum_window_pix_high = int(
-            line_window_pix_high + continuum_window/2
-        )
-
-        cx_low = (continuum_window_pix_low + line_window_pix_low) / 2
-        cy_low = data[
-            continuum_window_pix_low:line_window_pix_low, ...
-        ].mean()
-
-        cx_high = (line_window_pix_low + continuum_window_pix_high) / 2
-        cy_high = data[
-            continuum_window_pix_low:line_window_pix_low, ...
-        ].mean()
-        """
-
-    line_slice = data[line_window_pix_low:line_window_pix_high, ...]
+    idx_min = max(0, min(line_window_pix_low, line_window_pix_high))
+    idx_max = min(data.shape[0], max(line_window_pix_low, line_window_pix_high))
+    line_slice = np.nanmean(data[idx_min:idx_max, ...], axis=0)
+    return line_slice
 
 
-def self_correlate(data: np.ndarray,
-                   data_mask: Optional[np.ndarray] = None,
-                   similarity_sigma_threshold: Optional[float] = 5,
-                   tile_size: Optional[int] = 32,
-                   block_size: Optional[int] = 2,
-                   similarity_function: Optional[str] = 'rms',
-                   report_callback: Optional[Callable] = None) -> np.ndarray:
+def self_correlate(
+    data: np.ndarray,
+    data_mask: Optional[np.ndarray] = None,
+    similarity_sigma_threshold: Optional[float] = 5,
+    tile_size: int = 32,
+    block_size: int = 2,
+    similarity_function: Optional[str] = 'rms',
+    progress: Optional[Progress] = None
+) -> np.ndarray:
     if data_mask is not None and data.shape != data_mask.shape:
         raise ValueError("data and data_mask must have the same shape!")
 
@@ -1154,10 +1279,17 @@ def self_correlate(data: np.ndarray,
     sim_table = np.zeros((hei, wid))
     # For each spaxel in the cube
     block_id = 0
+    total_blocks = int(wid*hei / (block_size**2))-1
+    if progress is not None:
+        task_id = progress.add_task(
+            description="Correlating spaxels:",
+            total=total_blocks
+        )
+
     for h in np.arange(hei, step=block_size):
         for k in np.arange(wid, step=block_size):
-            if report_callback is not None:
-                report_callback(block_id, int(wid*hei / (block_size**2))-1)
+            if progress is not None:
+                progress.update(task_id, completed=block_id)
 
             block_id += 1
             if (
@@ -1178,9 +1310,9 @@ def self_correlate(data: np.ndarray,
                 continue
 
             similarity_map = cube_tiled_func(
-                data,
                 correlate_spaxel,
-                tile_size=tile_size,
+                tile_size,
+                data,
                 spaxel_data=spaxel_data,
                 similarity_function=similarity_function
             )
@@ -1189,14 +1321,22 @@ def self_correlate(data: np.ndarray,
             thresh += similarity_sigma_threshold * np.nanstd(similarity_map)
             similarity_mask = similarity_map >= thresh
             sim_table[similarity_mask] = block_id
+
+    if progress is not None:
+        progress.update(task_id, completed=total_blocks)
+        progress.remove_task(task_id)
     return sim_table
 
 
-def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
-                spatial_sigma: Optional[Union[float, units.Quantity]] = 1.0,
-                wave_sigma: Optional[Union[float, units.Quantity]] = 0.0,
-                cube_wcs : Optional[WCS] = None,
-                report_callback: Optional[Callable] = None) -> np.ndarray:
+def smooth_cube(
+    data: np.ndarray, data_mask: Optional[np.ndarray] = None,
+    spatial_size: float | int | Sequence[int | float  | units.Quantity] | np.ndarray | units.Quantity = 1.0,
+    wave_size: float | int | units.Quantity = 0.0,
+    cube_wcs : Optional[WCS] = None,
+    progress: Optional[Progress] = None,
+    spatial_kernel: str = "gaussian",
+    wave_kernel: str = "gaussian",
+) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Smooth a datacube spatially and/or along the spectral axis.
 
@@ -1206,14 +1346,16 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
         The spectral datacube.
     data_mask : numpy.ndarray, optional
         The mask for the spectral datacube. The default is None.
-    spatial_sigma : float, optional
+    spatial_size : float, optional
         The sigma for the spatial smoothing gaussian kernel.
         The default is 1.0.
-    wave_sigma : float, optional
+    wave_size : float, optional
         The sigma fot the spectral smoothing gaussian kernel.
         The default is 0.0.
-    report_callback : Callable or None, optional
-        A callable that will be execute every time the cutout of a single
+    cube_wcs : WCS, optional
+        The WCS of the cube
+    progress : Callable or None, optional
+        A callable that will be executed every time the cutout of a single
         slice of the cube is computed. Must accept in input two arguments:
 
           * the number of slice processed so far
@@ -1235,7 +1377,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
 
     smoothed_arr = data.copy()
 
-    if not isinstance(wave_sigma, Number):
+    if not isinstance(wave_size, float | int):
         if cube_wcs is None:
             raise ValueError(
                 "cube_wcs is needed when using dimensional quantities "
@@ -1248,79 +1390,158 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
         else:
             # Determine the equivalent sigma in pixel space
             p0 = cube_wcs.spectral.pixel_to_world(0).to(units.angstrom)
-            wave_sigma = cube_wcs.spectral.world_to_pixel(p0 + wave_sigma)
-    do_wave_smoohting = wave_sigma > 0
-
-    if (
-        isinstance(spatial_sigma, Number) or
-        isinstance(spatial_sigma[0], Number)
-    ):
-        try:
-            dp_spatial_smoothing = spatial_sigma > 0
-        except TypeError:
-            dp_spatial_smoothing = spatial_sigma[0] > 0
-            dp_spatial_smoothing |= spatial_sigma[1] > 0
+            wave_size_pix: float | int = cube_wcs.spectral.world_to_pixel(
+                p0 + wave_size
+            )
     else:
+        wave_size_pix = wave_size
+
+    do_wave_smoohting = wave_size_pix > 0
+
+    spatial_size_pix: list[int | float] = [0, 0]
+    if isinstance(spatial_size, float | int):
+        spatial_size_pix = [spatial_size, spatial_size]
+    elif isinstance(spatial_size, Quantity):
         if cube_wcs is None:
             raise ValueError(
                 "cube_wcs is needed when using dimensional quantities "
-                "for spatial_sigma"
+                "for spatial_size"
             )
         elif not cube_wcs.has_celestial:
             raise ValueError(
                 "Datacube WCS has no celestial axes!"
             )
         else:
+            if spatial_size.ndim == 0:
+                spatial_size = Quantity([spatial_size, spatial_size])
+
             # Determine the equivalent sigma in pixel space
             p0 = cube_wcs.celestial.pixel_to_world(0, 0)
-            try:
-                d_ra = spatial_sigma[0]
-                d_dec = spatial_sigma[1]
-            except (TypeError, IndexError):
-                d_ra = spatial_sigma
-                d_dec = spatial_sigma
+            d_ra = spatial_size[0]
+            d_dec = spatial_size[1]
             p1 = p0.spherical_offsets_by(d_ra, d_dec)
-            spatial_sigma = cube_wcs.celestial.world_to_pixel(p1)
-            dp_spatial_smoothing = (spatial_sigma[0] > 0)
-            dp_spatial_smoothing |= (spatial_sigma[1] > 0)
+            spatial_size_pix = cube_wcs.celestial.world_to_pixel(p1)
+    else:
+        # Just check if we have mixed quantities and numbers
+        if any([isinstance(x, units.Quantity) for x in spatial_size]):
+            if cube_wcs is None:
+                raise ValueError(
+                    "cube_wcs is needed when using dimensional quantities "
+                    "for spatial_size"
+                )
+            elif not cube_wcs.has_celestial:
+                raise ValueError(
+                    "Datacube WCS has no celestial axes!"
+                )
+            else:
+                # Determine the equivalent sigma in pixel space
+                p0 = cube_wcs.celestial.pixel_to_world(0, 0)
+                if isinstance(spatial_size[0], Quantity):
+                    d_ra = spatial_size[0]
+                else:
+                    d_ra = 0
+                    spatial_size_pix[0] = spatial_size[0]
+
+                if isinstance(spatial_size[1], Quantity):
+                    d_dec = spatial_size[1]
+                else:
+                    d_dec = 0
+                    spatial_size_pix[1] = spatial_size[1]
+
+                p1 = p0.spherical_offsets_by(d_ra, d_dec)
+                d_pix = cube_wcs.celestial.world_to_pixel(p1)
+
+                if isinstance(spatial_size[0], Quantity):
+                    spatial_size_pix[0] = d_pix[0]
+
+                if isinstance(spatial_size[1], Quantity):
+                    spatial_size_pix[1] = d_pix[1]
+        else:
+            spatial_size_pix = [float(x) for x in spatial_size]
+            if len(spatial_size_pix) == 1:
+                spatial_size_pix = [
+                    spatial_size_pix[0], spatial_size_pix[0]
+                ]
+
+    do_spatial_smoothing = spatial_size_pix[0] > 0
+    do_spatial_smoothing |= spatial_size_pix[1] > 0
 
     if do_wave_smoohting:
+        if progress is not None:
+            task_id = progress.add_task(
+                description="Smoothing along spectral axis:",
+                total=smoothed_arr.shape[1]*smoothed_arr.shape[2]
+            )
+
+        if wave_kernel == "gaussian":
+            kernel = Gaussian1DKernel(wave_size_pix)
+        elif wave_kernel == "box":
+            kernel = Box1DKernel(wave_size_pix)
+
         for h in range(smoothed_arr.shape[1]):
-            if report_callback is not None:
-                report_callback(h, smoothed_arr.shape[1] - 1)
             for k in range(smoothed_arr.shape[2]):
-                smoothed_spaxel = gaussian_filter1d(
+                if progress is not None:
+                    progress.update(task_id, advance=1)
+                smoothed_spaxel = convolve(
                     smoothed_arr[:, h, k],
-                    sigma=wave_sigma,
-                    mode='constant'
+                    kernel=kernel,
+                    nan_treatment='interpolate',
+                    normalize_kernel=True
                 )
                 smoothed_arr[:, h, k] = smoothed_spaxel
 
-    if report_callback is not None:
-        print("")
+        if progress is not None:
+            progress.update(
+                task_id, completed=smoothed_arr.shape[1]*smoothed_arr.shape[2]
+            )
+            progress.remove_task(task_id)
 
-    if dp_spatial_smoothing:
+    if do_spatial_smoothing:
+        if progress is not None:
+            task_id = progress.add_task(
+                description="Smoothing along spatial coordinates:",
+                total=smoothed_arr.shape[0]
+            )
+
+        if spatial_kernel == "gaussian":
+            kernel = Gaussian2DKernel(spatial_size_pix[0], spatial_size_pix[1])
+        elif spatial_kernel == "box":
+            kernel = Box2DKernel(np.max(spatial_size_pix))
+        elif spatial_kernel == "top-hat":
+            kernel = Tophat2DKernel(np.max(spatial_size_pix))
+
         for k, data_slice in enumerate(smoothed_arr):
-            if report_callback is not None:
-                report_callback(k, smoothed_arr.shape[0] - 1)
-            smoothed_slice = gaussian_filter(
-                data_slice,
-                sigma=spatial_sigma,
-                mode='constant'
+            if progress is not None:
+                progress.update(task_id, advance=1)
+
+            smoothed_slice = convolve(
+                data_slice, kernel=kernel,
+                nan_treatment='interpolate',
+                normalize_kernel=True
             )
             smoothed_arr[k] = smoothed_slice
 
-    if report_callback is not None:
-        print("")
+        if progress is not None:
+            progress.update(task_id, completed=smoothed_arr.shape[0])
+            progress.remove_task(task_id)
 
     if data_mask is not None:
         smoothed_mask = data_mask.copy().astype(bool)
+        if progress is not None:
+            task_id = progress.add_task(
+                description="Computing data mask:",
+                total=smoothed_arr.shape[0]
+            )
+
         for k, mask_slice in enumerate(smoothed_mask):
-            if report_callback is not None:
-                report_callback(k, smoothed_mask.shape[0] - 1)
-                smoothed_mask[k] &= ~np.isfinite(smoothed_arr[k])
-        if report_callback is not None:
-            print("")
+            if progress is not None:
+                progress.update(task_id, advance=1)
+            smoothed_mask[k] &= ~np.isfinite(smoothed_arr[k]) | mask_slice
+
+        if progress is not None:
+            progress.update(task_id, completed=smoothed_arr.shape[0])
+            progress.remove_task(task_id)
+
         smoothed_mask = smoothed_mask.astype('int8')
     else:
         smoothed_mask = None
@@ -1328,7 +1549,7 @@ def smooth_cube(data: np.ndarray, data_mask: Optional[np.ndarray] = None,
     return smoothed_arr, smoothed_mask
 
 
-def smoothing_main(options=None):
+def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
     """
     Run the main cutout program.
 
@@ -1342,79 +1563,94 @@ def smoothing_main(options=None):
     None.
 
     """
-    args = __smoothing_argshandler(options)
+    args = __smoothing_args_handler(options)
 
-    if args.verbose:
-        report_callback = simple_pbar_callback
+    if args.wave_smooth is None:
+        wave_smooth = 0
     else:
-        report_callback = None
+        try:
+            wave_smooth = float(args.wave_smooth)
+        except ValueError:
+            wave_smooth = units.Quantity(args.wave_smooth)
 
-    try:
-        wave_sigma = float(args.wave_sigma)
-    except ValueError:
-        wave_sigma = units.Quantity(args.wave_sigma)
+    if args.spatial_smooth is not None:
+        spatial_smooth_list = args.spatial_smooth.split(',')
+        spatial_smooth: list[int | float | units.Quantity] | units.Quantity = []
+        for x in spatial_smooth_list:
+            try:
+                value = float(x)
+            except ValueError:
+                value = units.Quantity(x)
+            spatial_smooth.append(value)
 
-    spatial_sigma_list = args.spatial_sigma.split(',')
-    try:
-        if len(spatial_sigma_list) > 1:
-            spatial_sigma = (
-                float(spatial_sigma_list[0]),
-                float(spatial_sigma_list[1])
-            )
-        else:
-            spatial_sigma = float(spatial_sigma_list[0])
-    except ValueError:
-        if len(spatial_sigma_list) > 1:
-            spatial_sigma = (
-                units.Quantity(spatial_sigma_list[0]),
-                units.Quantity(spatial_sigma_list[1])
-            )
-        else:
-            spatial_sigma = units.Quantity(spatial_sigma_list[0])
+        if all([isinstance(x, units.Quantity) for x in spatial_smooth]):
+            spatial_smooth = units.Quantity(spatial_smooth)
+    else:
+        spatial_smooth = 0
 
     for target_data_file in args.input_fits_files:
-        fits_base_name = os.path.basename(target_data_file)
-        fits_base_name = os.path.splitext(fits_base_name)[0]
-        out_fname = f"{fits_base_name}_smoothed.fits"
-
-        if args.verbose:
-            print(f"\n[{fits_base_name}]")
+        target_file_path: Path = Path(target_data_file)
+        out_fname = f"{target_file_path.stem}_smoothed.fits"
 
         shutil.copy(target_data_file, out_fname)
 
-        with SpectralCube.open(target_data_file, mode='readonly') as my_cube:
+        with SpectralCube.open(
+            target_data_file, mode='readonly'
+        ) as my_cube, Progress() as progress:
+
+            if args.verbose:
+                progress.print(f"\n[{target_file_path.stem}]")
 
             data_mask = None
             if my_cube.mask_hdu is not None:
                 data_mask = my_cube.mask_hdu.data
 
             if args.verbose:
-                print(">>> applying smoothing...")
-                print(f"  - spatial_sigma: {spatial_sigma}")
-                print(f"  - wave_sigma: {wave_sigma}")
+                progress.print(">>> applying smoothing...")
+                progress.print(f"  - spatial_size: {spatial_smooth}")
+                progress.print(f"  - wave_sigma: {wave_smooth}")
+
+            if my_cube.spec_hdu is None:
+                logging.error("No valid spectral HDU!")
+                sys.exit(1)
 
             smoothed_spec, smoothed_mask = smooth_cube(
                 data=my_cube.spec_hdu.data,
                 data_mask=data_mask,
-                spatial_sigma=spatial_sigma,
-                wave_sigma=wave_sigma,
+                spatial_size=spatial_smooth,
+                wave_size=wave_smooth,
+                spatial_kernel=args.spatial_kernel,
+                wave_kernel=args.wave_kernel,
                 cube_wcs=my_cube.getSpecWCS(),
-                report_callback=report_callback
+                progress=progress
             )
             my_cube.spec_hdu.data = smoothed_spec
 
+            variance: np.ndarray | None = None
             if my_cube.var_hdu is not None:
+                variance = my_cube.var_hdu.data
                 smoothed_var, _ = smooth_cube(
-                    data=my_cube.var_hdu.data,
-                    spatial_sigma=spatial_sigma,
-                    wave_sigma=wave_sigma,
+                    data=variance,
+                    spatial_size=spatial_smooth,
+                    wave_size=wave_smooth,
+                    spatial_kernel=args.spatial_kernel,
+                    wave_kernel=args.wave_kernel,
                     cube_wcs=my_cube.getVarWCS(),
-                    report_callback=report_callback
+                    progress=progress
                 )
                 my_cube.var_hdu.data = smoothed_var
 
             if my_cube.mask_hdu is not None:
                 my_cube.mask_hdu.data = smoothed_mask
+
+            if  (args.linemap is not None) and (args.linemap > 0):
+                line_map = get_line_map(
+                    my_cube.spec_hdu.data,
+                    window_size_pix=int(args.linemap),
+                    variance=variance,
+                    progress=progress
+                )
+                my_cube.spec_hdu.data = line_map
 
             if args.debug:
                 embedder = get_ipython_embedder()
@@ -1422,15 +1658,12 @@ def smoothing_main(options=None):
                     embedder()
 
             if args.verbose:
-                print(f"  - saving to {out_fname}...")
+                progress.print(f"  - saving to {out_fname}...")
 
-            my_cube.write(
-                out_fname,
-                overwrite=True
-            )
+            my_cube.write(out_fname, overwrite=True)
 
 
-def cutout_main(options=None):
+def cutout_main(options: Optional[Sequence[str]] = None) -> None:
     """
     Run the main cutout program.
 
@@ -1501,11 +1734,30 @@ def cutout_main(options=None):
 
     args = __cutout_argshandler(options)
 
+    inp_fits_file: Path = Path(args.input_fits)
+    if not inp_fits_file.is_file(follow_symlinks=True):
+        print(f"The file {inp_fits_file} does not exist!")
+        sys.exit(1)
+
+    regionfile: Path | None = None
+    if args.regionfile is None:
+        if (args.center is None) or (args.size is None):
+            print(
+                "If --regionfile is not specified then both --center and "
+                "--size must be provided."
+            )
+            sys.exit(1)
+    else:
+        regionfile = Path(args.regionfile)
+        if not regionfile.is_file(follow_symlinks=True):
+            print("The file input regionfile does not exist!")
+            sys.exit(1)
+
     cutout_list = []
-    if args.regionfile is not None:
+    if regionfile is not None:
         if HAS_REGION:
             myt = parse_regionfile(
-                args.regionfile,  key_ra='RA', key_dec='DEC'
+                regionfile,  key_ra='RA', key_dec='DEC'
             )
         else:
             logging.error("Astropy Regions is needed to handle region files!")
@@ -1548,6 +1800,7 @@ def cutout_main(options=None):
                 width = (np.max(ra_list) - np.min(ra_list)) * units.deg
                 height = (np.max(dec_list) - np.min(dec_list)) * units.deg
                 sizes = [height, width]
+                angle = 0 * units.deg
 
             cutout_list.append((center, sizes, angle))
     else:
@@ -1585,34 +1838,26 @@ def cutout_main(options=None):
         for j, (center, sizes, angle) in enumerate(cutout_list):
             print(f'  - Cutout {j}: {center} {sizes} {angle}')
 
-    target_data_file = args.input_fits[0]
-
-    fits_base_name = os.path.basename(target_data_file)
-    fits_base_name = os.path.splitext(fits_base_name)[0]
-
-    data_structure = _get_fits_data_structure(target_data_file)
+    data_structure = _get_fits_data_structure(inp_fits_file)
 
     if args.verbose:
         print(
             "\n=== IMAGE INFO ===\n"
-            f" Name: {fits_base_name}\n"
+            f" Name: {inp_fits_file.stem}\n"
             f" Type: {data_structure['type']}\n"
             f" Data EXT: {data_structure['data-ext']}\n"
             f" Var EXT: {data_structure['variance-ext']}\n"
             f" DQ EXT: {data_structure['mask-ext']}\n",
             file=sys.stderr
         )
-        report_callback = simple_pbar_callback
-    else:
-        report_callback = None
 
-    with fits.open(target_data_file) as hdul:
+    with fits.open(inp_fits_file) as hdul, Progress() as progress:
         for j, (cut_center, cut_size, cut_angle) in enumerate(cutout_list):
-            cutout_name = f"cutout_{fits_base_name}_{j:04}.fits"
+            cutout_name = f"cutout_{inp_fits_file.stem}_{j:04}.fits"
 
             if data_structure['type'] == 'cube':
                 with SpectralCube.open(
-                    target_data_file,
+                    inp_fits_file,
                     spec_hdu_index=data_structure['data-ext'][0],
                     mode='readonly'
                 ) as my_cube:
@@ -1622,13 +1867,18 @@ def cutout_main(options=None):
                             "\nComputing flux cutouts...",
                             file=sys.stderr
                         )
+
+                    if my_cube.spec_hdu is None:
+                        logging.error("No spectral HDU!")
+                        sys.exit(1)
+
                     flux_cutout = get_cube_cutout(
                         my_cube.spec_hdu.data,
                         center=cut_center,
                         size=cut_size,
                         angle=cut_angle,
                         data_wcs=my_cube.getSpecWCS(),
-                        report_callback=report_callback
+                        progress=progress
                     )
 
                     # Convert specral axis to angtrom units
@@ -1659,7 +1909,7 @@ def cutout_main(options=None):
                             size=cut_size,
                             angle=cut_angle,
                             data_wcs=my_cube.getVarWCS(),
-                            report_callback=report_callback
+                            progress=progress
                         )
 
                         var_header = updated_wcs_cutout_header(
@@ -1688,7 +1938,7 @@ def cutout_main(options=None):
                             size=cut_size,
                             angle=cut_angle,
                             data_wcs=my_cube.getMaskWCS(),
-                            report_callback=report_callback
+                            progress=progress
                         )
 
                         mask_header = updated_wcs_cutout_header(
@@ -1717,7 +1967,7 @@ def cutout_main(options=None):
                             size=cut_size,
                             angle=cut_angle,
                             data_wcs=my_cube.getWdWCS(),
-                            report_callback=report_callback
+                            progress=progress
                         )
 
                         wd_header = updated_wcs_cutout_header(
@@ -1804,6 +2054,10 @@ def cutout_main(options=None):
                 cutout_hdul.writeto(cutout_name, overwrite=True)
             else:
                 print(
-                    f"WARNING: not implemente yet [{data_structure['type']}]!",
+                    f"WARNING: not implemented [{data_structure['type']}]!",
                     file=sys.stderr
                 )
+
+
+if __name__ == '__main__':
+    smoothing_main()

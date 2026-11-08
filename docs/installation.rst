@@ -32,13 +32,8 @@ while this command will install only the dependencies needed to run the command 
 This is a list of the name of all optional dependency groups
 
   * ``animations`` : dependencies for generatig animations with ``specex-cube-anim``
-  * ``redrock`` : dependencies for estimating redshifts with ``rrspecex`` trough *Redrock*  [:ref:`1<references_installation>`]
   * ``regions`` : dependencies to enable the handling of regionfiles in ``specex``
-  * ``all``: install all the previous dependencies4
-
-.. attention::
-
-    The dependency group ``redrock`` install only the dependencies needed to run ``rrspecex`` and not *Redrock* itself. It is your responsability to correctly install *Redrock*
+  * ``all``: install all the optional dependencies
 
 
 Installing from GitHub
@@ -58,20 +53,3 @@ Also in this case, you can specify which group of dependencies you want to insta
 
     pip install .[all]
 
-The git repository also includes a simple script that will help you to install *Redrock* in a virtual environment
-
-.. code-block:: bash
-
-    chmod +x redrock_venv_setup.sh
-    ./redrock_venv_setup.sh
-    . ./redrock_venv/bin/activate
-    pip install .[redrock]
-
-even if it is better if **YOU** install it following the installation instructions on its `GitHub page <https://github.com/desihub/redrock>`_.
-
-.. _references_installation:
-
-References
-----------
-
-#. `Redrock <https://github.com/desihub/redrock>`_

@@ -5,13 +5,28 @@ SPECEX - SPECtra EXtractor.
 
 This module provides utility to identify sources directly from datacubes.
 
-Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 from __future__ import absolute_import, division, print_function
 
 import os
 import sys
 import argparse
+from typing import Optional
+
 import numpy as np
 import multiprocessing as mp
 
@@ -22,7 +37,7 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.convolution import Gaussian2DKernel, convolve
 
-from scipy.ndimage.morphology import grey_dilation  # , grey_erosion
+from scipy.ndimage import grey_dilation  # , grey_erosion
 
 from specex.utils import get_pbar
 from specex.utils import get_spectrum_snr, get_spectrum_snr_emission
@@ -291,11 +306,12 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
     """
     cube_mask = np.isnan(data_hdu.data)
     if mask_hdu is not None:
-        cube_mask &= mask_hdu.data != 0 if inverse_mask else mask_hdu.data == 0
+        dq_mask = mask_hdu.data == 0 if inverse_mask else mask_hdu.data != 0
+        cube_mask |= dq_mask
 
     if var_hdu is not None:
         cube_var = np.ma.array(
-            var_hdu.data, mask=cube_mask & np.isnan(var_hdu.data)
+            var_hdu.data, mask=cube_mask | np.isnan(var_hdu.data)
         )
     else:
         cube_var = None
@@ -456,23 +472,28 @@ def get_dilation_maxima(image, box_sizes=[3, 5], threshold=0,
     return tbl
 
 
-def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
+def get_spectrum(
+    flux_spaxels: np.ndarray,
+    var_spaxels: Optional[np.ndarray] = None,
+    weights: Optional[int | float | np.ndarray] = None,
+    average: bool = False
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Get spectrum from a list of spaxels.
 
     Parameters
     ----------
     flux_spaxels : 2D numpy.ndarray
-        The set of spectralspaxels used to compute the spectrum, in the form of
-        a 2D numpy array where the first axis represents the wavelength and the
-        second axis moves trough the different spaxels.
+        The set of spectral spaxels used to compute the spectrum, in the form
+        of a 2D numpy array where the first axis represents the wavelength and
+        the second axis moves through the different spaxels.
     var_spaxels : 2D numpy.ndarray, optional
-        Same format of flux_spaxels but for variace data. The default is None.
+        Same format of flux_spaxels but for variance data. The default is None.
         If none, the variance is computed using the spectra lspaxels.
     weights : 1D numpy.ndarray or list of float, optional
         Optional weights for each spaxel. The default is None.
     average : TYPE, optional
-        Wether to average the spaxels or to sum them. The default is False.
+        Weather to average the spaxels or to sum them. The default is False.
 
     Returns
     -------
@@ -496,27 +517,31 @@ def get_spectrum(flux_spaxels, var_spaxels=None, weights=None, average=False):
         )
 
     if weights is None:
-        spatial_w = 1
+        spatial_w: float | int | np.ma.MaskedArray = 1.0
     else:
-        if not isinstance(var_spaxels, np.ma.MaskedArray):
+        if not isinstance(weights, np.ma.MaskedArray):
             spatial_w = np.ma.array(weights, mask=~np.isfinite(weights))
         else:
             spatial_w = weights
-        spatial_w /= np.ma.max(spatial_w)
+        w_mean = np.ma.mean(spatial_w)
+        if w_mean > 0:
+            spatial_w /= w_mean
+        else:
+            spatial_w = np.ones_like(spatial_w)
 
     # Summing spaxels weighted by spatial_w on the spatial axis
-
-    w_sum = np.ma.sum(spatial_w)
     spectrum = np.ma.sum(flux_spaxels * spatial_w, axis=-1)
-    spectrum /= w_sum
 
     if var_spaxels is None:
-        spectrum_var = np.ma.var(flux_spaxels * spatial_w, axis=-1)
+        # Without an input variance cube, estimate the variance of the weighted sum
+        # from spatial dispersion across spaxels (scaled by sum of squared weights)
+        spatial_var = np.ma.var(flux_spaxels, axis=-1)
+        w_sum_sq = np.ma.sum(spatial_w ** 2)
+        spectrum_var = spatial_var * w_sum_sq
     else:
-        spectrum_var = np.ma.sum(var_spaxels * spatial_w, axis=-1)
-    spectrum_var /= w_sum
+        spectrum_var = np.ma.sum(var_spaxels * (spatial_w ** 2), axis=-1)
 
-    return spectrum, spectrum_var
+    return spectrum.filled(np.nan), spectrum_var.filled(np.nan)
 
 
 def source_clustering(sources_table, data_hdu, var_hdu=None, mask_hdu=None,
@@ -525,7 +550,7 @@ def source_clustering(sources_table, data_hdu, var_hdu=None, mask_hdu=None,
 
     def has_a_neighbour(arr, y, x):
         val = (arr[y+1, x] != -1) or (arr[y-1, x] != -1)
-        val = val or (arr[y, x-1] != -1) or (arr[y, x-1] != -1)
+        val = val or (arr[y, x-1] != -1) or (arr[y, x+1] != -1)
         val = val or (arr[y-1, x-1] != -1) or (arr[y+1, x+1] != -1)
         val = val or (arr[y-1, x+1] != -1) or (arr[y+1, x-1] != -1)
         return val
@@ -724,11 +749,12 @@ def detect_from_cube(options=None):
 
     if args.check_images:
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        ax.imsho()
+        ax.imshow(snr_map_em, origin='lower')
         fig.savefig(
-            os.path.join(check_images_outdir, f"{basename}_snr_map_em.fits")
+            os.path.join(check_images_outdir, f"{basename}_snr_map_em.png")
         )
         plt.tight_layout()
+        plt.close(fig)
 
     print("\nComputing SNR of the continuum...", file=sys.stderr)
     snr_map_ct = get_snr_spaxels(

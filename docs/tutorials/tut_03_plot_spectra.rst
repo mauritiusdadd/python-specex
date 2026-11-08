@@ -25,7 +25,7 @@ that generates plots which will be like the following one
   :width: 100%
   :alt: The plot of a spectrum generated using *specex-plot* with a cutout from the whitelight image.
 
-If a redshift catalog is available, it can be used to overlay on the spectrum plot the most common absorption/emission lines and can be set using ``--zcat``. If this catalog has not been generate by *rrspecex*, the name of the columns containing the IDs of the objects and their redshift can be specified using the parameters ``--key-id`` and ``--key-z``, for example
+If a redshift catalog is available, it can be used to overlay on the spectrum plot the most common absorption/emission lines and can be set using ``--zcat``. The name of the columns containing the IDs of the objects and their redshift can be specified using the parameters ``--key-id`` and ``--key-z``, for example
 
 .. code-block:: bash
 

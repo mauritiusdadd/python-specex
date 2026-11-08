@@ -5,9 +5,22 @@ SPECEX - SPECtra EXtractor.
 
 Extract spectra from spectral data cubes.
 
-Copyright (C) 2022-2023  Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (C) 2022-2024  Maurizio D'Addona <mauritiusdadd@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-from __future__ import  annotations
+from __future__ import annotations
 
 import os
 import sys
@@ -20,7 +33,6 @@ from typing import Optional, Any
 from collections.abc import Iterable
 
 import numpy as np
-import multiprocessing
 
 from scipy.signal import savgol_filter  # type: ignore
 from astropy import wcs  # type: ignore
@@ -34,12 +46,14 @@ from astropy import units
 import matplotlib.pyplot as plt
 
 from specex.utils import (
-    plot_zfit_check, get_log_img, stack, plot_scandata,
+    get_log_img, stack,
     get_spectrum_snr, get_spectrum_snr_emission, parse_regionfile,
     HAS_REGION, HAS_REPROJECT, simple_pbar_callback, do_reproject
 )
+
+from specex import __version__ as sp_ver
 from specex.sources import get_spectrum
-from specex.cube import get_hdu, SpectralCube
+from specex.cube import get_hdu, SpectralCube, get_gray_cutout
 from specex.exceptions import exception_handler
 
 from specex.cube import (
@@ -51,15 +65,7 @@ from specex.cube import (
 )
 
 try:
-    from specex.rrspecex import rrspecex, get_templates
-except Exception:
-    HAS_RR = False
-else:
-    HAS_RR = True
-
-try:
-    from IPython.core import ultratb
-    from IPython import embed
+    import IPython  # noqa: F401
 except Exception:
     HAS_IPYTHON = False
 else:
@@ -73,7 +79,7 @@ SPECTRA_WEIGHTING_MODES = {
 
 if HAS_REPROJECT:
     SPECTRA_WEIGHTING_MODES['<file url>'] = 'weighting using an external image'
-    
+
 
 def __argshandler(options: Optional[list[str]] = None) -> Any:
     """
@@ -86,8 +92,7 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
         the python documentation of the argparse module.
     """
     parser = argparse.ArgumentParser(
-        description='Extract spectra from a datacube and optionally compute '
-        'the redshift using rrspecex backend.'
+        description='Extract spectra from a datacube.'
     )
     parser.add_argument(
         'input_cube', metavar='SPEC_CUBE', type=str,
@@ -97,17 +102,21 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
 
     parser.add_argument(
         '--mode', metavar='WORKING_MODE', type=str, default='auto',
+        choices=[
+            'auto', 'kron_ellipse', 'kron_circular', 'kron_circle',
+            'circular_aperture', 'fixed-aperture'
+        ],
         help='Set the working mode of the program. Can be one of the following'
-        ' modes: "auto", "kron_ellipse", "kron_circle", "circular_aperture". '
-        'When using "kron_ellipse" mode, the input catalog must contain the '
+        ' modes: "auto", "kron_ellipse", "kron_circular", "circular_aperture".'
+        ' When using "kron_ellipse" mode, the input catalog must contain the '
         'column for objetcs kron radius, semi-major and semi-minor axes and '
         'for the rotation angle of the objects. In this mode all the pixels '
         'within this ellipse will be added together to compute the spectra. '
         '"kron_circular" mode requires the same parameters of the previous '
         'mode, but a circular aperture is used instead of an ellipse and the '
         'radius of this aperture is the circularized kron radius (i.e. the '
-        'kron darius multiplied by the axis ratio q = minor-axis/major-axis. '
-        'In circular_aperture mode, no morphological parameters are required '
+        'kron radius multiplied by the axis ratio q = minor-axis/major-axis).'
+        ' In circular_aperture mode, no morphological parameters are required '
         'to be in the input catalog and the aperture size is set using the '
         'input parameter --aperture-size. In "auto" mode, the best working '
         'mode is selected based on the parameters available in the input '
@@ -195,7 +204,7 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
     )
 
     parser.add_argument(
-        '--aperture-size', metavar='APERTURE', type=str, default='0.8mas',
+        '--aperture-size', metavar='APERTURE', type=str, default='0.8arcsec',
         help='Set the diameter of a fixed circula aperture used in the '
         '"fixed-aperture" mode. The pixels within this aperture will be '
         'used for spectra extraction. Units can be specified using the names '
@@ -220,7 +229,7 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
         ]) +
         ". Note that in order to use external images as weightmap, the python "
         "package 'reproject' is needed. (Is reproject installed: " +
-        "YES" if HAS_REPROJECT else "NO" +
+        ("YES" if HAS_REPROJECT else "NO") +
         ")."
     )
 
@@ -343,38 +352,6 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
         'enabled thorugh the appropriate parameter).'
     )
 
-    if HAS_RR:
-        rr_help_note = ''
-    else:
-        rr_help_note = ' (WARNING: this option is unavailable since redrock' \
-                       ' seems not to be installed).'
-
-    parser.add_argument(
-        "--zbest", type=str, default=None, required=False,
-        help='Whether to find redshift from the spectra. ' + rr_help_note
-    )
-
-    parser.add_argument(
-        "--priors", type=str, default=None, required=False,
-        help='optional redshift prior file. ' + rr_help_note
-    )
-
-    parser.add_argument(
-        "--nminima", type=int, default=3, required=False,
-        help="the number of redshift minima to search. " + rr_help_note
-    )
-
-    parser.add_argument(
-        "--mp", type=int, default=0, required=False,
-        help="if not using MPI, the number of multiprocessing processes to use"
-        " (defaults to half of the hardware threads). " + rr_help_note
-    )
-
-    parser.add_argument(
-        "-t", "--templates", type=str, default=None, required=False,
-        help="template file or directory. " + rr_help_note
-    )
-
     parser.add_argument(
         "--debug", action='store_true', default=False,
         help="Enable some debug otupout on plots and on the console."
@@ -385,9 +362,6 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
     if args.cutouts_image and not os.path.exists(args.cutouts_image):
         print(f"The file {args.cutouts_image} does not exist!")
         sys.exit(1)
-
-    if args.mp == 0:
-        args.mp = int(multiprocessing.cpu_count() / 4)
 
     return args
 
@@ -472,7 +446,7 @@ def get_spplate_fits(cube_header, spec_header, obj_ids, spec_data,
         # of the datacube
         crpix = spec_header["CRPIX3"] - 1
         crval = spec_header["CRVAL3"]
-        cd1 = spec_header["CD3_3"]
+        cd1 = spec_header.get("CD3_3", spec_header.get("CDELT3", 1.0))
 
         w_end = spec_data.shape[1] - crpix
 
@@ -483,8 +457,8 @@ def get_spplate_fits(cube_header, spec_header, obj_ids, spec_data,
         spec_hdu.header['COEFF1'] = coeff1
 
     spec_hdu.header["CRVAL1"] = spec_header["CRVAL3"]
-    spec_hdu.header["CD1_1"] = spec_header["CD3_3"]
-    spec_hdu.header["CDELT1"] = spec_header["CD3_3"]
+    spec_hdu.header["CD1_1"] = spec_header.get("CD3_3", spec_header.get("CDELT3", 1.0))
+    spec_hdu.header["CDELT1"] = spec_header.get("CD3_3", spec_header.get("CDELT3", 1.0))
     spec_hdu.header["CRPIX1"] = spec_header["CRPIX3"]
     spec_hdu.header['BUNIT'] = spec_header['BUNIT']
     spec_hdu.header["CUNIT1"] = spec_header["CUNIT3"]
@@ -512,8 +486,16 @@ def get_spplate_fits(cube_header, spec_header, obj_ids, spec_data,
     return hdul
 
 
-def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
-                      spec_hdu_header, obj_spectrum_var=None, no_nans=False):
+def get_spsingle_fits(
+    main_header,
+    spec_wcs_header,
+    obj_spectrum,
+    spec_hdu_header,
+    obj_spectrum_var=None,
+    no_nans=False,
+    cutout_data=None,
+    cutout_wcs=None
+):
     """
     Generate a fits containing the spectral data.
 
@@ -565,14 +547,20 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
             )
 
     spec_header = fits.Header()
-    spec_header['BUNIT'] = spec_hdu_header['BUNIT']
-    spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
-    spec_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
-    spec_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
-    spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
-    spec_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
-    spec_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
-    spec_header["CDELT1"] = spec_hdu_header["CD3_3"]
+    if 'BUNIT' in spec_hdu_header:
+        spec_header['BUNIT'] = spec_hdu_header['BUNIT']
+    if 'OBJECT' in spec_hdu_header:
+        spec_header["OBJECT"] = spec_hdu_header["OBJECT"]
+    if 'CUNIT3' in spec_hdu_header:
+        spec_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
+    if 'CTYPE3' in spec_hdu_header:
+        spec_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
+    if 'CRPIX3' in spec_hdu_header:
+        spec_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
+    if 'CRVAL3' in spec_hdu_header:
+        spec_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
+    cdelt3 = spec_hdu_header.get('CD3_3', spec_hdu_header.get('CDELT3', 1.0))
+    spec_header["CDELT1"] = cdelt3
 
     nanmask = np.isnan(obj_spectrum)
 
@@ -592,15 +580,19 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
 
     if obj_spectrum_var is not None:
         var_header = fits.Header()
-        var_header['BUNIT'] = spec_hdu_header['BUNIT']
-        var_header["OBJECT"] = spec_hdu_header["OBJECT"]
-        var_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
-        var_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
-        var_header["OBJECT"] = spec_hdu_header["OBJECT"]
-        var_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
-        var_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
-        var_header["CDELT1"] = spec_hdu_header["CD3_3"]
-        var_header["OBJECT"] = spec_hdu_header["OBJECT"]
+        if 'BUNIT' in spec_hdu_header:
+            var_header['BUNIT'] = spec_hdu_header['BUNIT']
+        if 'OBJECT' in spec_hdu_header:
+            var_header["OBJECT"] = spec_hdu_header["OBJECT"]
+        if 'CUNIT3' in spec_hdu_header:
+            var_header["CUNIT1"] = spec_hdu_header["CUNIT3"]
+        if 'CTYPE3' in spec_hdu_header:
+            var_header["CTYPE1"] = spec_hdu_header["CTYPE3"]
+        if 'CRPIX3' in spec_hdu_header:
+            var_header["CRPIX1"] = spec_hdu_header["CRPIX3"]
+        if 'CRVAL3' in spec_hdu_header:
+            var_header["CRVAL1"] = spec_hdu_header["CRVAL3"]
+        var_header["CDELT1"] = cdelt3
         hdu_list.append(
             fits.ImageHDU(
                 data=obj_spectrum_var,
@@ -616,17 +608,29 @@ def get_spsingle_fits(main_header, spec_wcs_header, obj_spectrum,
         )
     )
 
+    if cutout_data is not None:
+        cutout_header = fits.Header()
+        if cutout_wcs is not None:
+            cutout_header = cutout_wcs.to_header()
+        hdu_list.append(
+            fits.ImageHDU(
+                data=cutout_data,
+                header=cutout_header,
+                name='CUTOUT'
+            )
+        )
+
     hdul = fits.HDUList(hdu_list)
     return hdul
 
 
 def load_specex_file(
     filename: str | os.PathLike[str],
-    spec_hdu_index: Optional[int]=None,
-    var_hdu_index: Optional[int]=None,
-     wd_hdu_index: Optional[int]=None,
-    mask_hdu_index: Optional[int]=None,
-    smoothing: int=0
+    spec_hdu_index: Optional[int] = None,
+    var_hdu_index: Optional[int] = None,
+    wd_hdu_index: Optional[int] = None,
+    mask_hdu_index: Optional[int] = None,
+    smoothing: int = 0
 ):
     """
     Load a spectrum file generated by specex (or any compatible file).
@@ -688,6 +692,8 @@ def load_specex_file(
                     continue
                 else:
                     break
+            if spec_id is not None:
+                break
 
         main_header = get_hdu(
             hdul,
@@ -830,9 +836,9 @@ def load_specex_file(
 
 
 def speclist2ez(
-        spec_files: Iterable[str],
-        spec_hdu_name: str='SPECTRUM',
-        var_hdu_name:str='VARIANCE'
+    spec_files: Iterable[str],
+    spec_hdu_name: str = 'SPECTRUM',
+    var_hdu_name: str = 'VARIANCE'
 ):
     """
     Generate a list of spectra that can be imported into pandora EZ.
@@ -892,7 +898,7 @@ def specex(options: Optional[list[str]] = None) -> None:
             sys.exit(1)
 
         if args.cat_format is not None:
-            sources = Table.read(catalog_path, format=args.cat_format)
+            sources: Table = Table.read(catalog_path, format=args.cat_format)
         else:
             try:
                 sources = Table.read(catalog_path)
@@ -926,12 +932,18 @@ def specex(options: Optional[list[str]] = None) -> None:
             sys.exit(1)
 
         sources = parse_regionfile(
-            regionfile_path,
+            str(regionfile_path),
             key_ra=args.key_ra,
             key_dec=args.key_dec,
             key_id='ID' if args.key_id is None else args.key_id,
             file_format=args.cat_format,
         )
+
+        if sources is None:
+            logging.error(
+                "Cannot load region file data!",
+            )
+            sys.exit(1)
         coord_frame = 'icrs'
         basename = regionfile_path.stem
         pixelscale = 1.0 * units.arcsec
@@ -969,10 +981,15 @@ def specex(options: Optional[list[str]] = None) -> None:
         )
         sys.exit(1)
 
-    with SpectralCube.open(cube_path) as my_cube:
+    with (SpectralCube.open(
+        cube_path,
+        spec_hdu_index=args.spec_hdu,
+        var_hdu_index=args.var_hdu,
+        mask_hdu_index=args.mask_hdu
+    ) as my_cube):
         if my_cube.spec_hdu is None:
             logging.error(
-                f"Input cube has no spectral HDU! "
+                "Input cube has no spectral HDU!"
             )
             sys.exit(1)
 
@@ -1085,9 +1102,10 @@ def specex(options: Optional[list[str]] = None) -> None:
 
         extracted_data = np.zeros((img_height, img_width))
 
-        # Chech if there is a footprint mask in the cube
+        # Check if there is a footprint mask in the cube
         if my_cube.mask_hdu is not None:
-            cube_footprint = my_cube.mask_hdu.data.prod(axis=0) == 0
+            # Valid pixels have 0 in standard DQ mask, or 1 in inverted mask
+            cube_footprint = np.any(my_cube.mask_hdu.data == 0, axis=0)
             if args.invert_mask:
                 cube_footprint = ~cube_footprint
         else:
@@ -1111,36 +1129,37 @@ def specex(options: Optional[list[str]] = None) -> None:
                     mode = 'kron_ellipse'
                 else:
                     mode = 'circular_aperture'
+            elif args.mode == 'fixed-aperture':
+                mode = 'circular_aperture'
             else:
                 mode = args.mode
 
         print(f"Extracting spectra with strategy '{mode}'", file=sys.stderr)
 
+        cutout_img_data = None
+        cutout_img_wcs = None
+        if args.cutouts_image is not None:
+            with fits.open(args.cutouts_image) as cut_hdul:
+                for hdu in cut_hdul:
+                    if hdu.data is not None and len(hdu.data.shape) == 2:
+                        cutout_img_data = hdu.data.copy()
+                        cutout_img_wcs = wcs.WCS(hdu.header)
+                        break
+        if cutout_img_data is None:
+            cutout_img_data = stack(my_cube.spec_hdu.data, average=True)
+            cutout_img_wcs = celestial_wcs
+
+        cutout_box_size = args.cutouts_size * units.arcsec
+
         n_objects = len(sources)
         if args.nspectra:
-            n_objects = int(args.nspectra)
+            n_objects = min(int(args.nspectra), n_objects)
 
         out_specfiles = []
         specex_apertures = {}  # these values are in physical units (arcsecs)
-        specex_anuli = {}  # these values are in physical units (arcsecs)
         source_ids = []
 
-        valid_sources_mask = np.zeros(len(sources), dtype=bool)
-
-        # Check wheter to use anuli to compute background
-        anulus_str = args.anulus_size.lower().strip().split(',')
-
-        anulus_r_in = None
-        anulus_r_out = None
-        if anulus_str and len(anulus_str) == 2:
-            try:
-                anulus_r1 = float(anulus_str[0])
-                anulus_r2 = float(anulus_str[1])
-            except ValueError:
-                pass
-            else:
-                anulus_r_in = min(anulus_r1, anulus_r2)
-                anulus_r_out = max(anulus_r1, anulus_r2)
+        valid_sources_mask = np.zeros(n_objects, dtype=bool)
 
         if args.debug:
             print(
@@ -1148,6 +1167,12 @@ def specex(options: Optional[list[str]] = None) -> None:
                 "input catalog/regionfile...",
                 file=sys.stderr
             )
+
+        try:
+            if key_id is not None:
+                sources.sort(key_id)
+        except KeyError:
+            pass
 
         for i, source in enumerate(sources[:n_objects]):
             simple_pbar_callback(i + 1, n_objects)
@@ -1167,7 +1192,13 @@ def specex(options: Optional[list[str]] = None) -> None:
                 anulus_mask = None
                 pix_reg = source['region'].to_pixel(celestial_wcs)
                 reg_mask = pix_reg.to_mask()
-                mask = reg_mask.to_image((img_height, img_width)) > 0
+                mask = reg_mask.to_image((img_height, img_width))
+                if mask is None:
+                    logging.warning(
+                        f"object {obj_id} is outside the cube, skipping..."
+                    )
+                    continue
+                mask = mask > 0
                 specex_apertures[obj_id] = (
                     1 * pixelscale,
                     1 * pixelscale,
@@ -1177,31 +1208,43 @@ def specex(options: Optional[list[str]] = None) -> None:
             elif mode == 'kron_ellipse':
                 ang = np.deg2rad(source[args.key_theta])
 
+                # Scale semi-axes from catalog pixelscale to cube pixel scales
+                a_pix_x = (source[args.key_a] * pixelscale).to(units.arcsec) / cube_pixelscale_x
+                b_pix_y = (source[args.key_b] * pixelscale).to(units.arcsec) / cube_pixelscale_y
+
                 x_over_a = xx_tr*np.cos(ang) + yy_tr*np.sin(ang)
-                x_over_a /= source[args.key_a]
+                x_over_a /= a_pix_x.value
 
                 y_over_b = xx_tr*np.sin(ang) - yy_tr*np.cos(ang)
-                y_over_b /= source[args.key_b]
+                y_over_b /= b_pix_y.value
 
                 specex_apertures[obj_id] = (
-                    source[args.key_a] * pixelscale,
-                    source[args.key_b] * pixelscale,
-                    source[args.key_theta] * units.rad
+                    2 * source[args.key_a] * source[args.key_kron] * pixelscale,
+                    2 * source[args.key_b] * source[args.key_kron] * pixelscale,
+                    source[args.key_theta] * units.deg
                 )
 
-                mask = (x_over_a**2 + y_over_b**2) < (1.0/source[args.key_kron])
+                mask = (
+                    (x_over_a**2 + y_over_b**2) <
+                    (source[args.key_kron] ** 2)
+                )
 
-            elif mode == 'kron_circular':
-                kron_circular = source[args.key_kron] * source[args.key_b]
-                kron_circular /= source[args.key_a]
+            elif mode in ('kron_circular', 'kron_circle'):
+                kron_circ_rad = (
+                    source[args.key_kron] *
+                    np.sqrt(source[args.key_a] * source[args.key_b]) *
+                    pixelscale
+                )
 
                 specex_apertures[obj_id] = (
-                    kron_circular * pixelscale,
-                    kron_circular * pixelscale,
+                    2 * kron_circ_rad,
+                    2 * kron_circ_rad,
                     0 * units.rad
                 )
 
-                mask = (xx_tr**2 + yy_tr**2) < (kron_circular ** 2)
+                xx_scaled = xx_tr * cube_pixelscale_x
+                yy_scaled = yy_tr * cube_pixelscale_y
+                mask = (xx_scaled**2 + yy_scaled**2) < (kron_circ_rad.to(units.arcsec) ** 2)
 
             elif mode == 'circular_aperture':
                 aperture_size = units.Quantity(args.aperture_size)
@@ -1211,8 +1254,8 @@ def specex(options: Optional[list[str]] = None) -> None:
 
                 try:
                     specex_apertures[obj_id] = (
-                        aperture_radius,
-                        aperture_radius,
+                        aperture_size if str(aperture_size.unit.physical_type) != 'dimensionless' else aperture_size * units.mas,
+                        aperture_size if str(aperture_size.unit.physical_type) != 'dimensionless' else aperture_size * units.mas,
                         0 * units.rad
                     )
                 except TypeError:
@@ -1225,23 +1268,6 @@ def specex(options: Optional[list[str]] = None) -> None:
                 yy_scaled = yy_tr * cube_pixelscale_y
 
                 mask = (xx_scaled**2 + yy_scaled**2) < (aperture_radius)**2
-
-                # TODO: fix here
-                """
-                if anulus_r_in and anulus_r_out:
-                    specex_anuli[obj_id] = (
-                        anulus_r_in,
-                        anulus_r_out
-                    )
-
-                    anulus_mask_out = rad_coords <= anulus_r_out / cube_pixelscale
-                    anulus_mask_in = rad_coords > anulus_r_in / cube_pixelscale
-
-                    anulus_mask = anulus_mask_in & anulus_mask_out
-                else:
-                    specex_anuli[obj_id] = None
-                    anulus_mask = None
-                """
 
             if cube_footprint is not None:
                 mask &= cube_footprint
@@ -1266,7 +1292,12 @@ def specex(options: Optional[list[str]] = None) -> None:
                         dtype='float32'
                     )
                     weights = np.ma.mean(w_arr, axis=0)
-                    weights -= np.ma.min(weights)
+                    w_min = np.ma.min(weights)
+                    w_max = np.ma.max(weights)
+                    if w_max > w_min:
+                        weights -= w_min
+                    else:
+                        weights = np.ones_like(weights)
                 elif args.weighting.lower() == 'log-whitelight':
                     w_arr = np.ma.array(
                         my_cube.spec_hdu.data[:, mask],
@@ -1274,11 +1305,20 @@ def specex(options: Optional[list[str]] = None) -> None:
                         dtype='float32'
                     )
                     weights = np.ma.mean(w_arr, axis=0)
-                    weights -= np.ma.min(weights)
-                    weights = np.ma.log10(1 + weights)
+                    w_min = np.ma.min(weights)
+                    w_max = np.ma.max(weights)
+                    if w_max > w_min:
+                        weights = np.ma.log10(1 + (weights - w_min))
+                    else:
+                        weights = np.ones_like(weights)
                 elif weight_img is not None:
-                    weights = weight_img[mask]
-                    weights -= np.ma.min(weights)
+                    weights = np.ma.masked_invalid(weight_img[mask])
+                    w_min = np.ma.min(weights)
+                    w_max = np.ma.max(weights)
+                    if w_max > w_min:
+                        weights -= w_min
+                    else:
+                        weights = np.ones_like(weights)
 
                 obj_extraction_mask[mask] = weights
 
@@ -1292,26 +1332,20 @@ def specex(options: Optional[list[str]] = None) -> None:
                 weights=weights
             )
 
-            obj_spectrum = obj_spectrum.filled(np.nan)
-            obj_spectrum_var = obj_spectrum_var.filled(np.nan)
+            valid_pixels = np.isfinite(obj_spectrum)
+            valid_pixels &= np.isfinite(obj_spectrum_var)
+            obj_spectrum[~valid_pixels] = np.nan
+            obj_spectrum_var[~valid_pixels] = np.nan
 
-            if np.sum(
-                np.isnan(obj_spectrum_var[~np.isnan(obj_spectrum)])
-            ) != 0:
-                logging.warning(
-                    f"\nWARNING: object {obj_id}  is weird! Skipping...\n"
-                )
-                continue
-
-            if np.sum(~np.isnan(obj_spectrum)) < 100:
+            if np.sum(np.isfinite(obj_spectrum)) / len(obj_spectrum) < 0.5:
                 logging.warning(
                     f"WARNING: object {obj_id} has invalid data..."
                 )
 
             if anulus_mask is not None:
                 # TODO: fix here!
-                # Here we suppose that background vaies very slowly within
-                # object aperture. In this case we can copute the mean
+                # Here we suppose that background varies very slowly within
+                # object aperture. In this case we can compute the mean
                 # background and subtract it total contribution within the
                 # aperture.
                 bkg_spectrum = np.median(
@@ -1320,7 +1354,7 @@ def specex(options: Optional[list[str]] = None) -> None:
                 smoothed_bkg_spectrum = savgol_filter(bkg_spectrum, 51, 11)
                 obj_spectrum -= smoothed_bkg_spectrum*np.sum(mask)
 
-            if np.sum(~np.isnan(obj_spectrum)) == 0:
+            if np.sum(np.isfinite(obj_spectrum)) == 0:
                 if args.debug:
                     logging.warning(
                         f"WARNING: object {obj_id} has no spectral data, "
@@ -1349,7 +1383,7 @@ def specex(options: Optional[list[str]] = None) -> None:
             if args.out_name is None:
                 outname = f"spec_{obj_id}.fits"
             else:
-                outname = args.out_name.replace('%d', obj_id)
+                outname = args.out_name.replace('%d', str(obj_id))
                 try:
                     outname = outname.format(**source)
                 except KeyError as exc:
@@ -1377,7 +1411,7 @@ def specex(options: Optional[list[str]] = None) -> None:
                 'NPIX': (
                     np.sum(mask), 'Number of pixels used for this spectra'
                 ),
-                'HISTORY': f'Extracted on {str(my_time)}',
+                'HISTORY': f'Extracted with specex {sp_ver} on {str(my_time)}',
                 'ID': obj_id,
                 'SN': (
                     sn_spec, "SNR of the total spectrum"
@@ -1397,10 +1431,24 @@ def specex(options: Optional[list[str]] = None) -> None:
             # Copy the spectral part of the WCS into the new FITS
             spec_wcs_header = spectral_wcs.to_header()
 
+            obj_cutout_dict = None
+            try:
+                obj_cutout_dict = get_gray_cutout(
+                    cutout_img_data,
+                    center=SkyCoord(obj_ra, obj_dec, unit='deg', frame=coord_frame),
+                    size=cutout_box_size,
+                    data_wcs=cutout_img_wcs
+                )
+            except Exception as cut_err:
+                if args.debug:
+                    logging.warning(f"Could not extract cutout for {obj_id}: {cut_err}")
+
             hdul = get_spsingle_fits(
                 main_header, spec_wcs_header,
                 obj_spectrum, my_cube.spec_hdu.header,
-                obj_spectrum_var, no_nans=args.no_nans
+                obj_spectrum_var, no_nans=args.no_nans,
+                cutout_data=obj_cutout_dict['data'] if obj_cutout_dict else None,
+                cutout_wcs=obj_cutout_dict['wcs'] if obj_cutout_dict else None
             )
 
             out_file_name = os.path.join(outdir, outname)
@@ -1421,10 +1469,11 @@ def specex(options: Optional[list[str]] = None) -> None:
                 extracted_data -= anulus_mask
 
         # Discard all invalid sources
-        sources = sources[valid_sources_mask]
+        sources = sources[:n_objects][valid_sources_mask]
         source_ids = np.array(source_ids)
 
-        with open("spec_list_pandora_ez.txt", 'w') as f:
+        ez_list_file = os.path.join(outdir, "spec_list_pandora_ez.txt")
+        with open(ez_list_file, 'w') as f:
             f.write(speclist2ez(out_specfiles))
 
         if args.debug:
@@ -1441,101 +1490,38 @@ def specex(options: Optional[list[str]] = None) -> None:
         if not os.path.isdir(check_images_outdir):
             os.mkdir(check_images_outdir)
 
-        # NOTE: for some weird reason redrock hangs if any figure has been
-        #       created using matplotlib. Do all the plottings only after
-        #       redrock has finished!
-        if args.zbest:
-            rrspecex_options = [
-                '--zbest', args.zbest,
-                '--checkimg-outdir', check_images_outdir
-            ]
-
-            if args.priors is not None:
-                rrspecex_options += ['--priors', args.priors]
-
-            if args.nminima is not None:
-                rrspecex_options += ['--nminima', f'{args.nminima:d}']
-
-            if args.mp is not None:
-                rrspecex_options += ['--mp', f'{args.mp:d}']
-
-            if args.templates is not None:
-                rrspecex_options += ['--templates', f'{args.templates}']
-
-            rrspecex_options += out_specfiles
-            targets, zfit, scandata = rrspecex(options=rrspecex_options)
-
-            if args.debug or not args.cutouts_image:
-                stacked_cube = stack(my_cube.spec_hdu.data)
-
-            if args.debug:
-                fig = plt.figure(figsize=(10, 10))
-                ax = plt.subplot(projection=celestial_wcs)
-                logimg, cvmin, cvmax = get_log_img(stacked_cube)
-                ax.imshow(
-                    logimg,
-                    origin='lower',
-                    vmin=cvmin,
-                    vmax=cvmax,
-                    cmap='jet'
-                )
-                fig.savefig("stacked_cube.png")
-                plt.tight_layout()
-                plt.close(fig)
-
-            if args.debug:
-                plot_templates = get_templates(templates=args.templates)
-            else:
-                plot_templates = None
-
-            print("", file=sys.stderr)
-
-            # Creating directory to save Chi-2 plots
-            if args.debug:
-                x2_plots_out_dir = os.path.join(
-                    check_images_outdir,
-                    "X2_plots"
-                )
-                if not os.path.isdir(x2_plots_out_dir):
-                    os.mkdir(x2_plots_out_dir)
-
-            for i, target in enumerate(targets):
-                logging.info("Generating previews...")
-                simple_pbar_callback(i, n_objects-1)
-
-                fig, axs = plot_zfit_check(
-                    target,
-                    zfit,
-                    plot_template=plot_templates,
-                    wavelengt_units=my_cube.spec_hdu.header['CUNIT3'],
-                    flux_units=my_cube.spec_hdu.header['BUNIT'],
-                )
-
-                figname = f'spectrum_{target.spec_id}.png'
-                figname = os.path.join(check_images_outdir, figname)
-                fig.savefig(figname, dpi=150)
-                plt.close(fig)
-
-                if args.debug:
-                    figname = f'scandata_{target.spec_id}.png'
-                    figname = os.path.join(x2_plots_out_dir, figname)
-                    fig, axs = plot_scandata(target, scandata)
-                    fig.savefig(figname, dpi=150)
-                    plt.close(fig)
+        if args.debug:
+            stacked_cube = stack(my_cube.spec_hdu.data)
+            fig = plt.figure(figsize=(10, 10))
+            ax = plt.subplot(projection=celestial_wcs)
+            logimg, cvmin, cvmax = get_log_img(stacked_cube)
+            ax.imshow(
+                logimg,
+                origin='lower',
+                vmin=cvmin,
+                vmax=cvmax,
+                cmap='jet'
+            )
+            stacked_cube_png = os.path.join(check_images_outdir, "stacked_cube.png")
+            fig.savefig(stacked_cube_png)
+            plt.tight_layout()
+            plt.close(fig)
 
         specex_map = fits.PrimaryHDU(
             data=extracted_data,
             header=celestial_wcs.to_header()
         )
+        extmap_path = os.path.join(outdir, f"{my_cube.filename.stem}_extmap.fits")
         specex_map.writeto(
-            f"{my_cube.getBaseName()}_extmap.fits",
+            extmap_path,
             overwrite=True
         )
 
         if args.check_images:
             fig, ax = plt.subplots(1, 1, figsize=(10, 10))
             ax.imshow(extracted_data, origin='lower')
-            fig.savefig("sext_extraction_map.png", dpi=150)
+            extmap_png = os.path.join(check_images_outdir, "sext_extraction_map.png")
+            fig.savefig(extmap_png, dpi=150)
             plt.close(fig)
 
 

@@ -1,7 +1,6 @@
 
 .. toctree::
    module_docs/cubex
-   module_docs/rrspecex
    module_docs/plot
    module_docs/cube
    module_docs/lines

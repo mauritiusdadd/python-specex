@@ -12,7 +12,7 @@ dynamic = ["version"]
 description = "Extract spectra from fits cubes"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {file = "LICENSE"}
+license = {text = "GPL-3.0-or-later"}
 keywords = ["spectroscopy", "spectra", "spectrum", "spectral cubes"]
 authors = [
  {name = "Maurizio D'Addona"},
@@ -50,8 +50,7 @@ dependencies = [
 animations = ["imageio"]
 regions = ["regions"]
 advanced = ["reproject"]
-redrock = ["numba", "sqlalchemy", "healpy", "requests", "fitsio", "photutils", "h5py"]
-all = ["specex[animations,regions,redrock,advanced]"]
+all = ["specex[animations,regions,advanced]"]
 test = ["coverage"]
 
 [project.urls]
@@ -60,7 +59,6 @@ repository = "https://github.com/mauritiusdadd/python-specex"
 
 [project.scripts]
 specex = "specex.cubex:specex"
-rrspecex = "specex.rrspecex:rrspecex"
 specex-zeropointinfo = "specex.zeropoints:main"
 specex-cubestack = "specex.stack:cube_stack"
 specex-cutout = "specex.cube:cutout_main"
