@@ -1735,7 +1735,7 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
     args = __cutout_argshandler(options)
 
     inp_fits_file: Path = Path(args.input_fits)
-    if not inp_fits_file.is_file(follow_symlinks=True):
+    if not inp_fits_file.is_file():
         print(f"The file {inp_fits_file} does not exist!")
         sys.exit(1)
 
@@ -1749,7 +1749,7 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
             sys.exit(1)
     else:
         regionfile = Path(args.regionfile)
-        if not regionfile.is_file(follow_symlinks=True):
+        if not regionfile.is_file():
             print("The file input regionfile does not exist!")
             sys.exit(1)
 

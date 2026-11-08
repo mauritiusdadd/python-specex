@@ -77,8 +77,8 @@ class MyTests(unittest.TestCase):
         print(">>> Testing smoothing...\n")
         smoohting_options = [
             '--verbose',
-            '--spatial-sigma', '0.5arcsec,0.25arcsec',
-            '--wave-sigma', '1angstrom',
+            '--spatial-smooth', '0.5arcsec,0.25arcsec',
+            '--wave-smooth', '1angstrom',
             self.cube_file
         ]
         smoothing_main(smoohting_options)
@@ -87,8 +87,8 @@ class MyTests(unittest.TestCase):
         print(">>> Testing smoothing...\n")
         smoohting_options = [
             '--verbose',
-            '--spatial-sigma', '3,2',
-            '--wave-sigma', '2',
+            '--spatial-smooth', '3,2',
+            '--wave-smooth', '2',
             self.cube_file
         ]
         smoothing_main(smoohting_options)

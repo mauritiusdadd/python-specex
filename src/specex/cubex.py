@@ -972,7 +972,7 @@ def specex(options: Optional[list[str]] = None) -> None:
     if args.catalog is not None:
         catalog_path: Path = Path(args.catalog)
 
-        if not catalog_path.is_file(follow_symlinks=True):
+        if not catalog_path.is_file():
             print(f"The catalog '{catalog_path}' does not exits!")
             sys.exit(1)
 
@@ -1006,7 +1006,7 @@ def specex(options: Optional[list[str]] = None) -> None:
             sys.exit(1)
         regionfile_path: Path = Path(args.regionfile)
 
-        if not regionfile_path.is_file(follow_symlinks=True):
+        if not regionfile_path.is_file():
             print(f"The region file '{regionfile_path}' does not exits!")
             sys.exit(1)
 
@@ -1054,7 +1054,7 @@ def specex(options: Optional[list[str]] = None) -> None:
         key_id = args.key_id
 
     cube_path: Path = Path(args.input_cube)
-    if not cube_path.is_file(follow_symlinks=True):
+    if not cube_path.is_file():
         logging.error(
             f"The cube '{cube_path}' does not exist!"
         )
