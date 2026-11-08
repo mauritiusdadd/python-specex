@@ -214,10 +214,10 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
 
     parser.add_argument(
         '--anulus-size', metavar='R1,R2', type=str, default='None',
-        help='Set the inner and outer radii in arcsecs of a fixed anular '
-        'aperture used in  the "fixed-aperture" mode. The pixels within this '
-        'anulus will be used to compute the background nearby the objects. If '
-        'The default value is %(metavar)s=%(default)s.'
+        help='Set the inner and outer radii in arcsecs (e.g. "1.5,3.0") or '
+        'multiplicative factors of the aperture size (e.g. "1.2x,2.0x") '
+        'defining the background annulus around each object. '
+        'The default value is %(default)s.'
     )
 
     parser.add_argument(
@@ -1276,7 +1276,6 @@ def specex(options: Optional[list[str]] = None) -> None:
 
             anulus_mask = None
             if mode == 'regions':
-                anulus_mask = None
                 pix_reg = source['region'].to_pixel(celestial_wcs)
                 reg_mask = pix_reg.to_mask()
                 mask = reg_mask.to_image((img_height, img_width))
@@ -1311,10 +1310,25 @@ def specex(options: Optional[list[str]] = None) -> None:
                     source[args.key_theta] * units.deg
                 )
 
-                mask = (
-                    (x_over_a**2 + y_over_b**2) <
-                    (source[args.key_kron] ** 2)
-                )
+                r_ell_sq = x_over_a**2 + y_over_b**2
+                r_kron = source[args.key_kron]
+                mask = r_ell_sq < (r_kron ** 2)
+
+                if args.anulus_size and args.anulus_size.lower() != 'none':
+                    try:
+                        an_parts = [p.strip() for p in args.anulus_size.split(',')]
+                        if any(p.endswith('x') for p in an_parts):
+                            k_in = float(an_parts[0].rstrip('x')) * r_kron
+                            k_out = float(an_parts[1].rstrip('x')) * r_kron
+                        else:
+                            r1 = units.Quantity(an_parts[0])
+                            r2 = units.Quantity(an_parts[1])
+                            k_in = r_kron * (r1 / (source[args.key_a] * pixelscale)).decompose().value
+                            k_out = r_kron * (r2 / (source[args.key_a] * pixelscale)).decompose().value
+                        anulus_mask = (r_ell_sq >= k_in**2) & (r_ell_sq < k_out**2)
+                    except Exception as an_err:
+                        if args.debug:
+                            logging.warning(f"Invalid anulus_size '{args.anulus_size}': {an_err}")
 
             elif mode in ('kron_circular', 'kron_circle'):
                 kron_circ_rad = (
@@ -1331,7 +1345,23 @@ def specex(options: Optional[list[str]] = None) -> None:
 
                 xx_scaled = xx_tr * cube_pixelscale_x
                 yy_scaled = yy_tr * cube_pixelscale_y
-                mask = (xx_scaled**2 + yy_scaled**2) < (kron_circ_rad.to(units.arcsec) ** 2)
+                r_circ_sq = xx_scaled**2 + yy_scaled**2
+                r_circ_val = kron_circ_rad.to(units.arcsec)
+                mask = r_circ_sq < (r_circ_val ** 2)
+
+                if args.anulus_size and args.anulus_size.lower() != 'none':
+                    try:
+                        an_parts = [p.strip() for p in args.anulus_size.split(',')]
+                        if any(p.endswith('x') for p in an_parts):
+                            k_in = float(an_parts[0].rstrip('x')) * r_circ_val
+                            k_out = float(an_parts[1].rstrip('x')) * r_circ_val
+                        else:
+                            k_in = units.Quantity(an_parts[0]).to(units.arcsec)
+                            k_out = units.Quantity(an_parts[1]).to(units.arcsec)
+                        anulus_mask = (r_circ_sq >= k_in**2) & (r_circ_sq < k_out**2)
+                    except Exception as an_err:
+                        if args.debug:
+                            logging.warning(f"Invalid anulus_size '{args.anulus_size}': {an_err}")
 
             elif mode == 'circular_aperture':
                 aperture_size = units.Quantity(args.aperture_size)
@@ -1353,8 +1383,28 @@ def specex(options: Optional[list[str]] = None) -> None:
 
                 xx_scaled = xx_tr * cube_pixelscale_x
                 yy_scaled = yy_tr * cube_pixelscale_y
+                r_circ_sq = xx_scaled**2 + yy_scaled**2
+                r_aper_val = aperture_radius.to(units.arcsec)
+                mask = r_circ_sq < (r_aper_val)**2
 
-                mask = (xx_scaled**2 + yy_scaled**2) < (aperture_radius)**2
+                if args.anulus_size and args.anulus_size.lower() != 'none':
+                    try:
+                        an_parts = [p.strip() for p in args.anulus_size.split(',')]
+                        if any(p.endswith('x') for p in an_parts):
+                            k_in = float(an_parts[0].rstrip('x')) * r_aper_val
+                            k_out = float(an_parts[1].rstrip('x')) * r_aper_val
+                        else:
+                            k_in = units.Quantity(an_parts[0]).to(units.arcsec)
+                            k_out = units.Quantity(an_parts[1]).to(units.arcsec)
+                        anulus_mask = (r_circ_sq >= k_in**2) & (r_circ_sq < k_out**2)
+                    except Exception as an_err:
+                        if args.debug:
+                            logging.warning(f"Invalid anulus_size '{args.anulus_size}': {an_err}")
+
+            if anulus_mask is not None:
+                anulus_mask &= ~mask
+                if cube_footprint is not None:
+                    anulus_mask &= cube_footprint
 
             if cube_footprint is not None:
                 mask &= cube_footprint
@@ -1429,17 +1479,28 @@ def specex(options: Optional[list[str]] = None) -> None:
                     f"WARNING: object {obj_id} has invalid data..."
                 )
 
-            if anulus_mask is not None:
-                # TODO: fix here!
-                # Here we suppose that background varies very slowly within
-                # object aperture. In this case we can compute the mean
-                # background and subtract it total contribution within the
-                # aperture.
-                bkg_spectrum = np.median(
-                    my_cube.spec_hdu.data[:, mask], axis=0
-                )
-                smoothed_bkg_spectrum = savgol_filter(bkg_spectrum, 51, 11)
-                obj_spectrum -= smoothed_bkg_spectrum*np.sum(mask)
+            if anulus_mask is not None and np.sum(anulus_mask) > 0:
+                # Estimate robust median background spectrum across the annulus
+                bkg_spaxels = my_cube.spec_hdu.data[:, anulus_mask]
+                bkg_spectrum = np.nanmedian(bkg_spaxels, axis=1)
+
+                # Effective area / scale factor of background in object aperture
+                n_mask_pix = np.sum(mask)
+                if weights is not None:
+                    # In weighted extraction, the background scales with the sum of weights
+                    scale_bkg = float(np.sum(weights))
+                else:
+                    scale_bkg = float(n_mask_pix)
+
+                obj_spectrum -= bkg_spectrum * scale_bkg
+
+                # Estimate per-channel background error and propagate to variance
+                n_bkg_pix = np.sum(anulus_mask)
+                bkg_mad = np.array([
+                    nannmad(bkg_spaxels[ch, :]) for ch in range(bkg_spaxels.shape[0])
+                ])
+                bkg_err_median = 1.2533 * bkg_mad / np.sqrt(max(1, n_bkg_pix))
+                obj_spectrum_var += (scale_bkg * bkg_err_median) ** 2
 
             if np.sum(np.isfinite(obj_spectrum)) == 0:
                 if args.debug:
