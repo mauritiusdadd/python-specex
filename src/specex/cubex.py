@@ -48,7 +48,8 @@ import matplotlib.pyplot as plt
 from specex.utils import (
     get_log_img, stack,
     get_spectrum_snr, get_spectrum_snr_emission, parse_regionfile,
-    HAS_REGION, HAS_REPROJECT, simple_pbar_callback, do_reproject
+    HAS_REGION, HAS_REPROJECT, simple_pbar_callback, do_reproject,
+    nannmad
 )
 
 from specex import __version__ as sp_ver
