@@ -42,7 +42,7 @@ jobs:
     - name: Install program and dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install .[all,test]
+        python -m pip install .[all,test]
     - name: Running tests
       run: |
         python -m coverage run -m pytest -s test/test_all.py

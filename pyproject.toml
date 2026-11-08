@@ -51,7 +51,7 @@ animations = ["imageio"]
 regions = ["regions"]
 advanced = ["reproject"]
 all = ["specex[animations,regions,advanced]"]
-test = ["coverage"]
+test = ["coverage", "pytest"]
 
 [project.urls]
 documentation = "https://python-specex.readthedocs.io/en/latest"
