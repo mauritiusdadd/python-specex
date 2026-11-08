@@ -18,17 +18,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - name: "Set up Python ${{ matrix.python-version }}"
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v5
       with:
         python-version: "${{ matrix.python-version }}"
     - name: Cache test data
       id: cache-test
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       env:
         cache-name: cache-test-data
       with:
@@ -41,11 +41,10 @@ jobs:
           ${{ runner.os }}-
     - name: Install program and dependencies
       run: |
-        python -c "import sys; print(sys.version)"
-        pip install pytest coverage rich
+        python -m pip install --upgrade pip
         pip install .[all,test]
     - name: Running tests
       run: |
-        $(which python) -m coverage run -m pytest -s test/test_all.py
+        python -m coverage run -m pytest -s test/test_all.py
     - name: Coveralls
       uses: coverallsapp/github-action@v2
