@@ -91,6 +91,7 @@ def stack_and_plot(
         outdir = Path('.')
     else:
         outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
 
     if hdu.data is None:
         logging.error(

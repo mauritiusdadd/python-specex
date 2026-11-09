@@ -1700,8 +1700,8 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
             if pc_elem_re.fullmatch(str(k).strip()):
                 new_header[k] = cutout_header[k]
 
-        new_header['PC1_1'] = cutout_header['PC1_1']
-        new_header['PC2_2'] = cutout_header['PC2_2']
+        new_header['PC1_1'] = cutout_header.get('PC1_1', 1.0)
+        new_header['PC2_2'] = cutout_header.get('PC2_2', 1.0)
         new_header['CDELT1'] = cutout_header['CDELT1']
         new_header['CDELT2'] = cutout_header['CDELT2']
         new_header['CRVAL1'] = cutout_header['CRVAL1']
@@ -1721,7 +1721,7 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
             pass
         else:
             c_factor = cutout_unit3.to(orig_header['CUNIT3']).value
-            new_header['PC3_3'] = cutout_header['PC3_3'] * c_factor
+            new_header['PC3_3'] = cutout_header.get('PC3_3', 1.0) * c_factor
             new_header['PC1_3'] = 0
             new_header['PC2_3'] = 0
             new_header['PC3_1'] = 0

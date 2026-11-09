@@ -65,9 +65,14 @@ def exception_handler(exception_type, value, traceback):
     """
 
     if HAS_IPYTHON:
-        traceback_formatter = ultratb.FormattedTB(
-            mode='Verbose', color_scheme='Linux', call_pdb=1
-        )
+        try:
+            traceback_formatter = ultratb.FormattedTB(
+                mode='Verbose', theme_name='linux', call_pdb=1
+            )
+        except TypeError:
+            traceback_formatter = ultratb.FormattedTB(
+                mode='Verbose', color_scheme='Linux', call_pdb=1
+            )
         return traceback_formatter(exception_type, value, traceback)
     else:
         sys.__excepthook__(exception_type, value, traceback)

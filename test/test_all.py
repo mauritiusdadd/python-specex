@@ -29,7 +29,6 @@ import unittest
 from specex.cube import cutout_main, smoothing_main
 from specex.stack import cube_stack
 from specex.sources import detect_from_cube
-from specex.zeropoints import main as zpinfo
 from specex.cubex import specex
 from specex.plot import plot_spectra
 
@@ -53,16 +52,6 @@ class MyTests(unittest.TestCase):
     spec_files = make_synt_specs.main()
     reg_file = os.path.join(TEST_DATA_PATH, 'test_regions.reg')
     cat_file = os.path.join(TEST_DATA_PATH, 'test_sources.cat')
-
-    def test_zeropoint_info(self):
-        print(">>> Testing zeropoint_info...\n")
-        if not self.test_hst_imgs:
-            print(
-                "Failed to download HST test images, skipping this test...",
-                file=sys.stderr
-            )
-            return True
-        zpinfo(self.test_hst_imgs)
 
     def test_cube_stack(self):
         print(">>> Testing cube_stack...\n")
@@ -209,8 +198,6 @@ class MyTests(unittest.TestCase):
 
 if __name__ == '__main__':
     tests = MyTests()
-    tests.test_zeropoint_info()
-
     tests.test_cube_stack()
 
     tests.test_grayscale_cutout()

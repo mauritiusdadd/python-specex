@@ -59,7 +59,6 @@ repository = "https://github.com/mauritiusdadd/python-specex"
 
 [project.scripts]
 specex = "specex.cubex:specex"
-specex-zeropointinfo = "specex.zeropoints:main"
 specex-cubestack = "specex.stack:cube_stack"
 specex-cutout = "specex.cube:cutout_main"
 specex-smooth = "specex.cube:smoothing_main"
