@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Unit tests for specex.stack."""
+import os
+from pathlib import Path
+
 import numpy as np
+import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
-import pytest
 
 from specex.stack import stack_and_plot, cube_stack
+from test import (
+    get_muse_test_cube,
+    TEST_OUTPUT_PATH,
+)
 
 
 @pytest.fixture
@@ -34,6 +41,21 @@ def dummy_fits_cube(tmp_path):
     hdul = fits.HDUList([primary, var_hdu])
     hdul.writeto(cube_path)
     return str(cube_path)
+
+
+@pytest.fixture(scope="session")
+def real_cube_file():
+    cube = get_muse_test_cube()
+    if not cube or not os.path.isfile(cube):
+        pytest.skip("MUSE test cube not available.")
+    return cube
+
+
+@pytest.fixture(scope="session")
+def test_output_dir():
+    outdir = Path(TEST_OUTPUT_PATH)
+    outdir.mkdir(parents=True, exist_ok=True)
+    return outdir
 
 
 def test_stack_and_plot(tmp_path):
@@ -70,3 +92,18 @@ def test_cube_stack_cli(dummy_fits_cube, tmp_path):
     assert outdir.exists()
     assert len(list(outdir.glob("*.fits"))) > 0
     assert len(list(outdir.glob("*.png"))) > 0
+
+
+def test_cube_stack_real_cube(real_cube_file, test_output_dir):
+    outdir = test_output_dir / "stack_real_cube"
+    outdir.mkdir(parents=True, exist_ok=True)
+    cube_stack([
+        real_cube_file,
+        "--var-hdu", "STAT",
+        "--outdir", str(outdir),
+    ])
+    data_fits = outdir / f"{Path(real_cube_file).stem}_data.fits"
+    assert data_fits.exists()
+    with fits.open(data_fits) as hdul:
+        assert hdul[0].data is not None
+        assert hdul[0].data.ndim == 2

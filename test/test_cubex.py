@@ -2,13 +2,20 @@
 # -*- coding: utf-8 -*-
 """Unit tests for specex.cubex."""
 import os
+from pathlib import Path
+
 import numpy as np
+import pytest
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.table import Table
-import pytest
 
 from specex.cubex import specex
+from test import (
+    get_muse_test_cube,
+    TEST_DATA_PATH,
+    TEST_OUTPUT_PATH,
+)
 
 
 @pytest.fixture
@@ -41,7 +48,7 @@ def synthetic_specex_setup(tmp_path):
     hdul = fits.HDUList([primary, var_hdu, mask_hdu])
     hdul.writeto(cube_path)
 
-    # Create a small catalog with RA/DEC matching pixel (8, 8) -> 10.0 deg, 20.0 deg
+    # Create a small catalog with RA/DEC matching pixel (8, 8)
     cat = Table({
         "NUMBER": [1],
         "ALPHA_J2000": [10.0],
@@ -55,6 +62,21 @@ def synthetic_specex_setup(tmp_path):
     return str(cube_path), str(cat_path), str(outdir)
 
 
+@pytest.fixture(scope="session")
+def real_cube_file():
+    cube = get_muse_test_cube()
+    if not cube or not os.path.isfile(cube):
+        pytest.skip("MUSE test cube not available.")
+    return cube
+
+
+@pytest.fixture(scope="session")
+def test_output_dir():
+    outdir = Path(TEST_OUTPUT_PATH)
+    outdir.mkdir(parents=True, exist_ok=True)
+    return outdir
+
+
 def test_specex_extraction_catalog(synthetic_specex_setup):
     cube_path, cat_path, outdir = synthetic_specex_setup
 
@@ -66,7 +88,7 @@ def test_specex_extraction_catalog(synthetic_specex_setup):
         "--spec-hdu", "0",
         "--var-hdu", "1",
         "--outdir", outdir,
-        cube_path
+        cube_path,
     ]
     specex(options=specex_options)
 
@@ -87,8 +109,77 @@ def test_specex_extraction_whitelight(synthetic_specex_setup):
         "--spec-hdu", "0",
         "--var-hdu", "1",
         "--outdir", outdir,
-        cube_path
+        cube_path,
     ]
     specex(options=specex_options)
     assert os.path.exists(outdir)
 
+
+def test_specex_catalog_real_cube(real_cube_file, test_output_dir):
+    cat_file = os.path.join(TEST_DATA_PATH, "test_sources.cat")
+    outdir = test_output_dir / "specex_catalog_real_cube"
+    outdir.mkdir(parents=True, exist_ok=True)
+    specex_options = [
+        "--catalog", cat_file,
+        "--mode", "circular_aperture",
+        "--aperture-size", "0.8arcsec",
+        "--weighting", "whitelight",
+        "--no-nans",
+        "--outdir", str(outdir),
+        real_cube_file,
+    ]
+    specex(options=specex_options)
+    fits_files = list(outdir.glob("spec_*.fits"))
+    assert len(fits_files) > 0
+
+
+def test_specex_regionfile_real_cube(real_cube_file, test_output_dir):
+    reg_file = os.path.join(TEST_DATA_PATH, "test_regions.reg")
+    outdir = test_output_dir / "specex_regionfile_real_cube"
+    outdir.mkdir(parents=True, exist_ok=True)
+    specex_options = [
+        "--regionfile", reg_file,
+        "--mode", "kron_ellipse",
+        "--no-nans",
+        "--outdir", str(outdir),
+        real_cube_file,
+    ]
+    specex(options=specex_options)
+    fits_files = list(outdir.glob("spec_*.fits"))
+    assert len(fits_files) > 0
+
+
+def test_specex_regionfile_wlight_real_cube(real_cube_file, test_output_dir):
+    reg_file = os.path.join(TEST_DATA_PATH, "test_regions.reg")
+    outdir = test_output_dir / "specex_regionfile_wlight_real_cube"
+    outdir.mkdir(parents=True, exist_ok=True)
+    specex_options = [
+        "--regionfile", reg_file,
+        "--mode", "kron_ellipse",
+        "--weighting", "whitelight",
+        "--no-nans",
+        "--outdir", str(outdir),
+        real_cube_file,
+    ]
+    specex(options=specex_options)
+    fits_files = list(outdir.glob("spec_*.fits"))
+    assert len(fits_files) > 0
+
+
+def test_specex_regionfile_log_wlight_real_cube(
+    real_cube_file, test_output_dir
+):
+    reg_file = os.path.join(TEST_DATA_PATH, "test_regions.reg")
+    outdir = test_output_dir / "specex_regionfile_log_wlight_real_cube"
+    outdir.mkdir(parents=True, exist_ok=True)
+    specex_options = [
+        "--regionfile", reg_file,
+        "--mode", "kron_ellipse",
+        "--weighting", "log-whitelight",
+        "--no-nans",
+        "--outdir", str(outdir),
+        real_cube_file,
+    ]
+    specex(options=specex_options)
+    fits_files = list(outdir.glob("spec_*.fits"))
+    assert len(fits_files) > 0

@@ -40,11 +40,19 @@ or pixel unit
 
     specex-smooth ADP.2023-09-01T12_56_41.595.fits --wave-sigma 1angstrom
 
-And, of course, spatial and spectral smoothing can be applied at the same time
+And, of course, spatial and spectral smoothing can be applied at the same time:
 
 .. code-block:: bash
 
-    specex-smooth ADP.2023-09-01T12_56_41.595.fits --spatial-sigma 0.5arcsec,0.3arcsec --wave-sigma 1angstrom
+    specex-smooth ADP.2023-09-01T12_56_41.595.fits --spatial-smooth 0.5arcsec,0.3arcsec --wave-smooth 1angstrom
+
+You can also specify the output directory and custom output filename:
+
+.. code-block:: bash
+
+    specex-smooth ADP.2023-09-01T12_56_41.595.fits --spatial-smooth 1arcsec,0 --outdir ./output --output smoothed_cube.fits --verbose
+
+Both ``--spatial-smooth`` (alias ``--spatial-sigma``) and ``--wave-smooth`` (alias ``--wave-sigma``) are accepted.
 
 Making Cutouts
 --------------

@@ -684,7 +684,7 @@ def detect_from_cube(options=None):
         outdir = args.outdir
 
     if not os.path.isdir(outdir):
-        os.mkdir(outdir)
+        os.makedirs(outdir, exist_ok=True)
 
     if args.checkimg_outdir is not None:
         check_images_outdir = args.checkimg_outdir
@@ -692,7 +692,7 @@ def detect_from_cube(options=None):
         check_images_outdir = os.path.join(outdir, 'checkimages')
 
     if args.check_images and not os.path.isdir(check_images_outdir):
-        os.mkdir(check_images_outdir)
+        os.makedirs(check_images_outdir, exist_ok=True)
 
     hdl = fits.open(args.input_cube[0])
 

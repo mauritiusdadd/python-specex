@@ -1198,7 +1198,7 @@ def specex(options: Optional[list[str]] = None) -> None:
             outdir = args.outdir
 
         if not os.path.isdir(outdir):
-            os.mkdir(outdir)
+            os.makedirs(outdir, exist_ok=True)
 
         if mode is None:
             if args.mode == 'auto':
@@ -1631,7 +1631,7 @@ def specex(options: Optional[list[str]] = None) -> None:
             check_images_outdir = os.path.join(outdir, 'checkimages')
 
         if not os.path.isdir(check_images_outdir):
-            os.mkdir(check_images_outdir)
+            os.makedirs(check_images_outdir, exist_ok=True)
 
         if args.debug:
             stacked_cube = stack(my_cube.spec_hdu.data)

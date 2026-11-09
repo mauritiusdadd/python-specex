@@ -32,6 +32,9 @@ from pkgutil import extend_path
 __path__ = extend_path(__path__, __name__)
 
 TEST_DATA_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), "data")
+TEST_OUTPUT_PATH = os.path.join(
+    pathlib.Path(__file__).parent.resolve(), "test_output"
+)
 
 DOWNLOAD_HEADERS = {
     "User-Agent": 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 '
@@ -104,6 +107,10 @@ def download_files(
 
 def get_muse_test_cube(out_dir: str = TEST_DATA_PATH,
                        use_cached: bool = True):
+    local_fits = os.path.join(out_dir, 'ADP.2023-09-01T12:56:41.595.fits')
+    if use_cached and os.path.isfile(local_fits):
+        return os.path.realpath(local_fits)
+
     TEST_CUBE_URL = 'https://dataportal.eso.org/dataportal_new/file//ADP.2023-09-01T12:56:41.595'
     downloaded = download_files(
         [TEST_CUBE_URL,],

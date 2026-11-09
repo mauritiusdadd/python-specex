@@ -28,6 +28,7 @@ import sys
 import shutil
 import logging
 import argparse
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -47,7 +48,7 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata.utils import Cutout2D
 from astropy.convolution import (
     convolve, Gaussian1DKernel, Gaussian2DKernel,
-    Box1DKernel, Box2DKernel, Tophat2DKernel,
+    Box1DKernel, Box2DKernel, Tophat2DKernel, CustomKernel,
 )
 
 from specex.utils import get_pc_transform_params, rotate_data
@@ -511,6 +512,10 @@ def __cutout_argshandler(
         '--verbose', action='store_true', default=False,
         help="Print verbose outout."
     )
+    parser.add_argument(
+        '--outdir', metavar='DIR', type=str, default=None,
+        help='Set output directory for extracted cutouts.'
+    )
     args = parser.parse_args(options)
     return args
 
@@ -541,7 +546,8 @@ def __smoothing_args_handler(options: Optional[Sequence[str]]=None):
         help='The spectral cube (or image) from which to extract a cutout.'
     )
     parser.add_argument(
-        '--spatial-smooth', metavar='SIGMA', type=str, default=None,
+        '--spatial-smooth', '--spatial-sigma', metavar='SIGMA', type=str,
+        default=None,
         help='Set the size of the spatial gaussian kernel. If %(metavar)s '
         'is 0 then no spatial smoothing is applied. If not specified the '
         'default value %(metavar)s=0 is used.'
@@ -566,7 +572,8 @@ def __smoothing_args_handler(options: Optional[Sequence[str]]=None):
         'The default value is %(metavar)s=%(default)s.'
     )
     parser.add_argument(
-        '--wave-smooth', metavar='SIGMA', type=str, default=None,
+        '--wave-smooth', '--wave-sigma', metavar='SIGMA', type=str,
+        default=None,
         help='Set the size of the spectral gaussian kernel. If %(metavar)s '
         'is 0 then no spectral smoothing is applied. If not specified, the '
         'default value %(metavar)s=0 is used.'
@@ -621,6 +628,16 @@ def __smoothing_args_handler(options: Optional[Sequence[str]]=None):
     parser.add_argument(
         '--debug', action='store_true', default=False,
         help="Start an IPython console for debugging."
+    )
+
+    parser.add_argument(
+        '--outdir', metavar='DIR', type=str, default=None,
+        help='Set output directory for smoothed cubes.'
+    )
+
+    parser.add_argument(
+        '--output', '-o', metavar='FILENAME', type=str, default=None,
+        help='Set output filename for the smoothed cube.'
     )
 
     args = parser.parse_args(options)
@@ -1430,12 +1447,15 @@ def self_correlate(
 
 def smooth_cube(
     data: np.ndarray, data_mask: Optional[np.ndarray] = None,
-    spatial_size: float | int | Sequence[int | float  | units.Quantity] | np.ndarray | units.Quantity = 1.0,
+    spatial_size: float | int | Sequence[
+        int | float | units.Quantity
+    ] | np.ndarray | units.Quantity = 1.0,
     wave_size: float | int | units.Quantity = 0.0,
-    cube_wcs : Optional[WCS] = None,
+    cube_wcs: Optional[WCS] = None,
     progress: Optional[Progress] = None,
     spatial_kernel: str = "gaussian",
     wave_kernel: str = "gaussian",
+    memmap_dir: Optional[str] = None,
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Smooth a datacube spatially and/or along the spectral axis.
@@ -1461,6 +1481,13 @@ def smooth_cube(
           * the number of slice processed so far
           * the total number of slices.
 
+    wave_kernel : str, optional
+        The kernel used for spectral smoothing. Can be 'gaussian' or 'box'.
+        The default is 'gaussian'.
+    memmap_dir : str or None, optional
+        Directory where temporary memory-mapped arrays are stored during
+        smoothing. The default is None.
+
     Raises
     ------
     ValueError
@@ -1484,6 +1511,25 @@ def smooth_cube(
             pass
 
     smoothed_arr = data.copy()
+
+    if isinstance(wave_size, str):
+        try:
+            wave_size = float(wave_size)
+        except ValueError:
+            wave_size = units.Quantity(wave_size)
+
+    if isinstance(spatial_size, str):
+        parts = spatial_size.split(",")
+        parsed_spatial = []
+        for p in parts:
+            try:
+                parsed_spatial.append(float(p))
+            except ValueError:
+                parsed_spatial.append(units.Quantity(p))
+        if all(isinstance(x, units.Quantity) for x in parsed_spatial):
+            spatial_size = units.Quantity(parsed_spatial)
+        else:
+            spatial_size = parsed_spatial
 
     if not isinstance(wave_size, float | int):
         if cube_wcs is None:
@@ -1544,28 +1590,34 @@ def smooth_cube(
             else:
                 # Determine the equivalent sigma in pixel space
                 p0 = cube_wcs.celestial.pixel_to_world(0, 0)
+                unit_to_use = units.deg
+                for x in spatial_size:
+                    if isinstance(x, Quantity):
+                        unit_to_use = x.unit
+                        break
+
                 if isinstance(spatial_size[0], Quantity):
                     d_ra = spatial_size[0]
                 else:
-                    d_ra = 0
+                    d_ra = spatial_size[0] * unit_to_use
                     spatial_size_pix[0] = spatial_size[0]
 
                 if isinstance(spatial_size[1], Quantity):
                     d_dec = spatial_size[1]
                 else:
-                    d_dec = 0
+                    d_dec = spatial_size[1] * unit_to_use
                     spatial_size_pix[1] = spatial_size[1]
 
                 p1 = p0.spherical_offsets_by(d_ra, d_dec)
                 d_pix = cube_wcs.celestial.world_to_pixel(p1)
 
                 if isinstance(spatial_size[0], Quantity):
-                    spatial_size_pix[0] = d_pix[0]
+                    spatial_size_pix[0] = abs(float(d_pix[0]))
 
                 if isinstance(spatial_size[1], Quantity):
-                    spatial_size_pix[1] = d_pix[1]
+                    spatial_size_pix[1] = abs(float(d_pix[1]))
         else:
-            spatial_size_pix = [float(x) for x in spatial_size]
+            spatial_size_pix = [abs(float(x)) for x in spatial_size]
             if len(spatial_size_pix) == 1:
                 spatial_size_pix = [
                     spatial_size_pix[0], spatial_size_pix[0]
@@ -1602,43 +1654,83 @@ def smooth_cube(
         )
 
         if do_wave_smoohting:
+            wave_cb = None
+            task_id = None
             if progress is not None:
+                tot_spaxels = sc.shape[1] * sc.shape[2]
                 task_id = progress.add_task(
                     description="Smoothing along spectral axis:",
-                    total=1
+                    total=tot_spaxels
                 )
+                step = max(1, tot_spaxels // 100)
+                state = {'count': 0}
+
+                def wave_callback() -> None:
+                    state['count'] += 1
+                    if state['count'] % step == 0:
+                        progress.update(task_id, advance=step)
+
+                wave_cb = wave_callback
+
             if wave_kernel == "gaussian":
                 w_kernel = Gaussian1DKernel(wave_size_pix)
             elif wave_kernel == "box":
                 w_kernel = Box1DKernel(wave_size_pix)
             else:
                 w_kernel = Gaussian1DKernel(wave_size_pix)
-            sc = sc.spectral_smooth(w_kernel, parallel=False)
-            if progress is not None:
-                progress.update(task_id, completed=1)
+
+            sc = sc.spectral_smooth(
+                w_kernel,
+                parallel=False,
+                update_function=wave_cb,
+                memmap_dir=memmap_dir
+            )
+            if progress is not None and task_id is not None:
+                rem = state['count'] % step
+                if rem > 0:
+                    progress.update(task_id, advance=rem)
                 progress.remove_task(task_id)
 
         if do_spatial_smoothing:
+            spatial_cb = None
+            task_id = None
             if progress is not None:
+                n_wave_channels = sc.shape[0]
                 task_id = progress.add_task(
                     description="Smoothing along spatial coordinates:",
-                    total=1
+                    total=n_wave_channels
                 )
-            if spatial_kernel == "gaussian":
-                s_kernel = Gaussian2DKernel(
-                    spatial_size_pix[0], spatial_size_pix[1]
-                )
-            elif spatial_kernel == "box":
-                s_kernel = Box2DKernel(np.max(spatial_size_pix))
-            elif spatial_kernel == "top-hat":
-                s_kernel = Tophat2DKernel(np.max(spatial_size_pix))
+
+                def spatial_callback() -> None:
+                    progress.update(task_id, advance=1)
+
+                spatial_cb = spatial_callback
+
+            # Handle 1D or 2D spatial smoothing
+            sx, sy = spatial_size_pix[0], spatial_size_pix[1]
+            if sx > 0 and sy > 0:
+                if spatial_kernel == "gaussian":
+                    s_kernel = Gaussian2DKernel(sx, sy)
+                elif spatial_kernel == "box":
+                    s_kernel = Box2DKernel(np.max(spatial_size_pix))
+                elif spatial_kernel == "top-hat":
+                    s_kernel = Tophat2DKernel(np.max(spatial_size_pix))
+                else:
+                    s_kernel = Gaussian2DKernel(sx, sy)
+            elif sx > 0:
+                k1d = Gaussian1DKernel(sx)
+                s_kernel = CustomKernel(k1d.array[None, :])
             else:
-                s_kernel = Gaussian2DKernel(
-                    spatial_size_pix[0], spatial_size_pix[1]
-                )
-            sc = sc.spatial_smooth(s_kernel, parallel=False)
-            if progress is not None:
-                progress.update(task_id, completed=1)
+                k1d = Gaussian1DKernel(sy)
+                s_kernel = CustomKernel(k1d.array[:, None])
+
+            sc = sc.spatial_smooth(
+                s_kernel,
+                parallel=False,
+                update_function=spatial_cb,
+                memmap_dir=memmap_dir
+            )
+            if progress is not None and task_id is not None:
                 progress.remove_task(task_id)
 
         smoothed_arr = sc.unmasked_data[:].value
@@ -1678,7 +1770,9 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
 
     if args.spatial_smooth is not None:
         spatial_smooth_list = args.spatial_smooth.split(',')
-        spatial_smooth: list[int | float | units.Quantity] | units.Quantity = []
+        spatial_smooth: (
+            list[int | float | units.Quantity] | units.Quantity
+        ) = []
         for x in spatial_smooth_list:
             try:
                 value = float(x)
@@ -1691,15 +1785,29 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
     else:
         spatial_smooth = 0
 
+    outdir = Path(args.outdir) if args.outdir is not None else None
+    if outdir is not None:
+        outdir.mkdir(parents=True, exist_ok=True)
+
     for target_data_file in args.input_fits_files:
         target_file_path: Path = Path(target_data_file)
-        out_fname = f"{target_file_path.stem}_smoothed.fits"
+        if args.output is not None:
+            if outdir is not None:
+                out_fname = str(outdir / Path(args.output).name)
+            else:
+                out_fname = args.output
+        elif outdir is not None:
+            out_fname = str(outdir / f"{target_file_path.stem}_smoothed.fits")
+        else:
+            out_fname = f"{target_file_path.stem}_smoothed.fits"
 
         shutil.copy(target_data_file, out_fname)
 
         with SpectralCube.open(
-            target_data_file, mode='readonly'
-        ) as my_cube, Progress() as progress:
+            out_fname, mode='update'
+        ) as my_cube, Progress(
+            disable=not args.verbose
+        ) as progress, tempfile.TemporaryDirectory(dir='.') as tmp_dir:
 
             if args.verbose:
                 progress.print(f"\n[{target_file_path.stem}]")
@@ -1725,9 +1833,10 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
                 spatial_kernel=args.spatial_kernel,
                 wave_kernel=args.wave_kernel,
                 cube_wcs=my_cube.getSpecWCS(),
-                progress=progress
+                progress=progress,
+                memmap_dir=tmp_dir,
             )
-            my_cube.spec_hdu.data = smoothed_spec
+            my_cube.spec_hdu.data[:] = smoothed_spec
 
             variance: np.ndarray | None = None
             if my_cube.var_hdu is not None:
@@ -1739,12 +1848,13 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
                     spatial_kernel=args.spatial_kernel,
                     wave_kernel=args.wave_kernel,
                     cube_wcs=my_cube.getVarWCS(),
-                    progress=progress
+                    progress=progress,
+                    memmap_dir=tmp_dir,
                 )
-                my_cube.var_hdu.data = smoothed_var
+                my_cube.var_hdu.data[:] = smoothed_var
 
             if my_cube.mask_hdu is not None:
-                my_cube.mask_hdu.data = smoothed_mask
+                my_cube.mask_hdu.data[:] = smoothed_mask
 
             if  (args.linemap is not None) and (args.linemap > 0):
                 line_map = get_line_map(
@@ -1753,7 +1863,7 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
                     variance=variance,
                     progress=progress
                 )
-                my_cube.spec_hdu.data = line_map
+                my_cube.spec_hdu.data[:] = line_map
 
             if args.debug:
                 embedder = get_ipython_embedder()
@@ -1763,7 +1873,7 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
             if args.verbose:
                 progress.print(f"  - saving to {out_fname}...")
 
-            my_cube.write(out_fname, overwrite=True)
+            my_cube.hdul.flush()
 
 
 def cutout_main(options: Optional[Sequence[str]] = None) -> None:
@@ -1954,9 +2064,18 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
             file=sys.stderr
         )
 
+    outdir = Path(args.outdir) if args.outdir is not None else None
+    if outdir is not None:
+        outdir.mkdir(parents=True, exist_ok=True)
+
     with fits.open(inp_fits_file) as hdul, Progress() as progress:
         for j, (cut_center, cut_size, cut_angle) in enumerate(cutout_list):
-            cutout_name = f"cutout_{inp_fits_file.stem}_{j:04}.fits"
+            if outdir is not None:
+                cutout_name = str(
+                    outdir / f"cutout_{inp_fits_file.stem}_{j:04}.fits"
+                )
+            else:
+                cutout_name = f"cutout_{inp_fits_file.stem}_{j:04}.fits"
 
             if data_structure['type'] == 'cube':
                 with SpectralCube.open(
