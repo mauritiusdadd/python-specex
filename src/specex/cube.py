@@ -54,14 +54,8 @@ from specex.utils import get_pc_transform_params, rotate_data
 from specex.utils import HAS_REGION, parse_regionfile
 from specex.exceptions import get_ipython_embedder
 
-try:
-    from spectral_cube import SpectralCube as AstroSpectralCube
-    from spectral_cube.masks import BooleanArrayMask
-    HAS_SPECTRAL_CUBE = True
-except ImportError:
-    AstroSpectralCube = None
-    BooleanArrayMask = None
-    HAS_SPECTRAL_CUBE = False
+from spectral_cube import SpectralCube as AstroSpectralCube
+from spectral_cube.masks import BooleanArrayMask
 
 if HAS_REGION:
     import regions
@@ -217,7 +211,7 @@ class SpectralCube:
         else:
             return self.spec_hdu.data.shape[1:]
 
-    def to_spectral_cube(self) -> Any:
+    def to_spectral_cube(self) -> AstroSpectralCube:
         """
         Convert to a spectral-cube SpectralCube instance.
 
@@ -226,27 +220,20 @@ class SpectralCube:
         spectral_cube.SpectralCube
             The spectral-cube instance wrapping the spectral data and WCS.
         """
-        if not HAS_SPECTRAL_CUBE:
-            raise ImportError(
-                "spectral-cube is not installed. Please install spectral-cube "
-                "to use this feature."
-            )
         if self.spec_hdu is None:
             raise ValueError("No spectral HDU loaded.")
 
         wcs = self.getSpecWCS()
         data = self.spec_hdu.data
-        mask = None
         if self.mask_hdu is not None:
             bool_mask = (self.mask_hdu.data == 0)
         else:
             bool_mask = np.ones(data.shape, dtype=bool)
 
-        if BooleanArrayMask is not None and wcs is not None:
+        if wcs is not None:
             mask = BooleanArrayMask(bool_mask, wcs)
         else:
             mask = bool_mask
-
         return AstroSpectralCube(
             data=data,
             wcs=wcs,
@@ -270,15 +257,14 @@ class SpectralCube:
         astropy.units.Quantity
             The spectral axis values with physical units.
         """
-        if HAS_SPECTRAL_CUBE and self.spec_hdu is not None:
-            try:
-                sc = self.to_spectral_cube()
-                return sc.spectral_axis.to(unit)
-            except Exception:
-                pass
-
         if self.spec_hdu is None:
             raise ValueError("No spectral HDU loaded.")
+
+        try:
+            sc = self.to_spectral_cube()
+            return sc.spectral_axis.to(unit)
+        except Exception:
+            pass
 
         spec_wcs = self.getSpecWCS()
         n_spec = self.spec_hdu.data.shape[0]
@@ -314,87 +300,6 @@ class SpectralCube:
         """
         sc = self.to_spectral_cube()
         return sc.subcube_from_regions(regions_list)
-
-    def moment(self, order: int = 0, axis: int = 0, **kwargs) -> Any:
-        """
-        Compute moments along the spectral axis.
-
-        Parameters
-        ----------
-        order : int, optional
-            The order of the moment.
-            0: integrated flux
-            1: velocity / centroid wavelength
-            2: line width / dispersion
-            The default is 0.
-        axis : int, optional
-            The axis along which to compute the moment. The default is 0.
-        **kwargs : dict
-            Additional arguments passed to SpectralCube.moment.
-
-        Returns
-        -------
-        astropy.units.Quantity or Projection
-            The moment map.
-        """
-        sc = self.to_spectral_cube()
-        return sc.moment(order=order, axis=axis, **kwargs)
-
-    def smooth(
-        self,
-        spatial_kernel: Any = None,
-        spectral_kernel: Any = None,
-        parallel: bool = False,
-        **kwargs
-    ) -> SpectralCube:
-        """
-        Smooth the datacube spatially and/or spectrally.
-
-        Parameters
-        ----------
-        spatial_kernel : astropy.convolution.Kernel2D or None, optional
-            2D kernel for spatial smoothing.
-        spectral_kernel : astropy.convolution.Kernel1D or None, optional
-            1D kernel for spectral smoothing.
-        parallel : bool, optional
-            Whether to use parallel execution. The default is False.
-        **kwargs : dict
-            Additional arguments passed to spectral_cube smoothing methods.
-
-        Returns
-        -------
-        SpectralCube
-            A new specex SpectralCube containing the smoothed data.
-        """
-        sc = self.to_spectral_cube()
-        if spectral_kernel is not None:
-            sc = sc.spectral_smooth(spectral_kernel, parallel=parallel,
-                                    **kwargs)
-        if spatial_kernel is not None:
-            sc = sc.spatial_smooth(spatial_kernel, parallel=parallel,
-                                   **kwargs)
-
-        # Create a new specex SpectralCube instance
-        new_cube = SpectralCube()
-        smoothed_data = sc.unmasked_data[:].value
-        new_cube.spec_hdu = fits.ImageHDU(
-            data=smoothed_data,
-            header=self.spec_hdu.header.copy()
-        )
-        new_cube.spec_wcs = sc.wcs
-        if self.var_hdu is not None:
-            new_cube.var_hdu = fits.ImageHDU(
-                data=self.var_hdu.data.copy(),
-                header=self.var_hdu.header.copy()
-            )
-            new_cube.var_wcs = self.getVarWCS()
-        if self.mask_hdu is not None:
-            new_cube.mask_hdu = fits.ImageHDU(
-                data=self.mask_hdu.data.copy(),
-                header=self.mask_hdu.header.copy()
-            )
-            new_cube.mask_wcs = self.getMaskWCS()
-        return new_cube
 
     @classmethod
     def open(cls, filename: str | os.PathLike[str],
@@ -1030,7 +935,7 @@ def get_cube_cutout(
         celestial_wcs = None
         specex_wcs = None
 
-    if wave_range is not None and data_wcs is not None and HAS_SPECTRAL_CUBE:
+    if wave_range is not None and data_wcs is not None:
         try:
             w_min, w_max = wave_range[:2]
             if not isinstance(w_min, units.Quantity):
@@ -1444,25 +1349,17 @@ def get_continuum_subtracted_slice(
                 "A valid WCS object must be provided when central_wave, "
                 "line_window and continuum_window are dimensional quantities."
             )
-        line_wave_pix = cube_wcs.spectral.world_to_pixel(line_wave)
+        sc = AstroSpectralCube(data=data, wcs=cube_wcs)
+        slab = sc.spectral_slab(line_wave - line_window,
+                                line_wave + line_window)
+        return np.nanmean(slab.unmasked_data[:].value, axis=0)
 
-        line_window_pix_low = int(np.round(cube_wcs.spectral.world_to_pixel(
-            line_wave - line_window
-        )))
-
-        line_window_pix_high = int(np.round(cube_wcs.spectral.world_to_pixel(
-            line_wave + line_window
-        )))
-
-    else:
-        line_wave_pix = line_wave
-        line_window_pix_low = int(line_wave_pix - line_window)
-        line_window_pix_high = int(line_wave_pix + line_window)
-
+    line_wave_pix = line_wave
+    line_window_pix_low = int(line_wave_pix - line_window)
+    line_window_pix_high = int(line_wave_pix + line_window)
     idx_min = max(0, min(line_window_pix_low, line_window_pix_high))
     idx_max = min(data.shape[0], max(line_window_pix_low, line_window_pix_high))
-    line_slice = np.nanmean(data[idx_min:idx_max, ...], axis=0)
-    return line_slice
+    return np.nanmean(data[idx_min:idx_max, ...], axis=0)
 
 
 def self_correlate(
@@ -1578,6 +1475,14 @@ def smooth_cube(
     if data_mask is not None and data.shape != data_mask.shape:
         raise ValueError("data and data_mask must have the same shape!")
 
+    if cube_wcs is not None and not (
+        cube_wcs.has_celestial and cube_wcs.has_spectral
+    ):
+        try:
+            cube_wcs.wcs.set()
+        except Exception:
+            pass
+
     smoothed_arr = data.copy()
 
     if not isinstance(wave_size, float | int):
@@ -1669,82 +1574,77 @@ def smooth_cube(
     do_spatial_smoothing = spatial_size_pix[0] > 0
     do_spatial_smoothing |= spatial_size_pix[1] > 0
 
-    if do_wave_smoohting:
-        if progress is not None:
-            task_id = progress.add_task(
-                description="Smoothing along spectral axis:",
-                total=smoothed_arr.shape[1]*smoothed_arr.shape[2]
-            )
+    if do_wave_smoohting or do_spatial_smoothing:
+        wcs_for_sc = cube_wcs
+        has_wcs_3d = (
+            wcs_for_sc is not None and
+            wcs_for_sc.has_celestial and
+            wcs_for_sc.has_spectral
+        )
+        if not has_wcs_3d:
+            dummy_w = WCS(naxis=3)
+            dummy_w.wcs.crpix = [1, 1, 1]
+            dummy_w.wcs.cdelt = [1.0, 1.0, 1.0]
+            dummy_w.wcs.crval = [0.0, 0.0, 1.0]
+            dummy_w.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
+            dummy_w.wcs.cunit = ['deg', 'deg', 'Angstrom']
+            dummy_w.wcs.set()
+            wcs_for_sc = dummy_w
 
-        if wave_kernel == "gaussian":
-            kernel = Gaussian1DKernel(wave_size_pix)
-        elif wave_kernel == "box":
-            kernel = Box1DKernel(wave_size_pix)
+        if data_mask is not None:
+            sc_mask = BooleanArrayMask(data_mask == 0, wcs_for_sc)
+        else:
+            full_mask = np.ones(data.shape, dtype=bool)
+            sc_mask = BooleanArrayMask(full_mask, wcs_for_sc)
 
-        for h in range(smoothed_arr.shape[1]):
-            for k in range(smoothed_arr.shape[2]):
-                if progress is not None:
-                    progress.update(task_id, advance=1)
-                smoothed_spaxel = convolve(
-                    smoothed_arr[:, h, k],
-                    kernel=kernel,
-                    nan_treatment='interpolate',
-                    normalize_kernel=True
-                )
-                smoothed_arr[:, h, k] = smoothed_spaxel
+        sc = AstroSpectralCube(
+            data=smoothed_arr, wcs=wcs_for_sc, mask=sc_mask
+        )
 
-        if progress is not None:
-            progress.update(
-                task_id, completed=smoothed_arr.shape[1]*smoothed_arr.shape[2]
-            )
-            progress.remove_task(task_id)
-
-    if do_spatial_smoothing:
-        if progress is not None:
-            task_id = progress.add_task(
-                description="Smoothing along spatial coordinates:",
-                total=smoothed_arr.shape[0]
-            )
-
-        if spatial_kernel == "gaussian":
-            kernel = Gaussian2DKernel(spatial_size_pix[0], spatial_size_pix[1])
-        elif spatial_kernel == "box":
-            kernel = Box2DKernel(np.max(spatial_size_pix))
-        elif spatial_kernel == "top-hat":
-            kernel = Tophat2DKernel(np.max(spatial_size_pix))
-
-        for k, data_slice in enumerate(smoothed_arr):
+        if do_wave_smoohting:
             if progress is not None:
-                progress.update(task_id, advance=1)
+                task_id = progress.add_task(
+                    description="Smoothing along spectral axis:",
+                    total=1
+                )
+            if wave_kernel == "gaussian":
+                w_kernel = Gaussian1DKernel(wave_size_pix)
+            elif wave_kernel == "box":
+                w_kernel = Box1DKernel(wave_size_pix)
+            else:
+                w_kernel = Gaussian1DKernel(wave_size_pix)
+            sc = sc.spectral_smooth(w_kernel, parallel=False)
+            if progress is not None:
+                progress.update(task_id, completed=1)
+                progress.remove_task(task_id)
 
-            smoothed_slice = convolve(
-                data_slice, kernel=kernel,
-                nan_treatment='interpolate',
-                normalize_kernel=True
-            )
-            smoothed_arr[k] = smoothed_slice
+        if do_spatial_smoothing:
+            if progress is not None:
+                task_id = progress.add_task(
+                    description="Smoothing along spatial coordinates:",
+                    total=1
+                )
+            if spatial_kernel == "gaussian":
+                s_kernel = Gaussian2DKernel(
+                    spatial_size_pix[0], spatial_size_pix[1]
+                )
+            elif spatial_kernel == "box":
+                s_kernel = Box2DKernel(np.max(spatial_size_pix))
+            elif spatial_kernel == "top-hat":
+                s_kernel = Tophat2DKernel(np.max(spatial_size_pix))
+            else:
+                s_kernel = Gaussian2DKernel(
+                    spatial_size_pix[0], spatial_size_pix[1]
+                )
+            sc = sc.spatial_smooth(s_kernel, parallel=False)
+            if progress is not None:
+                progress.update(task_id, completed=1)
+                progress.remove_task(task_id)
 
-        if progress is not None:
-            progress.update(task_id, completed=smoothed_arr.shape[0])
-            progress.remove_task(task_id)
+        smoothed_arr = sc.unmasked_data[:].value
 
     if data_mask is not None:
-        smoothed_mask = data_mask.copy().astype(bool)
-        if progress is not None:
-            task_id = progress.add_task(
-                description="Computing data mask:",
-                total=smoothed_arr.shape[0]
-            )
-
-        for k, mask_slice in enumerate(smoothed_mask):
-            if progress is not None:
-                progress.update(task_id, advance=1)
-            smoothed_mask[k] &= ~np.isfinite(smoothed_arr[k]) | mask_slice
-
-        if progress is not None:
-            progress.update(task_id, completed=smoothed_arr.shape[0])
-            progress.remove_task(task_id)
-
+        smoothed_mask = (data_mask != 0) | ~np.isfinite(smoothed_arr)
         smoothed_mask = smoothed_mask.astype('int8')
     else:
         smoothed_mask = None
