@@ -75,6 +75,19 @@ def test_spectral_cube_open_and_properties(synthetic_cube):
     assert sub is not None
     assert sub.shape[0] == 25
 
+    # Test moment 0 and 1
+    m0 = cube.moment(order=0)
+    assert m0.shape == (16, 16)
+    m1 = cube.moment(order=1)
+    assert m1.shape == (16, 16)
+
+    # Test smooth
+    from astropy.convolution import Gaussian1DKernel, Gaussian2DKernel
+    k1 = Gaussian1DKernel(stddev=1.0)
+    k2 = Gaussian2DKernel(x_stddev=1.0)
+    smoothed = cube.smooth(spatial_kernel=k2, spectral_kernel=k1)
+    assert smoothed.spec_hdu.data.shape == (25, 16, 16)
+
     cube.close()
 
 

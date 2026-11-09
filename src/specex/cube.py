@@ -239,10 +239,14 @@ class SpectralCube:
         mask = None
         if self.mask_hdu is not None:
             bool_mask = (self.mask_hdu.data == 0)
-            if BooleanArrayMask is not None and wcs is not None:
-                mask = BooleanArrayMask(bool_mask, wcs)
-            else:
-                mask = bool_mask
+        else:
+            bool_mask = np.ones(data.shape, dtype=bool)
+
+        if BooleanArrayMask is not None and wcs is not None:
+            mask = BooleanArrayMask(bool_mask, wcs)
+        else:
+            mask = bool_mask
+
         return AstroSpectralCube(
             data=data,
             wcs=wcs,
@@ -310,6 +314,87 @@ class SpectralCube:
         """
         sc = self.to_spectral_cube()
         return sc.subcube_from_regions(regions_list)
+
+    def moment(self, order: int = 0, axis: int = 0, **kwargs) -> Any:
+        """
+        Compute moments along the spectral axis.
+
+        Parameters
+        ----------
+        order : int, optional
+            The order of the moment.
+            0: integrated flux
+            1: velocity / centroid wavelength
+            2: line width / dispersion
+            The default is 0.
+        axis : int, optional
+            The axis along which to compute the moment. The default is 0.
+        **kwargs : dict
+            Additional arguments passed to SpectralCube.moment.
+
+        Returns
+        -------
+        astropy.units.Quantity or Projection
+            The moment map.
+        """
+        sc = self.to_spectral_cube()
+        return sc.moment(order=order, axis=axis, **kwargs)
+
+    def smooth(
+        self,
+        spatial_kernel: Any = None,
+        spectral_kernel: Any = None,
+        parallel: bool = False,
+        **kwargs
+    ) -> SpectralCube:
+        """
+        Smooth the datacube spatially and/or spectrally.
+
+        Parameters
+        ----------
+        spatial_kernel : astropy.convolution.Kernel2D or None, optional
+            2D kernel for spatial smoothing.
+        spectral_kernel : astropy.convolution.Kernel1D or None, optional
+            1D kernel for spectral smoothing.
+        parallel : bool, optional
+            Whether to use parallel execution. The default is False.
+        **kwargs : dict
+            Additional arguments passed to spectral_cube smoothing methods.
+
+        Returns
+        -------
+        SpectralCube
+            A new specex SpectralCube containing the smoothed data.
+        """
+        sc = self.to_spectral_cube()
+        if spectral_kernel is not None:
+            sc = sc.spectral_smooth(spectral_kernel, parallel=parallel,
+                                    **kwargs)
+        if spatial_kernel is not None:
+            sc = sc.spatial_smooth(spatial_kernel, parallel=parallel,
+                                   **kwargs)
+
+        # Create a new specex SpectralCube instance
+        new_cube = SpectralCube()
+        smoothed_data = sc.unmasked_data[:].value
+        new_cube.spec_hdu = fits.ImageHDU(
+            data=smoothed_data,
+            header=self.spec_hdu.header.copy()
+        )
+        new_cube.spec_wcs = sc.wcs
+        if self.var_hdu is not None:
+            new_cube.var_hdu = fits.ImageHDU(
+                data=self.var_hdu.data.copy(),
+                header=self.var_hdu.header.copy()
+            )
+            new_cube.var_wcs = self.getVarWCS()
+        if self.mask_hdu is not None:
+            new_cube.mask_hdu = fits.ImageHDU(
+                data=self.mask_hdu.data.copy(),
+                header=self.mask_hdu.header.copy()
+            )
+            new_cube.mask_wcs = self.getMaskWCS()
+        return new_cube
 
     @classmethod
     def open(cls, filename: str | os.PathLike[str],
