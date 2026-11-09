@@ -1,40 +1,112 @@
-# This is a basic workflow to help you get started with Actions
-
 name: tagged-release
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on new tag
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "[0-9].[0-9].[0-9]*"
 
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # This workflow contains a single job called "tagged-release"
-  tagged-release:
-    name: "Tagged Release"
-    # The type of runner that the job will run on
+  test:
+    name: "Run test suite"
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
-
-      # Use automatic-release action
-      - uses: "marvinpinto/action-automatic-releases@latest"
+      - name: "Set up Python ${{ matrix.python-version }}"
+        uses: actions/setup-python@v5
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          prerelease: false
+          python-version: "${{ matrix.python-version }}"
+      - name: Cache test data
+        id: cache-test
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-test-data
+        with:
+          path: |
+            ./test/data
+          key: ${{ runner.os }}-build-${{ env.cache-name }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Install program and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[all,test]
+      - name: Running tests
+        run: |
+          python -m pytest -s test/
+
+  build:
+    name: "Build distribution packages"
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build tool
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+      - name: Build sdist and wheel
+        run: |
+          python -m build
+      - name: Store built distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  release:
+    name: "Create GitHub Release"
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
           files: |
+            dist/*
             LICENSE
             README.md
+
+  publish-to-pypi:
+    name: "Publish to PyPI via OIDC"
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/specex
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
