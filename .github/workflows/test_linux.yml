@@ -46,5 +46,18 @@ jobs:
     - name: Running tests
       run: |
         python -m coverage run -m pytest -s test/test_all.py
-    - name: Coveralls
+    - name: Coveralls Parallel
       uses: coverallsapp/github-action@v2
+      with:
+        parallel: true
+        flag-name: run-${{ matrix.python-version }}
+
+  finish:
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: Coveralls Finished
+      uses: coverallsapp/github-action@v2
+      with:
+        parallel-finished: true
