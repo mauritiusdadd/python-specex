@@ -48,6 +48,7 @@ jobs:
         python -m coverage run -m pytest -s test/test_all.py
     - name: Coveralls Parallel
       uses: coverallsapp/github-action@v2
+      continue-on-error: true
       with:
         parallel: true
         flag-name: run-${{ matrix.python-version }}
@@ -59,5 +60,6 @@ jobs:
     steps:
     - name: Coveralls Finished
       uses: coverallsapp/github-action@v2
+      continue-on-error: true
       with:
         parallel-finished: true
