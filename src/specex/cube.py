@@ -54,6 +54,13 @@ from specex.utils import get_pc_transform_params, rotate_data
 from specex.utils import HAS_REGION, parse_regionfile
 from specex.exceptions import get_ipython_embedder
 
+try:
+    from spectral_cube import SpectralCube as AstroSpectralCube
+    HAS_SPECTRAL_CUBE = True
+except ImportError:
+    AstroSpectralCube = None
+    HAS_SPECTRAL_CUBE = False
+
 if HAS_REGION:
     import regions
 
@@ -207,6 +214,35 @@ class SpectralCube:
             return [None, None]
         else:
             return self.spec_hdu.data.shape[1:]
+
+    def to_spectral_cube(self) -> Any:
+        """
+        Convert to a spectral-cube SpectralCube instance.
+
+        Returns
+        -------
+        spectral_cube.SpectralCube
+            The spectral-cube instance wrapping the spectral data and WCS.
+        """
+        if not HAS_SPECTRAL_CUBE:
+            raise ImportError(
+                "spectral-cube is not installed. Please install spectral-cube "
+                "to use this feature."
+            )
+        if self.spec_hdu is None:
+            raise ValueError("No spectral HDU loaded.")
+
+        wcs = self.getSpecWCS()
+        data = self.spec_hdu.data
+        mask = None
+        if self.mask_hdu is not None:
+            mask = self.mask_hdu.data == 0
+        return AstroSpectralCube(
+            data=data,
+            wcs=wcs,
+            mask=mask,
+            header=self.spec_hdu.header
+        )
 
     @classmethod
     def open(cls, filename: str | os.PathLike[str],

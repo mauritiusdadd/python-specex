@@ -54,6 +54,13 @@ def test_spectral_cube_open_and_properties(synthetic_cube):
     assert cube.getVarWCS() is not None
     assert cube.getMaskWCS() is not None
     assert cube.getSpatialSizePixels() == (16, 16)
+
+    # Test conversion to spectral_cube.SpectralCube
+    sc = cube.to_spectral_cube()
+    assert sc is not None
+    assert sc.shape == (25, 16, 16)
+    assert len(sc.spectral_axis) == 25
+
     cube.close()
 
 

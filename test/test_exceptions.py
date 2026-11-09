@@ -31,9 +31,11 @@ def test_exception_handler(monkeypatch):
             sexc.exception_handler(exc_type, exc_val, exc_tb)
 
     # Test ipython path without entering interactive pdb loop
-    monkeypatch.setattr(sexc, "HAS_IPYTHON", True)
     dummy_tb = lambda t, v, tb: "formatted_tb"
-    monkeypatch.setattr(sexc.ultratb, "FormattedTB", lambda **kwargs: dummy_tb)
+    class DummyUltratb:
+        FormattedTB = lambda self, **kwargs: dummy_tb
+    monkeypatch.setattr(sexc, "ultratb", DummyUltratb(), raising=False)
+    monkeypatch.setattr(sexc, "HAS_IPYTHON", True)
     try:
         raise RuntimeError("Test error 2")
     except RuntimeError:
