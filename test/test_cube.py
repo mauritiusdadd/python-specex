@@ -61,6 +61,20 @@ def test_spectral_cube_open_and_properties(synthetic_cube):
     assert sc.shape == (25, 16, 16)
     assert len(sc.spectral_axis) == 25
 
+    # Test get_spectral_axis
+    wave = cube.get_spectral_axis()
+    assert len(wave) == 25
+    assert wave.unit == u.Angstrom
+    assert np.isclose(wave[0].value, 5000.0)
+
+    # Test subcube_from_regions
+    from regions import CircleSkyRegion
+    reg = CircleSkyRegion(center=SkyCoord(10.0 * u.deg, 20.0 * u.deg),
+                          radius=0.0003 * u.deg)
+    sub = cube.subcube_from_regions([reg])
+    assert sub is not None
+    assert sub.shape[0] == 25
+
     cube.close()
 
 

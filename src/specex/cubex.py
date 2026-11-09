@@ -1080,17 +1080,10 @@ def specex(options: Optional[list[str]] = None) -> None:
             if my_cube.mask_hdu is not None:
                 print(f"Mask HDU: {my_cube.mask_hdu.name}")
 
-        # Get spectral and celstial WCS from the cube
+        # Get spectral and celestial WCS from the cube
         celestial_wcs = my_cube.getSpecWCS().celestial
         spectral_wcs = my_cube.getSpecWCS().spectral
-        cube_spectral_pixels = np.arange(my_cube.spec_hdu.data.shape[0])
-        try:
-            cube_wavelengths = spectral_wcs.pixel_to_world(cube_spectral_pixels).value
-        except Exception:
-            crpix3 = my_cube.spec_hdu.header.get('CRPIX3', 1.0)
-            crval3 = my_cube.spec_hdu.header.get('CRVAL3', 1.0)
-            cdelt3 = my_cube.spec_hdu.header.get('CD3_3', my_cube.spec_hdu.header.get('CDELT3', 1.0))
-            cube_wavelengths = crval3 + (cube_spectral_pixels - (crpix3 - 1)) * cdelt3
+        cube_wavelengths = my_cube.get_spectral_axis(units.Angstrom).value
 
         # If weighting with an external image, read that
         valid_wl_modes = ['none', 'whitelight', 'log-whitelight']

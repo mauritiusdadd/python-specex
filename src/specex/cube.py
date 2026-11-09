@@ -56,9 +56,11 @@ from specex.exceptions import get_ipython_embedder
 
 try:
     from spectral_cube import SpectralCube as AstroSpectralCube
+    from spectral_cube.masks import BooleanArrayMask
     HAS_SPECTRAL_CUBE = True
 except ImportError:
     AstroSpectralCube = None
+    BooleanArrayMask = None
     HAS_SPECTRAL_CUBE = False
 
 if HAS_REGION:
@@ -236,13 +238,78 @@ class SpectralCube:
         data = self.spec_hdu.data
         mask = None
         if self.mask_hdu is not None:
-            mask = self.mask_hdu.data == 0
+            bool_mask = (self.mask_hdu.data == 0)
+            if BooleanArrayMask is not None and wcs is not None:
+                mask = BooleanArrayMask(bool_mask, wcs)
+            else:
+                mask = bool_mask
         return AstroSpectralCube(
             data=data,
             wcs=wcs,
             mask=mask,
             header=self.spec_hdu.header
         )
+
+    def get_spectral_axis(
+        self, unit: units.Unit | str = units.Angstrom
+    ) -> Quantity:
+        """
+        Get the 1D wavelength/frequency spectral axis.
+
+        Parameters
+        ----------
+        unit : astropy.units.Unit or str, optional
+            The desired output unit. The default is units.Angstrom.
+
+        Returns
+        -------
+        astropy.units.Quantity
+            The spectral axis values with physical units.
+        """
+        if HAS_SPECTRAL_CUBE and self.spec_hdu is not None:
+            try:
+                sc = self.to_spectral_cube()
+                return sc.spectral_axis.to(unit)
+            except Exception:
+                pass
+
+        if self.spec_hdu is None:
+            raise ValueError("No spectral HDU loaded.")
+
+        spec_wcs = self.getSpecWCS()
+        n_spec = self.spec_hdu.data.shape[0]
+        pix = np.arange(n_spec)
+        if spec_wcs is not None and spec_wcs.has_spectral:
+            try:
+                wave = spec_wcs.spectral.pixel_to_world(pix)
+                return wave.to(unit)
+            except Exception:
+                pass
+
+        hdr = self.spec_hdu.header
+        crpix3 = hdr.get('CRPIX3', 1.0)
+        crval3 = hdr.get('CRVAL3', 1.0)
+        cdelt3 = hdr.get('CD3_3', hdr.get('CDELT3', 1.0))
+        cunit3 = hdr.get('CUNIT3', 'Angstrom')
+        wave_vals = crval3 + (pix - (crpix3 - 1)) * cdelt3
+        return Quantity(wave_vals, cunit3).to(unit)
+
+    def subcube_from_regions(self, regions_list: list[Any]) -> Any:
+        """
+        Extract a subcube defined by a list of regions.
+
+        Parameters
+        ----------
+        regions_list : list
+            A list of astropy regions objects.
+
+        Returns
+        -------
+        spectral_cube.SpectralCube
+            The extracted subcube.
+        """
+        sc = self.to_spectral_cube()
+        return sc.subcube_from_regions(regions_list)
 
     @classmethod
     def open(cls, filename: str | os.PathLike[str],
