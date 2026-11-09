@@ -945,6 +945,21 @@ def get_cube_cutout(
         celestial_wcs = None
         specex_wcs = None
 
+    if wave_range is not None and data_wcs is not None and HAS_SPECTRAL_CUBE:
+        try:
+            w_min, w_max = wave_range[:2]
+            if not isinstance(w_min, units.Quantity):
+                w_unit = specex_wcs.wcs.cunit[0]
+                w_min = units.Quantity(w_min, w_unit)
+                w_max = units.Quantity(w_max, w_unit)
+            temp_sc = AstroSpectralCube(data=data, wcs=data_wcs)
+            slab = temp_sc.spectral_slab(w_min, w_max)
+            data = slab.unmasked_data[:].value
+            data_wcs = slab.wcs
+            specex_wcs = data_wcs.spectral
+        except Exception:
+            pass
+
     cutout_data_list: list[np.ndarray] = []
 
     if progress is not None:

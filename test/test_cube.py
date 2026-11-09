@@ -122,3 +122,18 @@ def test_cutout_main(synthetic_cube, tmp_path):
     expected_out = "cutout_synth_cube_0000.fits"
     assert os.path.exists(expected_out)
     os.remove(expected_out)
+
+
+def test_get_cube_cutout_wave_range(synthetic_cube):
+    from specex.cube import get_cube_cutout
+    cube = SpectralCube.open(synthetic_cube, spec_hdu_index="DATA")
+    cutout = get_cube_cutout(
+        data=cube.spec_hdu.data,
+        center=SkyCoord(10.0 * u.deg, 20.0 * u.deg),
+        size=(0.0004 * u.deg, 0.0004 * u.deg),
+        data_wcs=cube.getSpecWCS(),
+        wave_range=(5050 * u.Angstrom, 5150 * u.Angstrom)
+    )
+    assert cutout["data"].shape[0] == 11
+    assert cutout["wcs"].has_spectral
+    cube.close()
