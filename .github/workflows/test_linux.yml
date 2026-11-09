@@ -45,7 +45,7 @@ jobs:
         python -m pip install .[all,test]
     - name: Running tests
       run: |
-        python -m coverage run -m pytest -s test/test_all.py
+        python -m coverage run -m pytest -s test/
     - name: Coveralls Parallel
       uses: coverallsapp/github-action@v2
       continue-on-error: true
