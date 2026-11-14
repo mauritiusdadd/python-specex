@@ -49,7 +49,7 @@ from specex.utils import (
     get_log_img, stack,
     get_spectrum_snr, get_spectrum_snr_emission, parse_regionfile,
     HAS_REGION, HAS_REPROJECT, simple_pbar_callback, do_reproject,
-    nannmad
+    nannmad, REFRACTION_METHODS, detect_wave_type, convert_air_to_vac
 )
 
 from specex import __version__ as sp_ver
@@ -353,12 +353,55 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
         'enabled thorugh the appropriate parameter).'
     )
 
+    wave_medium_group = parser.add_mutually_exclusive_group()
+    wave_medium_group.add_argument(
+        '--from-air', action='store_true', default=False,
+        help='Force treating input cube wavelengths as air wavelengths.'
+    )
+    wave_medium_group.add_argument(
+        '--from-vac', action='store_true', default=False,
+        help='Force treating input cube wavelengths as vacuum wavelengths.'
+    )
+
+    methods_str = ', '.join(REFRACTION_METHODS)
+    parser.add_argument(
+        '--to-vac', nargs='?', const='Greisen2006', default=None,
+        metavar='METHOD', choices=list(REFRACTION_METHODS),
+        help=(
+            'Convert input wavelengths from air to vacuum when needed. '
+            'Optionally specify a conversion method '
+            f'({methods_str}; default: Greisen2006).'
+        )
+    )
+
     parser.add_argument(
         "--debug", action='store_true', default=False,
         help="Enable some debug otupout on plots and on the console."
     )
 
-    args = parser.parse_args(options)
+    raw_options = sys.argv[1:] if options is None else list(options)
+    norm_options: list[str] = []
+    idx = 0
+    while idx < len(raw_options):
+        tok = raw_options[idx]
+        if tok == '--to-vac' and idx + 1 < len(raw_options):
+            nxt = raw_options[idx + 1]
+            is_fits_path = (
+                not nxt.startswith('-')
+                and nxt not in REFRACTION_METHODS
+                and (
+                    os.path.exists(nxt)
+                    or nxt.lower().endswith(('.fits', '.fit', '.fits.gz'))
+                )
+            )
+            if is_fits_path:
+                norm_options.append('--to-vac=Greisen2006')
+                idx += 1
+                continue
+        norm_options.append(tok)
+        idx += 1
+
+    args = parser.parse_args(norm_options)
 
     if args.cutouts_image and not os.path.exists(args.cutouts_image):
         print(f"The file {args.cutouts_image} does not exist!")
@@ -496,7 +539,8 @@ def get_spsingle_fits(
     no_nans=False,
     cutout_data=None,
     cutout_wcs=None,
-    wavelengths=None
+    wavelengths=None,
+    wave_type: Optional[str] = None,
 ):
     """
     Generate a FITS file containing the spectral data conforming to the IVOA
@@ -522,6 +566,9 @@ def get_spsingle_fits(
         WCS associated with the cutout image.
     wavelengths : numpy.ndarray, optional
         Wavelength grid corresponding to the spectrum pixels.
+    wave_type : str or None, optional
+        Wavelength medium (``'air'`` or ``'vacuum'``). When ``None``, it is
+        auto-detected from the provided headers.
 
     Returns
     -------
@@ -541,7 +588,9 @@ def get_spsingle_fits(
     main_hdu = fits.PrimaryHDU()
     main_hdu.header['VOCLASS'] = ('SPECTRUM 1.2', 'IVOA Spectrum Data Model')
     main_hdu.header['VOPUB'] = ('IVOA', 'VO standard publication')
-    main_hdu.header['CREATOR'] = (f'specex {sp_ver}', 'Software creating the dataset')
+    main_hdu.header['CREATOR'] = (
+        f'specex {sp_ver}', 'Software creating the dataset'
+    )
 
     for key, val in main_header.items():
         try:
@@ -551,6 +600,26 @@ def get_spsingle_fits(
                 f"Invalid value for spec header: {key} = {val}",
                 file=sys.stderr
             )
+
+    if wave_type is None:
+        detected_type = detect_wave_type(
+            header=spec_hdu_header,
+            headers=[main_hdu.header, spec_wcs_header],
+        )
+    else:
+        detected_type = str(wave_type).strip().lower()
+
+    is_air = (detected_type == 'air')
+    wtype_str = 'air' if is_air else 'vacuum'
+    main_hdu.header['WAVETYPE'] = (
+        wtype_str, 'Wavelength medium (air or vacuum)'
+    )
+    main_hdu.header['AIRORVAC'] = (
+        'air' if is_air else 'vac', 'Wavelength medium'
+    )
+    main_hdu.header['VACUUM'] = (
+        not is_air, 'True if wavelengths are in vacuum'
+    )
 
     flux_unit = spec_hdu_header.get('BUNIT', 'adu')
     wave_unit = spec_hdu_header.get('CUNIT3', spec_hdu_header.get('CUNIT1', 'Angstrom'))
@@ -611,10 +680,17 @@ def get_spsingle_fits(
     )
 
     tbl_hdu = fits.BinTableHDU.from_columns(cols, name='SPECTRUM')
-    tbl_hdu.header['UCD1'] = ('em.wl', 'Wavelength UCD')
+    ucd_wl = 'em.wl;obs.atmos' if is_air else 'em.wl'
+    tbl_hdu.header['UCD1'] = (ucd_wl, 'Wavelength UCD')
+    tbl_hdu.header['TUCD1'] = (ucd_wl, 'Wavelength UCD')
+    tbl_hdu.header['WAVETYPE'] = (
+        wtype_str, 'Wavelength medium (air or vacuum)'
+    )
     tbl_hdu.header['UCD2'] = ('phot.flux.density;em.wl', 'Flux density UCD')
     if obj_spectrum_var is not None:
-        tbl_hdu.header['UCD3'] = ('stat.error;phot.flux.density;em.wl', 'Flux error UCD')
+        tbl_hdu.header['UCD3'] = (
+            'stat.error;phot.flux.density;em.wl', 'Flux error UCD'
+        )
         tbl_hdu.header['UCD4'] = ('meta.code.qual', 'Quality flag UCD')
     else:
         tbl_hdu.header['UCD3'] = ('meta.code.qual', 'Quality flag UCD')
@@ -694,7 +770,8 @@ def load_specex_file(
         * 'r_curve': the resolution curve,
         * 'nan_mask': a mask indicating invalid fluxes,
         * 'flux_units': the units of the fluxes,
-        * 'wavelength_units': the units of the wavelengths
+        * 'wavelength_units': the units of the wavelengths,
+        * 'wave_type': the wavelength medium ('air' or 'vacuum')
 
     """
     with fits.open(filename) as hdul:
@@ -902,6 +979,12 @@ def load_specex_file(
                 "do not match variance data one!"
             )
 
+        wave_type = detect_wave_type(
+            header=spec_hdu.header if spec_hdu is not None else main_header,
+            headers=[h.header for h in hdul],
+            file_path=filename,
+        )
+
     return {
         'id': spec_id,
         'main_header': main_header,
@@ -911,7 +994,8 @@ def load_specex_file(
         'r_curve': wd,
         'nan_mask': flux_nan_mask,
         'flux_units': flux_units,
-        'wavelength_units': wavelength_units
+        'wavelength_units': wavelength_units,
+        'wave_type': wave_type,
     }
 
 
@@ -1080,10 +1164,31 @@ def specex(options: Optional[list[str]] = None) -> None:
             if my_cube.mask_hdu is not None:
                 print(f"Mask HDU: {my_cube.mask_hdu.name}")
 
+        # Determine input wavelength medium and spectral grid
+        if args.from_air:
+            input_wave_type = 'air'
+        elif args.from_vac:
+            input_wave_type = 'vacuum'
+        else:
+            input_wave_type = my_cube.get_wave_type()
+
         # Get spectral and celestial WCS from the cube
         celestial_wcs = my_cube.getSpecWCS().celestial
         spectral_wcs = my_cube.getSpecWCS().spectral
-        cube_wavelengths = my_cube.get_spectral_axis(units.Angstrom).value
+        cube_wave_qty = my_cube.get_spectral_axis(units.Angstrom)
+
+        converted_vac_method: Optional[str] = None
+        if args.to_vac is not None:
+            if input_wave_type == 'air':
+                cube_wave_qty = convert_air_to_vac(
+                    cube_wave_qty, method=args.to_vac
+                )
+                converted_vac_method = args.to_vac
+            output_wave_type = 'vacuum'
+        else:
+            output_wave_type = input_wave_type
+
+        cube_wavelengths = cube_wave_qty.value
 
         # If weighting with an external image, read that
         valid_wl_modes = ['none', 'whitelight', 'log-whitelight']
@@ -1570,6 +1675,12 @@ def specex(options: Optional[list[str]] = None) -> None:
                 )
             }
 
+            if converted_vac_method is not None:
+                main_header['VAC_METH'] = (
+                    converted_vac_method,
+                    'Air-to-vacuum conversion method',
+                )
+
             # Copy the spectral part of the WCS into the new FITS
             spec_wcs_header = spectral_wcs.to_header()
 
@@ -1577,21 +1688,30 @@ def specex(options: Optional[list[str]] = None) -> None:
             try:
                 obj_cutout_dict = get_gray_cutout(
                     cutout_img_data,
-                    center=SkyCoord(obj_ra, obj_dec, unit='deg', frame=coord_frame),
+                    center=SkyCoord(
+                        obj_ra, obj_dec, unit='deg', frame=coord_frame
+                    ),
                     size=cutout_box_size,
                     data_wcs=cutout_img_wcs
                 )
             except Exception as cut_err:
                 if args.debug:
-                    logging.warning(f"Could not extract cutout for {obj_id}: {cut_err}")
+                    logging.warning(
+                        f"Could not extract cutout for {obj_id}: {cut_err}"
+                    )
 
             hdul = get_spsingle_fits(
                 main_header, spec_wcs_header,
                 obj_spectrum, my_cube.spec_hdu.header,
                 obj_spectrum_var, no_nans=args.no_nans,
-                cutout_data=obj_cutout_dict['data'] if obj_cutout_dict else None,
-                cutout_wcs=obj_cutout_dict['wcs'] if obj_cutout_dict else None,
-                wavelengths=cube_wavelengths
+                cutout_data=(
+                    obj_cutout_dict['data'] if obj_cutout_dict else None
+                ),
+                cutout_wcs=(
+                    obj_cutout_dict['wcs'] if obj_cutout_dict else None
+                ),
+                wavelengths=cube_wavelengths,
+                wave_type=output_wave_type,
             )
 
             out_file_name = os.path.join(outdir, outname)

@@ -28,7 +28,6 @@ import sys
 import shutil
 import logging
 import argparse
-import tempfile
 import warnings
 from pathlib import Path
 
@@ -53,10 +52,13 @@ from astropy.convolution import (
 
 from specex.utils import get_pc_transform_params, rotate_data
 from specex.utils import HAS_REGION, parse_regionfile
+from specex.utils import detect_wave_type, convert_air_to_vac
 from specex.exceptions import get_ipython_embedder
 
-from spectral_cube import SpectralCube as AstroSpectralCube
-from spectral_cube.masks import BooleanArrayMask
+try:
+    from specutils import Spectrum
+except ImportError:
+    from specutils import Spectrum1D as Spectrum
 
 if HAS_REGION:
     import regions
@@ -68,6 +70,40 @@ KNOWN_MASK_EXT_NAMES = ['mask', 'platemask', 'footprint', 'dq', 'nan_mask']
 KNOWN_WAVE_EXT_NAMES = ['wave', 'wavelenght', 'lambda', 'lam']
 KNOWN_RCURVE_EXT_NAMES = ['r', 'reso', 'resolution', 'rcurve', 'wd']
 KNOWN_RGB_EXT_NAMES = ['r', 'g', 'b', 'red', 'green', 'blue']
+
+
+def _spectral_slab(
+    data: np.ndarray,
+    cube_wcs: WCS,
+    w_min: units.Quantity,
+    w_max: units.Quantity,
+) -> tuple[np.ndarray, WCS]:
+    """Slice a 3D datacube along its spectral axis between two bounds."""
+    n_spec = data.shape[0]
+    spec_wcs = cube_wcs.spectral
+    p_lo = float(spec_wcs.world_to_pixel(w_min))
+    p_hi = float(spec_wcs.world_to_pixel(w_max))
+    if p_lo > p_hi:
+        p_lo, p_hi = p_hi, p_lo
+    idx_min = max(0, int(np.floor(p_lo)))
+    idx_max = min(n_spec, int(np.ceil(p_hi)) + 1)
+    if idx_min >= idx_max:
+        raise ValueError(
+            "Requested wavelength range does not overlap datacube!"
+        )
+    slab_data = data[idx_min:idx_max, ...]
+    slab_wcs = cube_wcs[idx_min:idx_max, :, :]
+    return slab_data, slab_wcs
+
+
+def _shift_wcs_crpix(header: fits.Header, x0: int, y0: int) -> fits.Header:
+    """Return a copy of a FITS header with spatial CRPIX shifted by cutout."""
+    shifted = header.copy()
+    if 'CRPIX1' in shifted:
+        shifted['CRPIX1'] = float(shifted['CRPIX1']) - x0
+    if 'CRPIX2' in shifted:
+        shifted['CRPIX2'] = float(shifted['CRPIX2']) - y0
+    return shifted
 
 
 class SpectralCube:
@@ -212,38 +248,87 @@ class SpectralCube:
         else:
             return self.spec_hdu.data.shape[1:]
 
-    def to_spectral_cube(self) -> AstroSpectralCube:
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Return the shape of the loaded spectral datacube."""
+        if self.spec_hdu is None:
+            return ()
+        return tuple(self.spec_hdu.data.shape)
+
+    def get_wave_type(self) -> str:
         """
-        Convert to a spectral-cube SpectralCube instance.
+        Detect whether cube wavelengths are defined in air or vacuum.
 
         Returns
         -------
-        spectral_cube.SpectralCube
-            The spectral-cube instance wrapping the spectral data and WCS.
+        str
+            Either ``'air'`` or ``'vacuum'``.
+        """
+        spec_hdr = self.spec_hdu.header if self.spec_hdu is not None else None
+        all_hdrs = [h.header for h in self.hdul] if self.hdul else None
+        return detect_wave_type(
+            wcs_obj=self.getSpecWCS(),
+            header=spec_hdr,
+            headers=all_hdrs,
+            file_path=self.filename,
+        )
+
+    def to_spectrum(self) -> Spectrum:
+        """
+        Convert to a specutils Spectrum instance.
+
+        Returns
+        -------
+        specutils.Spectrum
+            The specutils Spectrum instance wrapping the spectral cube.
         """
         if self.spec_hdu is None:
             raise ValueError("No spectral HDU loaded.")
 
-        wcs = self.getSpecWCS()
-        data = self.spec_hdu.data
-        if self.mask_hdu is not None:
-            bool_mask = (self.mask_hdu.data == 0)
-        else:
-            bool_mask = np.ones(data.shape, dtype=bool)
+        hdr = self.spec_hdu.header
+        bunit = hdr.get('BUNIT', 'adu')
+        try:
+            flux_unit = units.Unit(bunit)
+        except Exception:
+            flux_unit = units.adu
 
-        if wcs is not None:
-            mask = BooleanArrayMask(bool_mask, wcs)
+        data = np.asarray(self.spec_hdu.data, dtype=float)
+        if self.mask_hdu is not None:
+            mask = (self.mask_hdu.data != 0)
+            data = np.where(mask, np.nan, data)
         else:
-            mask = bool_mask
-        return AstroSpectralCube(
-            data=data,
-            wcs=wcs,
-            mask=mask,
-            header=self.spec_hdu.header
+            mask = ~np.isfinite(data)
+
+        flux = data * flux_unit
+        wcs = self.getSpecWCS()
+        meta = {'header': hdr.copy(), 'wave_type': self.get_wave_type()}
+
+        if wcs is not None and wcs.has_spectral:
+            return Spectrum(
+                flux=flux,
+                wcs=wcs,
+                spectral_axis_index=0,
+                mask=mask,
+                meta=meta,
+            )
+
+        wave = self.get_spectral_axis()
+        return Spectrum(
+            flux=np.moveaxis(flux, 0, -1),
+            spectral_axis=wave,
+            mask=np.moveaxis(mask, 0, -1),
+            meta=meta,
         )
 
+    def to_spectral_cube(self) -> Spectrum:
+        """Return a specutils Spectrum wrapping the datacube."""
+        return self.to_spectrum()
+
     def get_spectral_axis(
-        self, unit: units.Unit | str = units.Angstrom
+        self,
+        unit: units.Unit | str = units.Angstrom,
+        to_vac: bool = False,
+        vac_method: str = 'Greisen2006',
     ) -> Quantity:
         """
         Get the 1D wavelength/frequency spectral axis.
@@ -251,7 +336,13 @@ class SpectralCube:
         Parameters
         ----------
         unit : astropy.units.Unit or str, optional
-            The desired output unit. The default is units.Angstrom.
+            The desired output unit. The default is ``units.Angstrom``.
+        to_vac : bool, optional
+            If True and the input wavelengths are in air, convert them to
+            vacuum wavelengths. The default is False.
+        vac_method : str, optional
+            Air-to-vacuum method passed to ``convert_air_to_vac`` when
+            ``to_vac=True``. The default is ``'Greisen2006'``.
 
         Returns
         -------
@@ -261,33 +352,33 @@ class SpectralCube:
         if self.spec_hdu is None:
             raise ValueError("No spectral HDU loaded.")
 
-        try:
-            sc = self.to_spectral_cube()
-            return sc.spectral_axis.to(unit)
-        except Exception:
-            pass
-
+        wave: Optional[Quantity] = None
         spec_wcs = self.getSpecWCS()
         n_spec = self.spec_hdu.data.shape[0]
         pix = np.arange(n_spec)
         if spec_wcs is not None and spec_wcs.has_spectral:
             try:
                 wave = spec_wcs.spectral.pixel_to_world(pix)
-                return wave.to(unit)
             except Exception:
-                pass
+                wave = None
 
-        hdr = self.spec_hdu.header
-        crpix3 = hdr.get('CRPIX3', 1.0)
-        crval3 = hdr.get('CRVAL3', 1.0)
-        cdelt3 = hdr.get('CD3_3', hdr.get('CDELT3', 1.0))
-        cunit3 = hdr.get('CUNIT3', 'Angstrom')
-        wave_vals = crval3 + (pix - (crpix3 - 1)) * cdelt3
-        return Quantity(wave_vals, cunit3).to(unit)
+        if wave is None:
+            hdr = self.spec_hdu.header
+            crpix3 = hdr.get('CRPIX3', 1.0)
+            crval3 = hdr.get('CRVAL3', 1.0)
+            cdelt3 = hdr.get('CD3_3', hdr.get('CDELT3', 1.0))
+            cunit3 = hdr.get('CUNIT3', 'Angstrom')
+            wave_vals = crval3 + (pix - (crpix3 - 1)) * cdelt3
+            wave = Quantity(wave_vals, cunit3)
 
-    def subcube_from_regions(self, regions_list: list[Any]) -> Any:
+        if to_vac and self.get_wave_type() == 'air':
+            wave = convert_air_to_vac(wave, method=vac_method)
+
+        return wave.to(unit)
+
+    def subcube_from_regions(self, regions_list: list[Any]) -> SpectralCube:
         """
-        Extract a subcube defined by a list of regions.
+        Extract a spatial subcube defined by a list of regions.
 
         Parameters
         ----------
@@ -296,11 +387,93 @@ class SpectralCube:
 
         Returns
         -------
-        spectral_cube.SpectralCube
+        SpectralCube
             The extracted subcube.
         """
-        sc = self.to_spectral_cube()
-        return sc.subcube_from_regions(regions_list)
+        if not HAS_REGION:
+            raise ImportError(
+                "The 'regions' package is required for subcube_from_regions."
+            )
+        if self.spec_hdu is None:
+            raise ValueError("No spectral HDU loaded.")
+        if not regions_list:
+            raise ValueError("regions_list cannot be empty.")
+
+        full_wcs = self.getSpecWCS()
+        if full_wcs is None or not full_wcs.has_celestial:
+            raise ValueError("Datacube WCS has no celestial axes.")
+        celestial_wcs = full_wcs.celestial
+        ny, nx = self.spec_hdu.data.shape[1:]
+
+        combined_mask = np.zeros((ny, nx), dtype=bool)
+        for reg in regions_list:
+            if isinstance(reg, regions.SkyRegion):
+                pix_reg = reg.to_pixel(celestial_wcs)
+            else:
+                pix_reg = reg
+            reg_mask = pix_reg.to_mask(mode='center')
+            img_mask = reg_mask.to_image((ny, nx))
+            if img_mask is not None:
+                combined_mask |= (img_mask > 0)
+
+        if not np.any(combined_mask):
+            raise ValueError("No pixels fall inside the provided regions.")
+
+        yy, xx = np.where(combined_mask)
+        y0, y1 = int(yy.min()), int(yy.max()) + 1
+        x0, x1 = int(xx.min()), int(xx.max()) + 1
+        sub_reg_mask = combined_mask[y0:y1, x0:x1]
+
+        sub_data = np.asarray(
+            self.spec_hdu.data[:, y0:y1, x0:x1], dtype=float
+        ).copy()
+        sub_data[:, ~sub_reg_mask] = np.nan
+        sub_hdr = _shift_wcs_crpix(self.spec_hdu.header, x0, y0)
+
+        sub_cube = SpectralCube()
+        sub_cube.filename = self.filename
+        is_primary_spec = (
+            self.hdul is not None and self.hdul[0] is self.spec_hdu
+        )
+        hdus: list[fits.PrimaryHDU | fits.ImageHDU] = []
+        if is_primary_spec:
+            sub_spec_hdu = fits.PrimaryHDU(data=sub_data, header=sub_hdr)
+            hdus.append(sub_spec_hdu)
+        else:
+            prim_hdr = (
+                self.hdul[0].header.copy() if self.hdul is not None else None
+            )
+            hdus.append(fits.PrimaryHDU(header=prim_hdr))
+            sub_spec_hdu = fits.ImageHDU(
+                data=sub_data, header=sub_hdr, name=self.spec_hdu.name
+            )
+            hdus.append(sub_spec_hdu)
+        sub_cube.spec_hdu = sub_spec_hdu
+
+        if self.var_hdu is not None:
+            sub_var = np.asarray(
+                self.var_hdu.data[:, y0:y1, x0:x1], dtype=float
+            ).copy()
+            sub_var[:, ~sub_reg_mask] = np.nan
+            var_hdr = _shift_wcs_crpix(self.var_hdu.header, x0, y0)
+            sub_var_hdu = fits.ImageHDU(
+                data=sub_var, header=var_hdr, name=self.var_hdu.name
+            )
+            hdus.append(sub_var_hdu)
+            sub_cube.var_hdu = sub_var_hdu
+
+        if self.mask_hdu is not None:
+            sub_mask = self.mask_hdu.data[:, y0:y1, x0:x1].copy()
+            sub_mask[:, ~sub_reg_mask] = 1
+            mask_hdr = _shift_wcs_crpix(self.mask_hdu.header, x0, y0)
+            sub_mask_hdu = fits.ImageHDU(
+                data=sub_mask, header=mask_hdr, name=self.mask_hdu.name
+            )
+            hdus.append(sub_mask_hdu)
+            sub_cube.mask_hdu = sub_mask_hdu
+
+        sub_cube.hdul = fits.HDUList(hdus)
+        return sub_cube
 
     @classmethod
     def open(cls, filename: str | os.PathLike[str],
@@ -959,10 +1132,7 @@ def get_cube_cutout(
                 w_unit = specex_wcs.wcs.cunit[0]
                 w_min = units.Quantity(w_min, w_unit)
                 w_max = units.Quantity(w_max, w_unit)
-            temp_sc = AstroSpectralCube(data=data, wcs=data_wcs)
-            slab = temp_sc.spectral_slab(w_min, w_max)
-            data = slab.unmasked_data[:].value
-            data_wcs = slab.wcs
+            data, data_wcs = _spectral_slab(data, data_wcs, w_min, w_max)
             specex_wcs = data_wcs.spectral
         except Exception:
             pass
@@ -1366,10 +1536,10 @@ def get_continuum_subtracted_slice(
                 "A valid WCS object must be provided when central_wave, "
                 "line_window and continuum_window are dimensional quantities."
             )
-        sc = AstroSpectralCube(data=data, wcs=cube_wcs)
-        slab = sc.spectral_slab(line_wave - line_window,
-                                line_wave + line_window)
-        return np.nanmean(slab.unmasked_data[:].value, axis=0)
+        slab_data, _ = _spectral_slab(
+            data, cube_wcs, line_wave - line_window, line_wave + line_window
+        )
+        return np.nanmean(slab_data, axis=0)
 
     line_wave_pix = line_wave
     line_window_pix_low = int(line_wave_pix - line_window)
@@ -1510,7 +1680,10 @@ def smooth_cube(
         except Exception:
             pass
 
-    smoothed_arr = data.copy()
+    if np.issubdtype(data.dtype, np.floating):
+        smoothed_arr = data.copy()
+    else:
+        smoothed_arr = data.astype(float)
 
     if isinstance(wave_size, str):
         try:
@@ -1627,50 +1800,19 @@ def smooth_cube(
     do_spatial_smoothing |= spatial_size_pix[1] > 0
 
     if do_wave_smoohting or do_spatial_smoothing:
-        wcs_for_sc = cube_wcs
-        has_wcs_3d = (
-            wcs_for_sc is not None and
-            wcs_for_sc.has_celestial and
-            wcs_for_sc.has_spectral
-        )
-        if not has_wcs_3d:
-            dummy_w = WCS(naxis=3)
-            dummy_w.wcs.crpix = [1, 1, 1]
-            dummy_w.wcs.cdelt = [1.0, 1.0, 1.0]
-            dummy_w.wcs.crval = [0.0, 0.0, 1.0]
-            dummy_w.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'WAVE']
-            dummy_w.wcs.cunit = ['deg', 'deg', 'Angstrom']
-            dummy_w.wcs.set()
-            wcs_for_sc = dummy_w
-
         if data_mask is not None:
-            sc_mask = BooleanArrayMask(data_mask == 0, wcs_for_sc)
-        else:
-            full_mask = np.ones(data.shape, dtype=bool)
-            sc_mask = BooleanArrayMask(full_mask, wcs_for_sc)
-
-        sc = AstroSpectralCube(
-            data=smoothed_arr, wcs=wcs_for_sc, mask=sc_mask
-        )
+            smoothed_arr[data_mask != 0] = np.nan
 
         if do_wave_smoohting:
-            wave_cb = None
             task_id = None
+            step = 1
             if progress is not None:
-                tot_spaxels = sc.shape[1] * sc.shape[2]
+                tot_spaxels = smoothed_arr.shape[1] * smoothed_arr.shape[2]
                 task_id = progress.add_task(
                     description="Smoothing along spectral axis:",
                     total=tot_spaxels
                 )
                 step = max(1, tot_spaxels // 100)
-                state = {'count': 0}
-
-                def wave_callback() -> None:
-                    state['count'] += 1
-                    if state['count'] % step == 0:
-                        progress.update(task_id, advance=step)
-
-                wave_cb = wave_callback
 
             if wave_kernel == "gaussian":
                 w_kernel = Gaussian1DKernel(wave_size_pix)
@@ -1679,32 +1821,37 @@ def smooth_cube(
             else:
                 w_kernel = Gaussian1DKernel(wave_size_pix)
 
-            sc = sc.spectral_smooth(
-                w_kernel,
-                parallel=False,
-                update_function=wave_cb,
-                memmap_dir=memmap_dir
-            )
+            ny, nx = smoothed_arr.shape[1:]
+            count = 0
+            for y in range(ny):
+                for x in range(nx):
+                    spaxel = smoothed_arr[:, y, x]
+                    if np.any(np.isfinite(spaxel)):
+                        smoothed_arr[:, y, x] = convolve(
+                            spaxel, w_kernel, preserve_nan=True
+                        )
+                    count += 1
+                    if (
+                        progress is not None
+                        and task_id is not None
+                        and count % step == 0
+                    ):
+                        progress.update(task_id, advance=step)
+
             if progress is not None and task_id is not None:
-                rem = state['count'] % step
+                rem = count % step
                 if rem > 0:
                     progress.update(task_id, advance=rem)
                 progress.remove_task(task_id)
 
         if do_spatial_smoothing:
-            spatial_cb = None
             task_id = None
+            n_wave_channels = smoothed_arr.shape[0]
             if progress is not None:
-                n_wave_channels = sc.shape[0]
                 task_id = progress.add_task(
                     description="Smoothing along spatial coordinates:",
                     total=n_wave_channels
                 )
-
-                def spatial_callback() -> None:
-                    progress.update(task_id, advance=1)
-
-                spatial_cb = spatial_callback
 
             # Handle 1D or 2D spatial smoothing
             sx, sy = spatial_size_pix[0], spatial_size_pix[1]
@@ -1724,16 +1871,17 @@ def smooth_cube(
                 k1d = Gaussian1DKernel(sy)
                 s_kernel = CustomKernel(k1d.array[:, None])
 
-            sc = sc.spatial_smooth(
-                s_kernel,
-                parallel=False,
-                update_function=spatial_cb,
-                memmap_dir=memmap_dir
-            )
+            for k in range(n_wave_channels):
+                img_slice = smoothed_arr[k]
+                if np.any(np.isfinite(img_slice)):
+                    smoothed_arr[k] = convolve(
+                        img_slice, s_kernel, preserve_nan=True
+                    )
+                if progress is not None and task_id is not None:
+                    progress.update(task_id, advance=1)
+
             if progress is not None and task_id is not None:
                 progress.remove_task(task_id)
-
-        smoothed_arr = sc.unmasked_data[:].value
 
     if data_mask is not None:
         smoothed_mask = (data_mask != 0) | ~np.isfinite(smoothed_arr)
@@ -1807,7 +1955,7 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
             out_fname, mode='update'
         ) as my_cube, Progress(
             disable=not args.verbose
-        ) as progress, tempfile.TemporaryDirectory(dir='.') as tmp_dir:
+        ) as progress:
 
             if args.verbose:
                 progress.print(f"\n[{target_file_path.stem}]")
@@ -1834,7 +1982,6 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
                 wave_kernel=args.wave_kernel,
                 cube_wcs=my_cube.getSpecWCS(),
                 progress=progress,
-                memmap_dir=tmp_dir,
             )
             my_cube.spec_hdu.data[:] = smoothed_spec
 
@@ -1849,7 +1996,6 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
                     wave_kernel=args.wave_kernel,
                     cube_wcs=my_cube.getVarWCS(),
                     progress=progress,
-                    memmap_dir=tmp_dir,
                 )
                 my_cube.var_hdu.data[:] = smoothed_var
 

@@ -42,7 +42,7 @@ dependencies = [
     "numpy",
     "scipy",
     "astropy",
-    "spectral-cube",
+    "specutils",
     "matplotlib",
     "rich>=15.0.0",
 ]

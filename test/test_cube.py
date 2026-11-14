@@ -125,13 +125,22 @@ def test_spectral_cube_open_and_properties(real_or_fallback_cube):
     assert cube.getSpecWCS() is not None
     assert cube.getSpatialSizePixels() is not None
 
-    sc = cube.to_spectral_cube()
+    sc = cube.to_spectrum()
     assert sc is not None
     assert len(sc.shape) == 3
+
+    wave_type = cube.get_wave_type()
+    assert wave_type in ("air", "vacuum")
 
     wave = cube.get_spectral_axis()
     assert len(wave) == sc.shape[0]
     assert wave.unit == u.Angstrom
+
+    vac_wave = cube.get_spectral_axis(to_vac=True)
+    if wave_type == "air":
+        assert np.all(vac_wave.value > wave.value)
+    else:
+        assert np.allclose(vac_wave.value, wave.value)
 
     if is_real:
         center = SkyCoord(16.3867 * u.deg, -24.6464 * u.deg)
@@ -145,7 +154,7 @@ def test_spectral_cube_open_and_properties(real_or_fallback_cube):
     assert sub is not None
     assert sub.shape[0] == sc.shape[0]
 
-    sub_slice = sub.unmasked_data[:5, :5, :5].value
+    sub_slice = sub.spec_hdu.data[:5, :5, :5]
     sm_data, _ = smooth_cube(
         data=sub_slice,
         spatial_size=0.5 * u.arcsec,

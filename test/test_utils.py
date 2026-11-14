@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from astropy.io import fits
 from astropy.wcs import WCS
 
 from specex.utils import (
@@ -26,6 +27,9 @@ from specex.utils import (
     get_pc_transform_params,
     rotate_data,
     parse_regionfile,
+    REFRACTION_METHODS,
+    detect_wave_type,
+    convert_air_to_vac,
 )
 
 
@@ -229,3 +233,50 @@ def test_plot_lines_and_plot_spectrum(tmp_path):
     assert fig is not None
     assert len(axs) == 4
     plt.close(fig)
+
+
+def test_detect_wave_type():
+    hdr_air = fits.Header({"CTYPE3": "AWAV", "CUNIT3": "Angstrom"})
+    assert detect_wave_type(header=hdr_air) == "air"
+
+    hdr_vac = fits.Header({"CTYPE3": "WAVE", "CUNIT3": "Angstrom"})
+    assert detect_wave_type(header=hdr_vac) == "vacuum"
+
+    hdr_ucd_air = fits.Header({"UCD1": "em.wl;obs.atmos", "CTYPE3": "WAVE"})
+    assert detect_wave_type(header=hdr_ucd_air) == "air"
+
+    hdr_ucd_vac = fits.Header({"TUCD1": "em.wl", "CTYPE3": "AWAV"})
+    assert detect_wave_type(header=hdr_ucd_vac) == "vacuum"
+
+    hdr_card_air = fits.Header({"AIRORVAC": "air"})
+    assert detect_wave_type(header=hdr_card_air) == "air"
+
+    assert detect_wave_type(header=fits.Header({"VACUUM": False})) == "air"
+    assert detect_wave_type(header=fits.Header({"VACUUM": True})) == "vacuum"
+    assert detect_wave_type(header=fits.Header()) == "vacuum"
+
+
+def test_convert_air_to_vac():
+    from specutils.utils.wcs_utils import air_to_vac
+
+    assert "Greisen2006" in REFRACTION_METHODS
+    assert "Ciddor1996" in REFRACTION_METHODS
+
+    air_wave = np.array([5000.0, 6562.8, 8500.0]) * u.Angstrom
+    vac_greisen = convert_air_to_vac(air_wave, method="Greisen2006")
+    assert vac_greisen.unit == u.Angstrom
+    assert np.all(vac_greisen.value > air_wave.value)
+    expected_greisen = air_to_vac(
+        air_wave, scheme="inversion", method="Greisen2006"
+    )
+    assert np.allclose(vac_greisen.value, expected_greisen.value)
+
+    vac_ciddor = convert_air_to_vac(air_wave, method="Ciddor1996")
+    expected_ciddor = air_to_vac(
+        air_wave, scheme="inversion", method="Ciddor1996"
+    )
+    assert np.allclose(vac_ciddor.value, expected_ciddor.value)
+    assert not np.allclose(vac_greisen.value, vac_ciddor.value, atol=1e-4)
+
+    with pytest.raises(ValueError, match="Unknown air-to-vacuum method"):
+        convert_air_to_vac(air_wave, method="InvalidMethod")

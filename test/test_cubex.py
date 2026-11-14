@@ -6,11 +6,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from astropy import units as u
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.table import Table
 
-from specex.cubex import specex
+from specex.cubex import specex, load_specex_file
+from specex.utils import convert_air_to_vac
 from test import (
     get_muse_test_cube,
     TEST_DATA_PATH,
@@ -183,3 +185,174 @@ def test_specex_regionfile_log_wlight_real_cube(
     specex(options=specex_options)
     fits_files = list(outdir.glob("spec_*.fits"))
     assert len(fits_files) > 0
+
+
+def _make_wave_cube_and_cat(tmp_path, ctype3="AWAV", tag="air"):
+    cube_path = tmp_path / f"cube_{tag}.fits"
+    cat_path = tmp_path / f"cat_{tag}.fits"
+
+    data = np.ones((20, 16, 16), dtype=np.float32)
+    data[:, 8, 8] = 10.0
+    var = np.full((20, 16, 16), 0.1, dtype=np.float32)
+    mask = np.zeros((20, 16, 16), dtype=np.int16)
+
+    w = WCS(naxis=3)
+    w.wcs.crpix = [8.0, 8.0, 1.0]
+    w.wcs.cdelt = [-0.0001, 0.0001, 10.0]
+    w.wcs.crval = [10.0, 20.0, 5000.0]
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN", ctype3]
+    w.wcs.cunit = ["deg", "deg", "Angstrom"]
+    w.wcs.pc = np.eye(3)
+    hdr = w.to_header()
+
+    primary = fits.PrimaryHDU(data=data, header=hdr)
+    primary.name = "DATA"
+    var_hdu = fits.ImageHDU(data=var, header=hdr, name="STAT")
+    mask_hdu = fits.ImageHDU(data=mask, header=hdr, name="MASK")
+    fits.HDUList([primary, var_hdu, mask_hdu]).writeto(cube_path)
+
+    cat = Table({
+        "NUMBER": [1],
+        "ALPHA_J2000": [10.0],
+        "DELTA_J2000": [20.0],
+    })
+    cat.write(cat_path, overwrite=True)
+    return cube_path, cat_path
+
+
+def test_specex_wave_type_default_air_and_vac(tmp_path):
+    air_cube, air_cat = _make_wave_cube_and_cat(
+        tmp_path, ctype3="AWAV", tag="air"
+    )
+    out_air = tmp_path / "out_air"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(air_cat), "--aperture-size", "0.5",
+        "--outdir", str(out_air), str(air_cube),
+    ])
+    air_spec = out_air / "spec_1.fits"
+    assert air_spec.exists()
+
+    with fits.open(air_spec) as hdul:
+        assert hdul[0].header["WAVETYPE"] == "air"
+        assert hdul[0].header["AIRORVAC"] == "air"
+        assert hdul[0].header["VACUUM"] is False
+        assert "VAC_METH" not in hdul[0].header
+        assert hdul["SPECTRUM"].header["UCD1"] == "em.wl;obs.atmos"
+        assert hdul["SPECTRUM"].header["TUCD1"] == "em.wl;obs.atmos"
+        assert hdul["SPECTRUM"].header["WAVETYPE"] == "air"
+        wl = hdul["SPECTRUM"].data["WAVELENGTH"]
+        assert np.allclose(wl, 5000.0 + 10.0 * np.arange(20))
+
+    loaded_air = load_specex_file(air_spec)
+    assert loaded_air["wave_type"] == "air"
+
+    vac_cube, vac_cat = _make_wave_cube_and_cat(
+        tmp_path, ctype3="WAVE", tag="vac"
+    )
+    out_vac = tmp_path / "out_vac"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(vac_cat), "--aperture-size", "0.5",
+        "--outdir", str(out_vac), str(vac_cube),
+    ])
+    vac_spec = out_vac / "spec_1.fits"
+    with fits.open(vac_spec) as hdul:
+        assert hdul[0].header["WAVETYPE"] == "vacuum"
+        assert hdul[0].header["AIRORVAC"] == "vac"
+        assert hdul[0].header["VACUUM"] is True
+        assert hdul["SPECTRUM"].header["UCD1"] == "em.wl"
+        assert hdul["SPECTRUM"].header["TUCD1"] == "em.wl"
+
+    loaded_vac = load_specex_file(vac_spec)
+    assert loaded_vac["wave_type"] == "vacuum"
+
+
+def test_specex_to_vac_methods_and_overrides(tmp_path):
+    air_cube, air_cat = _make_wave_cube_and_cat(
+        tmp_path, ctype3="AWAV", tag="air2"
+    )
+    orig_wave = (5000.0 + 10.0 * np.arange(20)) * u.Angstrom
+
+    # Default --to-vac (Greisen2006), placed right before the FITS cube path
+    out_def = tmp_path / "out_to_vac_def"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(air_cat), "--aperture-size", "0.5",
+        "--outdir", str(out_def), "--to-vac", str(air_cube),
+    ])
+    expected_greisen = convert_air_to_vac(
+        orig_wave, method="Greisen2006"
+    ).value
+    with fits.open(out_def / "spec_1.fits") as hdul:
+        assert hdul[0].header["WAVETYPE"] == "vacuum"
+        assert hdul[0].header["AIRORVAC"] == "vac"
+        assert hdul[0].header["VACUUM"] is True
+        assert hdul[0].header["VAC_METH"] == "Greisen2006"
+        assert hdul["SPECTRUM"].header["UCD1"] == "em.wl"
+        assert hdul["SPECTRUM"].header["TUCD1"] == "em.wl"
+        wl = hdul["SPECTRUM"].data["WAVELENGTH"]
+        assert np.allclose(wl, expected_greisen)
+
+    # Explicit method --to-vac Ciddor1996
+    out_ciddor = tmp_path / "out_to_vac_ciddor"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(air_cat), "--aperture-size", "0.5",
+        "--to-vac", "Ciddor1996", "--outdir", str(out_ciddor), str(air_cube),
+    ])
+    expected_ciddor = convert_air_to_vac(
+        orig_wave, method="Ciddor1996"
+    ).value
+    with fits.open(out_ciddor / "spec_1.fits") as hdul:
+        assert hdul[0].header["VAC_METH"] == "Ciddor1996"
+        wl = hdul["SPECTRUM"].data["WAVELENGTH"]
+        assert np.allclose(wl, expected_ciddor)
+
+    # Override AWAV cube with --from-vac and --to-vac: no conversion occurs
+    out_from_vac = tmp_path / "out_from_vac"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(air_cat), "--aperture-size", "0.5",
+        "--from-vac", "--to-vac",
+        "--outdir", str(out_from_vac), str(air_cube),
+    ])
+    with fits.open(out_from_vac / "spec_1.fits") as hdul:
+        assert hdul[0].header["WAVETYPE"] == "vacuum"
+        assert "VAC_METH" not in hdul[0].header
+        wl = hdul["SPECTRUM"].data["WAVELENGTH"]
+        assert np.allclose(wl, orig_wave.value)
+
+    # Override WAVE cube with --from-air (no conversion -> propagates air)
+    vac_cube, vac_cat = _make_wave_cube_and_cat(
+        tmp_path, ctype3="WAVE", tag="vac2"
+    )
+    out_from_air = tmp_path / "out_from_air"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(vac_cat), "--aperture-size", "0.5",
+        "--from-air", "--outdir", str(out_from_air), str(vac_cube),
+    ])
+    with fits.open(out_from_air / "spec_1.fits") as hdul:
+        assert hdul[0].header["WAVETYPE"] == "air"
+        assert hdul["SPECTRUM"].header["UCD1"] == "em.wl;obs.atmos"
+        wl = hdul["SPECTRUM"].data["WAVELENGTH"]
+        assert np.allclose(wl, orig_wave.value)
+
+    # Override WAVE cube with --from-air and --to-vac: converts to vacuum
+    out_from_air_vac = tmp_path / "out_from_air_vac"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(vac_cat), "--aperture-size", "0.5",
+        "--from-air", "--to-vac",
+        "--outdir", str(out_from_air_vac), str(vac_cube),
+    ])
+    with fits.open(out_from_air_vac / "spec_1.fits") as hdul:
+        assert hdul[0].header["WAVETYPE"] == "vacuum"
+        assert hdul[0].header["VAC_METH"] == "Greisen2006"
+        wl = hdul["SPECTRUM"].data["WAVELENGTH"]
+        assert np.allclose(wl, expected_greisen)
+
+    # Mutually exclusive flags
+    with pytest.raises(SystemExit):
+        specex(["--from-air", "--from-vac", str(air_cube)])

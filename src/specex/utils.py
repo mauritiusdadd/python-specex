@@ -29,7 +29,8 @@ import tarfile
 import logging
 import platform
 import subprocess
-from typing import Optional
+from collections.abc import Sequence
+from typing import Any, Optional
 from urllib import request
 
 import numpy as np
@@ -49,8 +50,24 @@ from astropy import coordinates
 from astropy import constants
 from astropy.table import Table
 from astropy.convolution import convolve, Box1DKernel
+from specutils.utils.wcs_utils import air_to_vac
 
 from specex.lines import get_lines
+
+REFRACTION_METHODS = (
+    'Greisen2006',
+    'Edlen1953',
+    'Edlen1966',
+    'Morton2000',
+    'PeckReeder1972',
+    'Ciddor1996',
+)
+
+KNOWN_WAVE_NAMES = {
+    'lam', 'lambda', 'wave', 'wavelength', 'waves', 'wavelengths',
+    'wave_air', 'wavelength_air', 'lam_air', 'lambda_air',
+    'wave_vac', 'wavelength_vac', 'lam_vac', 'lambda_vac',
+}
 
 try:
     from regions import Regions, SkyRegion
@@ -1823,3 +1840,254 @@ def rotate_data(data: np.ndarray, angle: apu.Quantity,
     rotated_data[rotated_mask] = np.nan
 
     return {'data': rotated_data, 'wcs': new_wcs}
+
+
+def _header_get_ucd_explicit(header: Any) -> Optional[str]:
+    """Check header for VO UCD or explicit air/vacuum wavelength cards."""
+    if header is None or not hasattr(header, 'items'):
+        return None
+
+    for key, val in header.items():
+        uk = str(key).upper()
+        if uk.startswith(('TUCD', 'UCD')) and val is not None:
+            sval = str(val).strip().lower()
+            if 'obs.atmos' in sval:
+                return 'air'
+            if sval == 'em.wl' or sval.startswith('em.wl;'):
+                return 'vacuum'
+
+    wave_cards = ('AIRORVAC', 'WAVETYPE', 'WAVE_TYPE', 'WTYPE', 'DISPTYPE')
+    for key in wave_cards:
+        if key in header and header[key] is not None:
+            sval = str(header[key]).strip().lower()
+            if 'air' in sval:
+                return 'air'
+            if 'vac' in sval:
+                return 'vacuum'
+
+    if 'VACUUM' in header and header['VACUUM'] is not None:
+        val = header['VACUUM']
+        if isinstance(val, (bool, np.bool_)):
+            return 'vacuum' if val else 'air'
+        sval = str(val).strip().lower()
+        if sval in ('t', 'true', '1', 'yes', 'y'):
+            return 'vacuum'
+        if sval in ('f', 'false', '0', 'no', 'n'):
+            return 'air'
+
+    air_keys = ('WAVE_AIR', 'WAVELENGTH_AIR', 'LAM_AIR', 'LAMBDA_AIR')
+    vac_keys = ('WAVE_VAC', 'WAVELENGTH_VAC', 'LAM_VAC', 'LAMBDA_VAC')
+    for key, val in header.items():
+        uk = str(key).upper()
+        if uk in air_keys:
+            return 'air'
+        if uk in vac_keys:
+            return 'vacuum'
+        if uk.startswith('TTYPE') and val is not None:
+            sval = str(val).strip().lower()
+            if sval in KNOWN_WAVE_NAMES:
+                if 'air' in sval:
+                    return 'air'
+                if 'vac' in sval:
+                    return 'vacuum'
+
+    return None
+
+
+def _header_get_wcs_ctype(header: Any) -> Optional[str]:
+    """Check FITS header CTYPE keywords for AWAV or WAVE spectral axes."""
+    if header is None or not hasattr(header, 'get'):
+        return None
+
+    for key in ('CTYPE1', 'CTYPE2', 'CTYPE3'):
+        val = header.get(key)
+        if val is not None:
+            uval = str(val).strip().upper()
+            if uval.startswith('AWAV'):
+                return 'air'
+            if uval.startswith('WAVE'):
+                return 'vacuum'
+
+    return None
+
+
+def _comments_get_wave_type(meta: Any) -> Optional[str]:
+    """Check metadata comments for explicit air or vacuum markers."""
+    if meta is None or not hasattr(meta, 'get'):
+        return None
+    comments = meta.get('comments')
+    if not comments:
+        return None
+    if isinstance(comments, str):
+        comments_list = [comments]
+    else:
+        comments_list = list(comments)
+
+    air_tokens = ('wavelength_air', 'wave_air', 'lam_air')
+    vac_tokens = ('wavelength_vac', 'wave_vac', 'lam_vac')
+    for line in comments_list:
+        low = str(line).lower()
+        if any(tok in low for tok in air_tokens):
+            return 'air'
+        if any(tok in low for tok in vac_tokens):
+            return 'vacuum'
+    return None
+
+
+def detect_wave_type(
+    wcs_obj: Optional[apwcs.WCS] = None,
+    header: Any = None,
+    headers: Optional[Sequence[Any]] = None,
+    file_path: Optional[str | os.PathLike[str]] = None,
+    wave_col: Optional[str] = None,
+    table: Optional[Table] = None,
+) -> str:
+    """
+    Detect whether wavelengths are defined in 'air' or 'vacuum'.
+
+    Follows IVOA UCD, explicit FITS header cards, FITS WCS CTYPE (AWAV vs
+    WAVE), and comment conventions, defaulting to 'vacuum' when no air
+    indicator is found.
+
+    Parameters
+    ----------
+    wcs_obj : astropy.wcs.WCS or None, optional
+        WCS instance associated with the spectrum or cube.
+    header : astropy.io.fits.Header or Mapping or None, optional
+        Primary or data HDU header to inspect.
+    headers : Sequence[Any] or None, optional
+        Additional FITS HDU headers already in memory to inspect before
+        falling back to opening ``file_path``.
+    file_path : str or PathLike or None, optional
+        Path to a FITS file whose HDU headers are inspected when ``headers``
+        is not provided.
+    wave_col : str or None, optional
+        Name of the wavelength column when inspecting tabular spectra.
+    table : astropy.table.Table or None, optional
+        Astropy Table whose column metadata and table metadata are checked.
+
+    Returns
+    -------
+    str
+        Either ``'air'`` or ``'vacuum'``.
+    """
+    if wave_col:
+        wcol_low = wave_col.strip().lower()
+        if 'air' in wcol_low:
+            return 'air'
+        if 'vac' in wcol_low:
+            return 'vacuum'
+
+    if table is not None:
+        if wave_col and wave_col in table.colnames:
+            col_meta = getattr(table[wave_col], 'meta', None) or {}
+            ucd = col_meta.get('ucd') or col_meta.get('UCD')
+            if ucd is not None:
+                ucd_low = str(ucd).strip().lower()
+                if 'obs.atmos' in ucd_low:
+                    return 'air'
+                if ucd_low == 'em.wl' or ucd_low.startswith('em.wl;'):
+                    return 'vacuum'
+
+        res = _header_get_ucd_explicit(getattr(table, 'meta', None))
+        if res is not None:
+            return res
+
+        for col in table.colnames:
+            cl = col.strip().lower()
+            if cl in KNOWN_WAVE_NAMES:
+                if 'air' in cl:
+                    return 'air'
+                if 'vac' in cl:
+                    return 'vacuum'
+
+    res = _header_get_ucd_explicit(header)
+    if res is not None:
+        return res
+
+    fits_headers: list[Any] = list(headers) if headers is not None else []
+    if not fits_headers and file_path is not None:
+        try:
+            with fits.open(file_path, memmap=True) as hdul:
+                fits_headers = [h.header for h in hdul]
+        except Exception:
+            fits_headers = []
+
+    for fhdr in fits_headers:
+        res = _header_get_ucd_explicit(fhdr)
+        if res is not None:
+            return res
+
+    if wcs_obj is not None and hasattr(wcs_obj, 'wcs'):
+        ctypes = getattr(wcs_obj.wcs, 'ctype', None)
+        if ctypes is not None:
+            for ct in ctypes:
+                ct_up = str(ct).strip().upper()
+                if ct_up.startswith('AWAV'):
+                    return 'air'
+                if ct_up.startswith('WAVE'):
+                    return 'vacuum'
+
+    res = _header_get_wcs_ctype(header)
+    if res is not None:
+        return res
+
+    for fhdr in fits_headers:
+        res = _header_get_wcs_ctype(fhdr)
+        if res is not None:
+            return res
+
+    if table is not None:
+        res = _comments_get_wave_type(getattr(table, 'meta', None))
+        if res is not None:
+            return res
+
+    for hdr in [header, *fits_headers]:
+        res = _comments_get_wave_type(hdr)
+        if res is not None:
+            return res
+        if hdr is not None and hasattr(hdr, 'get'):
+            res = _comments_get_wave_type({'comments': hdr.get('COMMENT')})
+            if res is not None:
+                return res
+
+    return 'vacuum'
+
+
+def convert_air_to_vac(
+    wavelength: apu.Quantity,
+    method: str = 'Greisen2006',
+    co2: Optional[float] = None,
+) -> apu.Quantity:
+    """
+    Convert air wavelengths to vacuum wavelengths using specutils.
+
+    Parameters
+    ----------
+    wavelength : astropy.units.Quantity
+        Air wavelengths with spectral length units.
+    method : str, optional
+        Refraction formula passed to ``specutils.utils.wcs_utils.air_to_vac``.
+        The default is ``'Greisen2006'``.
+    co2 : float or None, optional
+        CO2 concentration in ppm used by the ``'Ciddor1996'`` method.
+
+    Returns
+    -------
+    astropy.units.Quantity
+        Equivalent vacuum wavelengths in the input quantity's unit.
+    """
+    if method not in REFRACTION_METHODS:
+        valid = ', '.join(REFRACTION_METHODS)
+        raise ValueError(
+            f"Unknown air-to-vacuum method '{method}'. "
+            f"Valid methods: {valid}"
+        )
+
+    orig_unit = wavelength.unit
+    wave_aa = wavelength.to(apu.Angstrom)
+    co2_val = co2 if method == 'Ciddor1996' else None
+    vac_wave = air_to_vac(
+        wave_aa, scheme='inversion', method=method, co2=co2_val
+    )
+    return vac_wave.to(orig_unit)
