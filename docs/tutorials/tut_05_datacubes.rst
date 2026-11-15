@@ -52,21 +52,32 @@ You can also specify the output directory and custom output filename:
 
     specex-smooth ADP.2023-09-01T12_56_41.595.fits --spatial-smooth 1arcsec,0 --outdir ./output --output smoothed_cube.fits --verbose
 
-Both ``--spatial-smooth`` (alias ``--spatial-sigma``) and ``--wave-smooth`` (alias ``--wave-sigma``) are accepted.
+Both ``--spatial-smooth`` (alias ``--spatial-sigma``) and ``--wave-smooth`` (alias ``--wave-sigma``) are accepted. You can also select the convolution kernels with ``--spatial-kernel`` (``gaussian``, ``box``, or ``top-hat``) and ``--wave-kernel`` (``gaussian`` or ``box``):
+
+.. code-block:: bash
+
+    specex-smooth ADP.2023-09-01T12_56_41.595.fits --spatial-smooth 1.5 --spatial-kernel top-hat --wave-smooth 2 --wave-kernel box
 
 Making Cutouts
 --------------
 
-``specex-cutout`` can be used to extract cutouts from a datacue.
+``specex-cutout`` can be used to extract cutouts from a datacube.
 
-For example, the following command extracts a cutout centered on *Ra=16.3867* and *Dec=-24.6464* and size 6"x4" and with a rotation of 45°
+For example, the following command extracts a cutout centered on *Ra=16.3867* and *Dec=-24.6464* and size 6"x3" and with a rotation of 45°
 
 .. code-block:: bash
 
     specex-cutout --verbose --center 16.3867deg,-24.6464deg --size 6arcsec,3arcsec --angle 45deg ADP.2023-09-01T12_56_41.595.fits
 
-To make a square cutout, the second value for ``--size`` can be omitted. Pixel units also are acceped:
+To make a square cutout, the second value for ``--size`` can be omitted. Pixel units also are accepted:
 
 .. code-block:: bash
 
     specex-cutout --verbose --center 250,100 --size 50 ADP.2023-09-01T12_56_41.595.fits
+
+You can also extract one cutout per region defined in a DS9/Astropy region file using ``--regionfile``:
+
+.. code-block:: bash
+
+    specex-cutout --verbose --regionfile test_regions.reg --outdir cutouts ADP.2023-09-01T12_56_41.595.fits
+

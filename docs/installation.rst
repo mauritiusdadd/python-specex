@@ -29,10 +29,11 @@ while this command will install only the dependencies needed to run the command 
 
     pip install specex[animations,regions]
 
-This is a list of the name of all optional dependency groups
+This is a list of the names of all optional dependency groups
 
-  * ``animations`` : dependencies for generatig animations with ``specex-cube-anim``
-  * ``regions`` : dependencies to enable the handling of regionfiles in ``specex``
+  * ``animations`` : dependencies for generating animations with ``specex-cube-anim``
+  * ``regions`` : dependencies to enable the handling of regionfiles in ``specex`` and ``specex-cutout``
+  * ``advanced`` : dependencies (``reproject``) for reprojecting external weightmaps in ``specex``
   * ``all``: install all the optional dependencies
 
 

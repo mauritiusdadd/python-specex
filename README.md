@@ -11,15 +11,19 @@ To install the latest stable version of specex, just use pip:
 
     $ pip install specex
 
-Some functionalities are enabled only if some optional packages are installed, these packages can be installed by pip when installing Specex by specifing the desired configuration, for example
+Some functionalities are enabled only if some optional packages are installed, these packages can be installed by pip when installing Specex by specifying the desired configuration, for example
 
-    $ pip install specex[animation]
+    $ pip install specex[animations]
 
-will install the packages required to use the command specex-cube-anim, while with the command
+will install the packages required to use the command ``specex-cube-anim``, while with the command
 
-    $ pip install specex[animation,regions]
+    $ pip install specex[animations,regions]
 
-to install packages required for animations and region file handling. To install all the optional dependencies use
+you install packages required for animations and region file handling, and
+
+    $ pip install specex[advanced]
+
+installs ``reproject`` for external weightmap reprojection. To install all the optional dependencies use
 
     $ pip install specex[all]
 
@@ -28,6 +32,17 @@ To install the bleeding edge version, clone the github repository then use pip:
     $ git clone 'https://github.com/mauritiusdadd/python-specex.git'
     $ cd python-specex
     $ pip install .
+
+# COMMAND-LINE TOOLS
+
+Specex provides the following CLI entry points:
+
+- `specex`: Extract IVOA-compliant 1D FITS spectra from datacubes using a source catalog or region file, with optional spatial weighting, background annulus subtraction (`--anulus-size`), air/vacuum wavelength detection and header propagation, `--from-air`/`--from-vac` overrides, and `--to-vac [METHOD]` air-to-vacuum conversion (`specutils`).
+- `specex-cubestack`: Create 2D white-light images by stacking a datacube over optional wavelength intervals.
+- `specex-cutout`: Extract spatial cutouts from datacubes, grayscale images, or RGB images using sky/pixel coordinates or region files.
+- `specex-smooth`: Apply spatial and/or spectral smoothing to datacubes and variance extensions.
+- `specex-plot`: Plot extracted 1D spectra with optional smoothing, cutouts, and redshifted spectral line overlays.
+- `specex-cube-anim`: Generate animated GIFs scanning datacube slices around spectral lines.
 
 # DOCUMENTATION
 

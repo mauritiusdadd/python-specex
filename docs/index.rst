@@ -64,7 +64,7 @@ License
 
 GNU General Public License v3.0 or later (GPL-3.0-or-later)
 
-Copyright (c) 2022-2024, Maurizio D'Addona <mauritiusdadd@gmail.com>
+Copyright (c) 2022-2026, Maurizio D'Addona <mauritiusdadd@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

@@ -116,6 +116,48 @@ we can also use the whitelight weighting and all the options seen before, with t
   :width: 45%
   :alt: Extraction map without whitelight weighting from a region file.
 
+
+Local Background Subtraction
+----------------------------
+
+You can subtract a local background spectrum measured inside a circular annulus around each source using ``--anulus-size``. The inner and outer radii can be given either in arcseconds or as multiplicative factors of the extraction aperture size:
+
+.. code-block:: bash
+
+    specex --catalog sources.cat --mode circular_aperture --aperture-size 0.8arcsec --anulus-size 1.2x,2.0x ADP.2023-09-01T12_56_41.595.fits
+
+
+Wavelength Medium (Air vs. Vacuum) and Vacuum Conversion
+--------------------------------------------------------
+
+``specex`` automatically determines whether the input datacube wavelength grid is defined in **air** or **vacuum** by inspecting its FITS headers and WCS (``TUCD*``/``UCD*`` keywords, explicit cards such as ``WAVETYPE``, ``AIRORVAC``, ``VACUUM``, WCS ``CTYPE*`` values ``AWAV`` vs. ``WAVE``, and header comments), defaulting to ``vacuum`` when no air indicator is found.
+
+By default, **no wavelength conversion is performed**: the input wavelength values are preserved as-is, and the detected medium is propagated to each extracted IVOA 1D FITS spectrum:
+
+- In the ``PRIMARY`` HDU: ``WAVETYPE`` (``'air'`` or ``'vacuum'``), ``AIRORVAC`` (``'air'`` or ``'vac'``), and ``VACUUM`` (boolean).
+- In the ``SPECTRUM`` table HDU: ``UCD1`` and ``TUCD1`` are set to ``em.wl;obs.atmos`` for air wavelengths or ``em.wl`` for vacuum wavelengths, alongside ``WAVETYPE``.
+
+To convert air wavelengths to vacuum during extraction, pass ``--to-vac``. By default it uses ``specutils``'s ``air_to_vac()`` with the ``Greisen2006`` formula:
+
+.. code-block:: bash
+
+    specex --catalog sources.cat --to-vac ADP.2023-09-01T12_56_41.595.fits
+
+You can also specify an alternative refraction method explicitly (supported methods: ``Greisen2006``, ``Edlen1953``, ``Edlen1966``, ``Morton2000``, ``PeckReeder1972``, ``Ciddor1996``):
+
+.. code-block:: bash
+
+    specex --catalog sources.cat --to-vac Ciddor1996 ADP.2023-09-01T12_56_41.595.fits
+
+When a conversion is performed, ``VAC_METH`` is recorded in the ``PRIMARY`` header of each output spectrum and its metadata are updated to ``vacuum``. If the input cube wavelengths are already in ``vacuum``, ``--to-vac`` leaves them unchanged.
+
+When header metadata are missing or misleading, you can override auto-detection with the mutually exclusive flags ``--from-air`` and ``--from-vac``:
+
+.. code-block:: bash
+
+    specex --catalog sources.cat --from-air --to-vac custom_cube.fits
+    specex --catalog sources.cat --from-vac custom_cube.fits
+
 .. _appendix:
 
 Appendix
