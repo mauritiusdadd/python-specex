@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Unit tests for specex.cube."""
 import os
+import json
 import warnings
 from pathlib import Path
 
@@ -337,3 +338,78 @@ def test_grayscale_cutout_nicmos(test_output_dir):
             generated = list(outdir.glob("cutout_*.fits"))
             assert len(generated) > 0
             break
+
+
+def test_cube_cli_stdout_modes(tmp_path, capsys):
+    cube_path = tmp_path / "mini_cube.fits"
+    data = np.ones((8, 6, 6), dtype=np.float32)
+    var = np.full((8, 6, 6), 0.1, dtype=np.float32)
+    mask = np.zeros((8, 6, 6), dtype=np.int16)
+
+    w = WCS(naxis=3)
+    w.wcs.crpix = [3.0, 3.0, 1.0]
+    w.wcs.cdelt = [-0.0001, 0.0001, 10.0]
+    w.wcs.crval = [10.0, 20.0, 5000.0]
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN", "WAVE"]
+    w.wcs.cunit = ["deg", "deg", "Angstrom"]
+    hdr = w.to_header()
+
+    fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(data=data, header=hdr, name="DATA"),
+        fits.ImageHDU(data=var, header=hdr, name="STAT"),
+        fits.ImageHDU(data=mask, header=hdr, name="DQ"),
+    ]).writeto(cube_path)
+
+    smooth_out = tmp_path / "smooth_out"
+    smoothing_main([
+        "--verbose",
+        "--wave-smooth", "1",
+        "--stdout-mode", "json",
+        "--outdir", str(smooth_out),
+        "--output", "smoothed_json.fits",
+        str(cube_path),
+    ])
+    cap = capsys.readouterr()
+    assert "applying smoothing" in cap.err
+    smooth_lines = [line for line in cap.out.splitlines() if line.strip()]
+    assert len(smooth_lines) > 0
+    for line in smooth_lines:
+        parsed = json.loads(line)
+        assert set(parsed.keys()) == {'progress', 'total', 'description'}
+
+    smoothing_main([
+        "--verbose",
+        "--wave-smooth", "1",
+        "-m", "quiet",
+        "--outdir", str(smooth_out),
+        "--output", "smoothed_quiet.fits",
+        str(cube_path),
+    ])
+    assert capsys.readouterr().out == ''
+
+    cutout_out = tmp_path / "cutout_out"
+    cutout_main([
+        "--verbose",
+        "--center", "3,3",
+        "--size", "3",
+        "--stdout-mode", "json",
+        "--outdir", str(cutout_out),
+        str(cube_path),
+    ])
+    cut_cap = capsys.readouterr()
+    assert "Cutout 0" in cut_cap.err
+    cut_lines = [line for line in cut_cap.out.splitlines() if line.strip()]
+    assert len(cut_lines) > 0
+    for line in cut_lines:
+        parsed = json.loads(line)
+        assert set(parsed.keys()) == {'progress', 'total', 'description'}
+
+    cutout_main([
+        "--center", "3,3",
+        "--size", "3",
+        "-m", "quiet",
+        "--outdir", str(cutout_out),
+        str(cube_path),
+    ])
+    assert capsys.readouterr().out == ''

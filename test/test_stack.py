@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Unit tests for specex.stack."""
 import os
+import json
 from pathlib import Path
 
 import numpy as np
@@ -107,3 +108,30 @@ def test_cube_stack_real_cube(real_cube_file, test_output_dir):
     with fits.open(data_fits) as hdul:
         assert hdul[0].data is not None
         assert hdul[0].data.ndim == 2
+
+
+def test_cube_stack_stdout_modes(dummy_fits_cube, tmp_path, capsys):
+    out_json = tmp_path / "stack_json"
+    cube_stack([
+        dummy_fits_cube,
+        "--outdir", str(out_json),
+        "--var-hdu", "STAT",
+        "--stdout-mode", "json",
+    ])
+    lines = [
+        line for line in capsys.readouterr().out.splitlines() if line.strip()
+    ]
+    assert len(lines) > 0
+    events = [json.loads(line) for line in lines]
+    for entry in events:
+        assert set(entry.keys()) == {'progress', 'total', 'description'}
+    assert any(e['progress'] == e['total'] and e['total'] > 0 for e in events)
+
+    out_quiet = tmp_path / "stack_quiet"
+    cube_stack([
+        dummy_fits_cube,
+        "--outdir", str(out_quiet),
+        "--var-hdu", "STAT",
+        "-m", "quiet",
+    ])
+    assert capsys.readouterr().out == ''

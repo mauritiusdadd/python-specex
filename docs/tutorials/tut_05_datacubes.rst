@@ -81,3 +81,5 @@ You can also extract one cutout per region defined in a DS9/Astropy region file 
 
     specex-cutout --verbose --regionfile test_regions.reg --outdir cutouts ADP.2023-09-01T12_56_41.595.fits
 
+Both ``specex-smooth`` and ``specex-cutout`` also support ``--stdout-mode`` (``-m``) with ``json``, ``ascii``, ``pbar``, ``rich``, or ``quiet`` output formats (for instance, ``--stdout-mode json`` emits line-delimited JSON progress events to stdout while keeping verbose diagnostics on stderr).
+

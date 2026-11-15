@@ -3,8 +3,12 @@
 """Unit tests for specex.plot."""
 import os
 import glob
+import json
+import numpy as np
 import pytest
-from specex.plot import plot_spectra
+from astropy.io import fits
+from astropy.wcs import WCS
+from specex.plot import plot_spectra, plot_cube_slice_animation
 
 
 def test_plot_spectra_synthetic(tmp_path):
@@ -82,3 +86,88 @@ def test_plot_cube_slice_animation(tmp_path):
     ]
     plot_cube_slice_animation(options=options)
     assert out_gif.exists()
+
+
+def _make_plot_spec(spec_path):
+    pri_hdr = fits.Header()
+    pri_hdr["RA"] = 10.0
+    pri_hdr["DEC"] = 20.0
+    pri_hdr["ID"] = "1"
+    pri_hdr["EXT_MODE"] = "circular_aperture"
+    pri_hdr["EXT_APER"] = json.dumps(["0.5 arcsec"])
+    pri_hdr["FRAME"] = "icrs"
+
+    w_spec = WCS(naxis=1)
+    w_spec.wcs.crpix = [1.0]
+    w_spec.wcs.cdelt = [10.0]
+    w_spec.wcs.crval = [5000.0]
+    w_spec.wcs.ctype = ["WAVE"]
+    w_spec.wcs.cunit = ["Angstrom"]
+    s_hdr = w_spec.to_header()
+    s_hdr["BUNIT"] = "10**(-20)*erg/s/cm**2/Angstrom"
+
+    fits.HDUList([
+        fits.PrimaryHDU(header=pri_hdr),
+        fits.ImageHDU(data=np.ones(10), header=s_hdr, name="SPEC"),
+        fits.ImageHDU(data=np.full(10, 0.1), header=s_hdr, name="VAR"),
+    ]).writeto(spec_path)
+
+
+def test_plot_stdout_modes(tmp_path, capsys):
+    spec_path = tmp_path / "plot_spec.fits"
+    _make_plot_spec(spec_path)
+
+    out_png = tmp_path / "plot_json"
+    plot_spectra([
+        "--outdir", str(out_png),
+        "--stdout-mode", "json",
+        str(spec_path),
+    ])
+    lines = [
+        line for line in capsys.readouterr().out.splitlines() if line.strip()
+    ]
+    assert len(lines) >= 2
+    events = [json.loads(line) for line in lines]
+    for entry in events:
+        assert set(entry.keys()) == {'progress', 'total', 'description'}
+    assert events[-1]['progress'] == events[-1]['total']
+
+    out_quiet = tmp_path / "plot_quiet"
+    plot_spectra([
+        "--outdir", str(out_quiet),
+        "-m", "quiet",
+        str(spec_path),
+    ])
+    assert capsys.readouterr().out == ''
+
+    cube_path = tmp_path / "anim_json_cube.fits"
+    w = WCS(naxis=3)
+    w.wcs.crpix = [5.0, 5.0, 1.0]
+    w.wcs.cdelt = [-0.0001, 0.0001, 10.0]
+    w.wcs.crval = [10.0, 20.0, 5000.0]
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN", "WAVE"]
+    w.wcs.cunit = ["deg", "deg", "Angstrom"]
+    pri = fits.PrimaryHDU(
+        data=np.ones((10, 10, 10), dtype=np.float32),
+        header=w.to_header(),
+    )
+    pri.name = "DATA"
+    pri.writeto(cube_path)
+
+    out_gif = tmp_path / "anim_json.gif"
+    plot_cube_slice_animation([
+        "--outname", str(out_gif),
+        "--cutout-size", "2arcsec",
+        "--stdout-mode", "json",
+        str(cube_path),
+        "5050angstrom",
+        "30angstrom",
+        str(spec_path),
+    ])
+    anim_lines = [
+        line for line in capsys.readouterr().out.splitlines() if line.strip()
+    ]
+    assert len(anim_lines) > 0
+    for line in anim_lines:
+        parsed = json.loads(line)
+        assert set(parsed.keys()) == {'progress', 'total', 'description'}

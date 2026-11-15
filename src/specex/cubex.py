@@ -49,7 +49,8 @@ from specex.utils import (
     get_log_img, stack,
     get_spectrum_snr, get_spectrum_snr_emission, parse_regionfile,
     HAS_REGION, HAS_REPROJECT, simple_pbar_callback, do_reproject,
-    nannmad, REFRACTION_METHODS, detect_wave_type, convert_air_to_vac
+    nannmad, REFRACTION_METHODS, detect_wave_type, convert_air_to_vac,
+    add_stdout_mode_argument,
 )
 
 from specex import __version__ as sp_ver
@@ -373,6 +374,8 @@ def __argshandler(options: Optional[list[str]] = None) -> Any:
             f'({methods_str}; default: Greisen2006).'
         )
     )
+
+    add_stdout_mode_argument(parser)
 
     parser.add_argument(
         "--debug", action='store_true', default=False,
@@ -1158,11 +1161,14 @@ def specex(options: Optional[list[str]] = None) -> None:
             sys.exit(1)
 
         if args.debug:
-            print(f"Flux HDU: {my_cube.spec_hdu.name}")
+            print(f"Flux HDU: {my_cube.spec_hdu.name}", file=sys.stderr)
             if my_cube.var_hdu is not None:
-                print(f"Variance HDU: {my_cube.var_hdu.name}")
+                print(
+                    f"Variance HDU: {my_cube.var_hdu.name}",
+                    file=sys.stderr,
+                )
             if my_cube.mask_hdu is not None:
-                print(f"Mask HDU: {my_cube.mask_hdu.name}")
+                print(f"Mask HDU: {my_cube.mask_hdu.name}", file=sys.stderr)
 
         # Determine input wavelength medium and spectral grid
         if args.from_air:
@@ -1332,7 +1338,11 @@ def specex(options: Optional[list[str]] = None) -> None:
                         cutout_img_wcs = wcs.WCS(hdu.header)
                         break
         if cutout_img_data is None:
-            cutout_img_data = stack(my_cube.spec_hdu.data, average=True)
+            cutout_img_data = stack(
+                my_cube.spec_hdu.data,
+                average=True,
+                stdout_mode=args.stdout_mode,
+            )
             cutout_img_wcs = celestial_wcs
 
         cutout_box_size = args.cutouts_size * units.arcsec
@@ -1361,7 +1371,12 @@ def specex(options: Optional[list[str]] = None) -> None:
             pass
 
         for i, source in enumerate(sources[:n_objects]):
-            simple_pbar_callback(i + 1, n_objects)
+            simple_pbar_callback(
+                i + 1,
+                n_objects,
+                description='Extracting spectra',
+                stdout_mode=args.stdout_mode,
+            )
 
             if key_id is not None:
                 obj_id = source[key_id]
@@ -1754,7 +1769,10 @@ def specex(options: Optional[list[str]] = None) -> None:
             os.makedirs(check_images_outdir, exist_ok=True)
 
         if args.debug:
-            stacked_cube = stack(my_cube.spec_hdu.data)
+            stacked_cube = stack(
+                my_cube.spec_hdu.data,
+                stdout_mode=args.stdout_mode,
+            )
             fig = plt.figure(figsize=(10, 10))
             ax = plt.subplot(projection=celestial_wcs)
             logimg, cvmin, cvmax = get_log_img(stacked_cube)

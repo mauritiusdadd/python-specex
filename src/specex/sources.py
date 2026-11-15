@@ -357,7 +357,7 @@ def get_snr_spaxels(data_hdu, var_hdu=None, mask_hdu=None, inverse_mask=False,
                 sys.stderr.flush()
             val.wait()
             snr_map[pos] = val.get()
-    print("")
+    print("", file=sys.stderr)
     return snr_map
 
 

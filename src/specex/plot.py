@@ -43,7 +43,10 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata import Cutout2D
 from astropy.visualization import quantity_support
 
-from specex.utils import plot_spectrum, get_pbar, load_rgb_fits, find_prog
+from specex.utils import (
+    plot_spectrum, load_rgb_fits, find_prog, simple_pbar_callback,
+    add_stdout_mode_argument,
+)
 from specex.cube import get_hdu, get_rgb_cutout, get_gray_cutout
 
 from specex.cubex import load_specex_file
@@ -143,6 +146,8 @@ def __plot_spectra_argshandler(options=None):
         'assumed to be in arcseconds. The default cutout size is %(default)s.'
     )
 
+    add_stdout_mode_argument(parser)
+
     parser.add_argument(
         'spectra', metavar='SPECTRUM', type=str, nargs='+',
         help='Input spectra extracted with specex.'
@@ -196,7 +201,10 @@ def plot_spectra(options=None):
         try:
             big_image = load_rgb_fits(args.cutout)
         except FileNotFoundError:
-            print(f"ERROR: file not found '{args.cutout}'")
+            print(
+                f"ERROR: file not found '{args.cutout}'",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         if big_image is None:
@@ -217,9 +225,13 @@ def plot_spectra(options=None):
             spectra_list.append(fname)
 
     for j, spectrum_fits_file in enumerate(spectra_list):
-        progress = j / len(spectra_list)
-        sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-        sys.stdout.flush()
+        simple_pbar_callback(
+            j,
+            len(spectra_list),
+            min_interval=0,
+            description='Plotting spectra',
+            stdout_mode=args.stdout_mode,
+        )
 
         sp_dict = load_specex_file(spectrum_fits_file)
 
@@ -230,7 +242,10 @@ def plot_spectra(options=None):
                     sp_dict['variance']
                 ]
         ):
-            print(f"Skipping file '{spectrum_fits_file}'\n")
+            print(
+                f"Skipping file '{spectrum_fits_file}'\n",
+                file=sys.stderr,
+            )
             continue
 
         try:
@@ -244,7 +259,8 @@ def plot_spectra(options=None):
             ]
         except KeyError:
             print(
-                f"Skipping file with invalid header: {spectrum_fits_file}"
+                f"Skipping file with invalid header: {spectrum_fits_file}",
+                file=sys.stderr,
             )
             continue
         else:
@@ -376,7 +392,15 @@ def plot_spectra(options=None):
         fig.savefig(fig_out_path, dpi=150)
         plt.close(fig)
 
-    print(f"\r{get_pbar(1)} 100%")
+    if spectra_list:
+        simple_pbar_callback(
+            len(spectra_list),
+            len(spectra_list),
+            min_interval=0,
+            description='Plotting spectra',
+            stdout_mode=args.stdout_mode,
+            end_newline=True,
+        )
 
 
 def __plot_slice_argshandler(options=None):
@@ -514,6 +538,8 @@ def __plot_slice_argshandler(options=None):
         ' expressed in angstroms.'
     )
 
+    add_stdout_mode_argument(parser)
+
     parser.add_argument(
         'spectra', metavar='SPECTRUM', type=str, nargs='+',
         help='Input spectra extracted with specex.'
@@ -549,7 +575,8 @@ def plot_cube_slice_animation(options=None):
                 "This program requires either the python package imageio (the "
                 "preferred option) or a working version of FFMPEG. "
                 "If you already have FFMPEG try to manually set the executable"
-                " path with the --ffmpeg-exec option\n"
+                " path with the --ffmpeg-exec option\n",
+                file=sys.stderr,
             )
             sys.exit(1)
 
@@ -585,7 +612,10 @@ def plot_cube_slice_animation(options=None):
         try:
             big_image = load_rgb_fits(args.cutout)
         except FileNotFoundError:
-            print(f"ERROR: file not found '{args.cutout}'")
+            print(
+                f"ERROR: file not found '{args.cutout}'",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         if big_image is None:
@@ -597,12 +627,17 @@ def plot_cube_slice_animation(options=None):
     else:
         big_image = None
 
-    print("Loading spectral data...")
+    print("Loading spectral data...", file=sys.stderr)
     spectra_list = []
     for j, spectrum_fits_file in enumerate(args.spectra):
-        progress = (j + 1) / len(args.spectra)
-        sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-        sys.stdout.flush()
+        simple_pbar_callback(
+            j + 1,
+            len(args.spectra),
+            min_interval=0,
+            description='Loading spectra',
+            stdout_mode=args.stdout_mode,
+            end_newline=True,
+        )
 
         with fits.open(spectrum_fits_file) as hdulist:
             main_header = get_hdu(
@@ -636,7 +671,10 @@ def plot_cube_slice_animation(options=None):
             )
 
             if any(x is None for x in [main_header, spec_hdu, var_hdu]):
-                print(f"Skipping file '{spectrum_fits_file}'\n")
+                print(
+                    f"Skipping file '{spectrum_fits_file}'\n",
+                    file=sys.stderr,
+                )
                 continue
 
             try:
@@ -650,7 +688,9 @@ def plot_cube_slice_animation(options=None):
                 ]
             except KeyError:
                 print(
-                    f"Skipping file with invalid header: {spectrum_fits_file}"
+                    "Skipping file with invalid header: "
+                    f"{spectrum_fits_file}",
+                    file=sys.stderr,
                 )
                 continue
             else:
@@ -744,7 +784,8 @@ def plot_cube_slice_animation(options=None):
     size = apu.Quantity(args.size)
 
     print(
-        f"Generating animation centered on {c_wave} with a size of {size}..."
+        f"Generating animation centered on {c_wave} with a size of {size}...",
+        file=sys.stderr,
     )
 
     if str(c_wave.unit).strip() != '':
@@ -888,9 +929,14 @@ def plot_cube_slice_animation(options=None):
     with tempfile.TemporaryDirectory() as tempdir:
         figname = os.path.join(tempdir, 'frame_%06d.png')
         for j, wav in enumerate(play_wav_ang):
-            progress = (j + 1) / len(play_wav_ang)
-            sys.stdout.write(f"\r{get_pbar(progress)} {progress:.2%}\r")
-            sys.stdout.flush()
+            simple_pbar_callback(
+                j + 1,
+                len(play_wav_ang),
+                min_interval=0,
+                description='Generating animation frames',
+                stdout_mode=args.stdout_mode,
+                end_newline=True,
+            )
 
             fig.canvas.restore_region(bkg)
             for k, (row_axs, spc) in enumerate(zip(axs, spectra_list)):
@@ -928,7 +974,7 @@ def plot_cube_slice_animation(options=None):
         if use_imageio:
             writer.close()
         else:
-            print("Encoding with FFMPEG...")
+            print("Encoding with FFMPEG...", file=sys.stderr)
             ffmpeg_cmd = [
                 ffmpeg_exec, '-y', '-i', figname,
                 '-framerate', str(out_fps),
@@ -939,5 +985,5 @@ def plot_cube_slice_animation(options=None):
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE
             )
-            print(result)
+            print(result, file=sys.stderr)
     plt.close(fig)

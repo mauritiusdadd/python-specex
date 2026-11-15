@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Unit tests for specex.utils."""
 import os
+import json
 import numpy as np
 import pytest
 from astropy import units as u
@@ -28,6 +29,11 @@ from specex.utils import (
     rotate_data,
     parse_regionfile,
     REFRACTION_METHODS,
+    STDOUT_MODES,
+    normalize_stdout_mode,
+    progress_callback_json,
+    progress_callback_ascii,
+    ProgressReporter,
     detect_wave_type,
     convert_air_to_vac,
 )
@@ -280,3 +286,68 @@ def test_convert_air_to_vac():
 
     with pytest.raises(ValueError, match="Unknown air-to-vacuum method"):
         convert_air_to_vac(air_wave, method="InvalidMethod")
+
+
+def test_stdout_mode_callbacks_and_reporter(capsys):
+    assert 'json' in STDOUT_MODES
+    assert normalize_stdout_mode('quite') == 'quiet'
+    assert normalize_stdout_mode('JSON') == 'json'
+    with pytest.raises(ValueError, match="Unsupported stdout mode"):
+        normalize_stdout_mode('invalid_mode')
+
+    progress_callback_json(2, 5, 'Testing step')
+    out_json = capsys.readouterr().out.strip().splitlines()
+    assert len(out_json) == 1
+    assert json.loads(out_json[0]) == {
+        'progress': 2,
+        'total': 5,
+        'description': 'Testing step',
+    }
+
+    progress_callback_ascii(1, 4, 'ASCII step')
+    out_ascii = capsys.readouterr().out.strip()
+    assert out_ascii == '25.00% ASCII step'
+
+    simple_pbar_callback(1, 3, min_interval=0, description='Loop',
+                         stdout_mode='json')
+    out_loop = capsys.readouterr().out.strip().splitlines()
+    assert len(out_loop) == 1
+    assert json.loads(out_loop[0]) == {
+        'progress': 1,
+        'total': 3,
+        'description': 'Loop',
+    }
+
+    simple_pbar_callback(1, 3, min_interval=0, description='Loop',
+                         stdout_mode='quiet')
+    assert capsys.readouterr().out == ''
+
+    with ProgressReporter(stdout_mode='json') as reporter:
+        tid = reporter.add_task('Smooth', total=10)
+        reporter.update(tid, advance=5)
+        reporter.print('stderr log message')
+        reporter.update(tid, completed=10)
+        reporter.remove_task(tid)
+
+    captured = capsys.readouterr()
+    assert 'stderr log message' in captured.err
+    json_lines = [
+        json.loads(line) for line in captured.out.splitlines() if line.strip()
+    ]
+    assert [entry['progress'] for entry in json_lines] == [0.0, 5.0, 10.0]
+    assert all(entry['total'] == 10.0 for entry in json_lines)
+    assert all(entry['description'] == 'Smooth' for entry in json_lines)
+
+    cube = np.ones((5, 4, 4), dtype=float)
+    stacked = stack(cube, stdout_mode='json', description='Stack test')
+    assert np.allclose(stacked, 5.0)
+    stack_cap = capsys.readouterr().out
+    stack_events = [
+        json.loads(line) for line in stack_cap.splitlines() if line.strip()
+    ]
+    assert len(stack_events) == 5
+    assert stack_events[-1] == {
+        'progress': 5,
+        'total': 5,
+        'description': 'Stack test',
+    }

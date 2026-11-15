@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 import time
 import tarfile
 import logging
+import argparse
 import platform
 import subprocess
 from collections.abc import Sequence
@@ -53,6 +55,16 @@ from astropy.convolution import convolve, Box1DKernel
 from specutils.utils.wcs_utils import air_to_vac
 
 from specex.lines import get_lines
+
+try:
+    from rich.progress import Progress
+except Exception:
+    Progress = None
+    HAS_RICH = False
+else:
+    HAS_RICH = True
+
+STDOUT_MODES = ('rich', 'pbar', 'ascii', 'json', 'quiet')
 
 REFRACTION_METHODS = (
     'Greisen2006',
@@ -359,39 +371,269 @@ def loop_print(text, file=sys.stdout, end=None):
     file.flush()
 
 
-@static_vars(last_time=0)
-def simple_pbar_callback(k, total, min_interval=1):
+def normalize_stdout_mode(stdout_mode: Optional[str] = 'rich') -> str:
+    """Normalize and validate an output progress mode string."""
+    if stdout_mode is None:
+        return 'rich'
+    mode = stdout_mode.strip().lower()
+    if mode == 'quite':
+        mode = 'quiet'
+    if mode not in STDOUT_MODES:
+        raise ValueError(f"Unsupported stdout mode: '{stdout_mode}'")
+    return mode
+
+
+def add_stdout_mode_argument(
+    parser: argparse.ArgumentParser,
+    default: str = 'rich',
+) -> None:
+    """Add --stdout-mode / -m option to an argument parser."""
+    parser.add_argument(
+        '--stdout-mode',
+        '-m',
+        type=normalize_stdout_mode,
+        choices=STDOUT_MODES,
+        default=default,
+        help=(
+            'Set how the program writes progress to standard output. '
+            'Allowed values are: rich (rich progress bars), '
+            'pbar (unicode progress bars), ascii (plain text percentages), '
+            'json (JSON lines for other programs), quiet (no output).'
+        ),
+    )
+
+
+def progress_callback_json(
+    progress: float,
+    total: float,
+    description: str = '',
+) -> None:
+    """Print progress information as a single JSON line to stdout."""
+    info_dict = {
+        'progress': progress,
+        'total': total,
+        'description': description,
+    }
+    print(json.dumps(info_dict), flush=True)
+
+
+def progress_callback_ascii(
+    progress: float,
+    total: float,
+    description: str = '',
+) -> None:
+    """Print progress information as plain ASCII text to stdout."""
+    pct = (progress / total) if total > 0 else 0.0
+    msg = f"{pct:.2%} {description}".rstrip()
+    print(msg, flush=True)
+
+
+class ProgressReporter:
     """
-    Print a progressbar with a cooldown interval.
+    Unified progress reporter supporting rich, pbar, ascii, json, and quiet.
+    """
+
+    def __init__(
+        self, stdout_mode: str = 'rich', **rich_kwargs: Any
+    ) -> None:
+        self.stdout_mode = normalize_stdout_mode(stdout_mode)
+        self._tasks: dict[int, dict[str, Any]] = {}
+        self._next_task_id = 0
+        self._rich: Optional[Any] = None
+
+        if self.stdout_mode == 'rich':
+            if HAS_RICH and (Progress is not None):
+                self._rich = Progress(**rich_kwargs)
+            else:
+                print(
+                    'WARNING: rich package not installed, falling back to '
+                    'ascii stdout mode.',
+                    file=sys.stderr,
+                )
+                self.stdout_mode = 'ascii'
+
+    def _emit_task(self, task: dict[str, Any], force: bool = False) -> None:
+        if self.stdout_mode == 'quiet':
+            return
+        completed = task['completed']
+        total = task['total']
+        desc = task['description']
+        last = task['last_emitted']
+        if not force and total > 200 and completed < total:
+            min_delta = total / 200.0
+            if (last is not None) and ((completed - last) < min_delta):
+                return
+        task['last_emitted'] = completed
+        if self.stdout_mode == 'json':
+            progress_callback_json(completed, total, desc)
+        elif self.stdout_mode == 'ascii':
+            progress_callback_ascii(completed, total, desc)
+        elif self.stdout_mode == 'pbar':
+            ratio = (completed / total) if total > 0 else 0.0
+            pbar = get_pbar(ratio)
+            prefix = f"{desc}: " if desc else ""
+            end = '\n' if (total > 0 and completed >= total) else None
+            loop_print(f"{prefix}{pbar} {ratio:.2%}", end=end)
+
+    def add_task(
+        self,
+        description: str,
+        start: bool = True,
+        total: Optional[float] = 100.0,
+        completed: float = 0.0,
+        visible: bool = True,
+        **fields: Any,
+    ) -> int:
+        if self._rich is not None:
+            return self._rich.add_task(
+                description,
+                start=start,
+                total=total,
+                completed=completed,
+                visible=visible,
+                **fields,
+            )
+        task_id = self._next_task_id
+        self._next_task_id += 1
+        tot_val = float(total) if total is not None else 0.0
+        task = {
+            'description': description,
+            'total': tot_val,
+            'completed': float(completed),
+            'last_emitted': None,
+        }
+        self._tasks[task_id] = task
+        self._emit_task(task, force=True)
+        return task_id
+
+    def update(
+        self,
+        task_id: int,
+        total: Optional[float] = None,
+        completed: Optional[float] = None,
+        advance: Optional[float] = None,
+        description: Optional[str] = None,
+        visible: Optional[bool] = None,
+        refresh: bool = False,
+        **fields: Any,
+    ) -> None:
+        if self._rich is not None:
+            self._rich.update(
+                task_id,
+                total=total,
+                completed=completed,
+                advance=advance,
+                description=description,
+                visible=visible,
+                refresh=refresh,
+                **fields,
+            )
+            return
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        if total is not None:
+            task['total'] = float(total)
+        if completed is not None:
+            task['completed'] = float(completed)
+        if advance is not None:
+            task['completed'] += float(advance)
+        if description is not None:
+            task['description'] = description
+        force = task['total'] > 0 and task['completed'] >= task['total']
+        self._emit_task(task, force=force)
+
+    def remove_task(self, task_id: int) -> None:
+        if self._rich is not None:
+            self._rich.remove_task(task_id)
+            return
+        self._tasks.pop(task_id, None)
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        if self._rich is not None:
+            self._rich.print(*args, **kwargs)
+            return
+        if self.stdout_mode == 'quiet':
+            return
+        if self.stdout_mode == 'json':
+            kwargs.setdefault('file', sys.stderr)
+            print(*args, **kwargs)
+            return
+        if self.stdout_mode == 'pbar' and loop_print.prev_iter_text_len > 0:
+            sys.stdout.write('\n')
+            loop_print.prev_iter_text_len = 0
+        print(*args, **kwargs)
+
+    def __enter__(self) -> 'ProgressReporter':
+        if self._rich is not None:
+            self._rich.__enter__()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        if self._rich is not None:
+            return self._rich.__exit__(exc_type, exc_val, exc_tb)
+        return False
+
+
+@static_vars(last_time=0)
+def simple_pbar_callback(
+    k: float,
+    total: float,
+    min_interval: float = 1,
+    description: str = '',
+    stdout_mode: str = 'rich',
+    end_newline: bool = False,
+) -> None:
+    """
+    Print progress information according to the selected stdout mode.
 
     Parameters
     ----------
-    k : float
-        DESCRIPTION.
-    total : float
-        DESCRIPTION.
-    min_interval : TYPE, optional
-        Miniumum interval in seconds between two printings. The default is 1.
-
-    Returns
-    -------
-    None.
-
+    k : int or float
+        Current step (or completed amount).
+    total : int or float
+        Total number of steps (or total amount).
+    min_interval : float, optional
+        Minimum time interval in seconds between progress updates in
+        interactive or ASCII modes. The default is 1.
+    description : str, optional
+        Short label describing the running task. The default is ''.
+    stdout_mode : str, optional
+        Output mode ('rich', 'pbar', 'ascii', 'json', 'quiet').
+        The default is 'rich'.
+    end_newline : bool, optional
+        Whether to emit a newline when progress finishes in pbar/rich modes.
+        The default is False.
     """
-    if (k <= 0):
+    mode = normalize_stdout_mode(stdout_mode)
+    if mode == 'quiet':
+        return
+
+    if k <= 0:
         loop_print.prev_iter_text_len = 0
         simple_pbar_callback.last_time = 0
 
-    if (
-        (k <= 1) or
-        (k == total) or
-        (time.perf_counter() - simple_pbar_callback.last_time) > min_interval
-    ):
+    elapsed = time.perf_counter() - simple_pbar_callback.last_time
+    should_emit = (
+        (mode == 'json')
+        or (k <= 1)
+        or (total > 0 and k >= total)
+        or (elapsed > min_interval)
+    )
+    if should_emit:
         simple_pbar_callback.last_time = time.perf_counter()
-        pbar = get_pbar(k / total)
-        loop_print(f"\r{pbar} {k / total:.2%} \r")
+        if mode == 'json':
+            progress_callback_json(k, total, description)
+        elif mode == 'ascii':
+            progress_callback_ascii(k, total, description)
+        else:
+            ratio = (k / total) if total > 0 else 0.0
+            pbar = get_pbar(ratio)
+            prefix = f"{description}: " if description else ""
+            end = '\n' if (end_newline and total > 0 and k >= total) else None
+            loop_print(f"{prefix}{pbar} {ratio:.2%}", end=end)
 
-    if (k >= total):
+    if total > 0 and k >= total:
         loop_print.prev_iter_text_len = 0
         simple_pbar_callback.last_time = 0
 
@@ -1528,7 +1770,9 @@ def stack(
     data: np.ndarray,
     wave_mask: Optional[np.ndarray] = None,
     average: bool = False,
-    quite: bool = False
+    quite: bool = False,
+    stdout_mode: str = 'rich',
+    description: str = 'stacking cube',
 ) -> np.ndarray:
     """
     Stack the spectral cube along wavelength axis.
@@ -1543,6 +1787,11 @@ def stack(
     quite : bool, optional
         Whether to avoid printing a progress bar or not.
         The default value is False.
+    stdout_mode : str, optional
+        Output mode ('rich', 'pbar', 'ascii', 'json', 'quiet').
+        The default is 'rich'.
+    description : str, optional
+        Progress description string. The default is 'stacking cube'.
 
     Returns
     -------
@@ -1550,19 +1799,29 @@ def stack(
         The stacked datacube.
 
     """
+    mode = 'quiet' if quite else normalize_stdout_mode(stdout_mode)
+    n_slices = len(data)
+    step = max(1, n_slices // 100) if mode in ('json', 'ascii') else 10
+
     img_height, img_width = data.shape[1], data.shape[2]
     new_data: np.ndarray = np.zeros((img_height, img_width), dtype=float)
     new_count: np.ndarray = np.zeros((img_height, img_width), dtype=int)
     n_slices_used = 0
     dat: np.ndarray
-    for k in range(len(data)):
+    for k in range(n_slices):
         dat = data[k]
-        if (not quite) and (k % 10 == 0):
-            progress = (k + 1) / len(data)
-            sys.stdout.write(
-                f"\rstacking cube: {get_pbar(progress)} {progress:.2%}\r"
-            )
-            sys.stdout.flush()
+        if (mode != 'quiet') and ((k % step == 0) or (k == n_slices - 1)):
+            if mode == 'json':
+                progress_callback_json(k + 1, n_slices, description)
+            elif mode == 'ascii':
+                progress_callback_ascii(k + 1, n_slices, description)
+            else:
+                progress = (k + 1) / n_slices
+                sys.stdout.write(
+                    f"\r{description}: {get_pbar(progress)} "
+                    f"{progress:.2%}\r"
+                )
+                sys.stdout.flush()
 
         if (wave_mask is None) or (wave_mask[k].any()):
             n_slices_used += 1

@@ -35,7 +35,7 @@ from astropy.wcs import WCS
 from astropy.io import fits
 import matplotlib.pyplot as plt
 
-from specex.utils import stack
+from specex.utils import stack, add_stdout_mode_argument
 from specex.cube import get_hdu
 
 
@@ -49,7 +49,8 @@ def stack_and_plot(
         wave_ranges: Optional[
             Iterable[Iterable[float | int] | np.ndarray] | np.ndarray
         ]=None,
-        outdir: Optional[str | os.PathLike[str]] = None
+        outdir: Optional[str | os.PathLike[str]] = None,
+        stdout_mode: str = 'rich',
 ) -> tuple[np.ndarray, WCS] | None:
     """
     Stack and plot a spectral datacube.
@@ -121,7 +122,13 @@ def stack_and_plot(
         img_height / dpi
     )
 
-    new_data = stack(hdu.data, wave_mask=wave_mask)
+    desc = f"stacking {suffix}" if suffix else "stacking cube"
+    new_data = stack(
+        hdu.data,
+        wave_mask=wave_mask,
+        stdout_mode=stdout_mode,
+        description=desc,
+    )
 
     if is_mask:
         new_data = ~(new_data == new_data.max()) * 1.0
@@ -211,6 +218,8 @@ def __argshandler(options=None):
         ' If not specified, the whole wavelength range is used.'
     )
 
+    add_stdout_mode_argument(parser)
+
     return parser.parse_args(options)
 
 
@@ -280,7 +289,8 @@ def cube_stack(options: Optional[Sequence[str]]=None):
             'data',
             wave_ranges=wave_ranges,
             dpi=args.dpi,
-            outdir=outdir
+            outdir=outdir,
+            stdout_mode=args.stdout_mode,
         )
         if res is None:
             sys.exit(1)
@@ -306,7 +316,8 @@ def cube_stack(options: Optional[Sequence[str]]=None):
                 override_wcs=dat_wcs,
                 wave_ranges=wave_ranges,
                 dpi=args.dpi,
-                outdir=outdir
+                outdir=outdir,
+                stdout_mode=args.stdout_mode,
             )
 
         if mask_hdu_index is not None:
@@ -328,7 +339,8 @@ def cube_stack(options: Optional[Sequence[str]]=None):
                 override_wcs=dat_wcs,
                 wave_ranges=wave_ranges,
                 dpi=args.dpi,
-                outdir=outdir
+                outdir=outdir,
+                stdout_mode=args.stdout_mode,
             )
 
 

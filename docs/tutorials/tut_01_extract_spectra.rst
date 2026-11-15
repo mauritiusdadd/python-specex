@@ -158,6 +158,23 @@ When header metadata are missing or misleading, you can override auto-detection 
     specex --catalog sources.cat --from-air --to-vac custom_cube.fits
     specex --catalog sources.cat --from-vac custom_cube.fits
 
+Progress Output Modes
+---------------------
+
+All ``specex`` CLI commands accept ``--stdout-mode`` (or ``-m``) to control how progress is reported on standard output:
+
+- ``rich``: rich interactive progress bars when supported (default).
+- ``pbar``: unicode text progress bar.
+- ``ascii``: plain text percentage lines.
+- ``json``: one JSON object per line with ``progress``, ``total``, and ``description`` fields, useful when integrating with external tools or pipelines.
+- ``quiet``: suppress progress output.
+
+For example, to stream machine-readable JSON progress lines during extraction:
+
+.. code-block:: bash
+
+    specex --catalog sources.cat --stdout-mode json ADP.2023-09-01T12_56_41.595.fits
+
 .. _appendix:
 
 Appendix

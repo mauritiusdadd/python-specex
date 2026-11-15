@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Unit tests for specex.cubex."""
 import os
+import json
 from pathlib import Path
 
 import numpy as np
@@ -356,3 +357,35 @@ def test_specex_to_vac_methods_and_overrides(tmp_path):
     # Mutually exclusive flags
     with pytest.raises(SystemExit):
         specex(["--from-air", "--from-vac", str(air_cube)])
+
+
+def test_specex_stdout_modes(synthetic_specex_setup, capsys):
+    cube_path, cat_path, outdir = synthetic_specex_setup
+    out_root = Path(outdir).parent
+    out_json = out_root / "out_json"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(cat_path),
+        "--aperture-size", "0.5",
+        "--stdout-mode", "json",
+        "--outdir", str(out_json),
+        cube_path,
+    ])
+    captured = capsys.readouterr()
+    lines = [line for line in captured.out.splitlines() if line.strip()]
+    assert len(lines) > 0
+    events = [json.loads(line) for line in lines]
+    for entry in events:
+        assert set(entry.keys()) == {'progress', 'total', 'description'}
+    assert any(e['progress'] == e['total'] and e['total'] > 0 for e in events)
+
+    out_quiet = out_root / "out_quiet"
+    specex([
+        "--spec-hdu", "0", "--var-hdu", "1", "--mask-hdu", "2",
+        "--catalog", str(cat_path),
+        "--aperture-size", "0.5",
+        "-m", "quite",
+        "--outdir", str(out_quiet),
+        cube_path,
+    ])
+    assert capsys.readouterr().out == ''

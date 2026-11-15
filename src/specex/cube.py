@@ -53,6 +53,7 @@ from astropy.convolution import (
 from specex.utils import get_pc_transform_params, rotate_data
 from specex.utils import HAS_REGION, parse_regionfile
 from specex.utils import detect_wave_type, convert_air_to_vac
+from specex.utils import ProgressReporter, add_stdout_mode_argument
 from specex.exceptions import get_ipython_embedder
 
 try:
@@ -689,6 +690,7 @@ def __cutout_argshandler(
         '--outdir', metavar='DIR', type=str, default=None,
         help='Set output directory for extracted cutouts.'
     )
+    add_stdout_mode_argument(parser)
     args = parser.parse_args(options)
     return args
 
@@ -812,6 +814,8 @@ def __smoothing_args_handler(options: Optional[Sequence[str]]=None):
         '--output', '-o', metavar='FILENAME', type=str, default=None,
         help='Set output filename for the smoothed cube.'
     )
+
+    add_stdout_mode_argument(parser)
 
     args = parser.parse_args(options)
 
@@ -1415,8 +1419,8 @@ def cube_tiled_func(
                 except AttributeError:
                     pass
 
-    print("DONE!!!")
     if progress is not None:
+        progress.print("DONE!!!")
         progress.update(task_id, completed=data_shape[0]*data_shape[1])
         progress.remove_task(task_id)
 
@@ -1951,10 +1955,15 @@ def smoothing_main(options: Optional[Sequence[str]] = None) -> None:
 
         shutil.copy(target_data_file, out_fname)
 
+        effective_mode = (
+            'quiet'
+            if (not args.verbose and args.stdout_mode == 'rich')
+            else args.stdout_mode
+        )
         with SpectralCube.open(
             out_fname, mode='update'
-        ) as my_cube, Progress(
-            disable=not args.verbose
+        ) as my_cube, ProgressReporter(
+            stdout_mode=effective_mode
         ) as progress:
 
             if args.verbose:
@@ -2195,7 +2204,10 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
 
     if args.verbose:
         for j, (center, sizes, angle) in enumerate(cutout_list):
-            print(f'  - Cutout {j}: {center} {sizes} {angle}')
+            print(
+                f'  - Cutout {j}: {center} {sizes} {angle}',
+                file=sys.stderr,
+            )
 
     data_structure = _get_fits_data_structure(inp_fits_file)
 
@@ -2214,7 +2226,9 @@ def cutout_main(options: Optional[Sequence[str]] = None) -> None:
     if outdir is not None:
         outdir.mkdir(parents=True, exist_ok=True)
 
-    with fits.open(inp_fits_file) as hdul, Progress() as progress:
+    with fits.open(inp_fits_file) as hdul, ProgressReporter(
+        stdout_mode=args.stdout_mode
+    ) as progress:
         for j, (cut_center, cut_size, cut_angle) in enumerate(cutout_list):
             if outdir is not None:
                 cutout_name = str(
